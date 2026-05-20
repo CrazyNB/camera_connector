@@ -5,6 +5,7 @@ $vsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Comm
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $pushInput = Join-Path $root "target\push-input"
 $pushOutput = Join-Path $root "target\push-output"
+$configPath = Join-Path $root "target\push-config.json"
 
 function Invoke-CargoDev {
     param(
@@ -29,13 +30,26 @@ if (Test-Path $pushInput) {
 if (Test-Path $pushOutput) {
     Remove-Item -LiteralPath $pushOutput -Recurse -Force
 }
+if (Test-Path $configPath) {
+    Remove-Item -LiteralPath $configPath -Force
+}
 New-Item -ItemType Directory -Force -Path $pushInput | Out-Null
 New-Item -ItemType Directory -Force -Path $pushOutput | Out-Null
 
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --protocol ftp --output $pushOutput --source-name "Verify Camera" --source-alias "192.168.137.56=Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") source-alias --config $configPath set --ip "192.168.137.56" --name "Verify Camera"
+if ($LASTEXITCODE -ne 0) { throw "source-alias set smoke failed" }
+
+$aliasList = & (Join-Path $root "target\debug\camera-connector.exe") source-alias --config $configPath list
+if ($LASTEXITCODE -ne 0) { throw "source-alias list smoke failed" }
+if (($aliasList | Where-Object { $_ -like "*192.168.137.56*Verify Camera*" }).Count -lt 1) {
+    throw "source-alias list did not include Verify Camera"
+}
+Write-Output $aliasList
+
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"
@@ -47,7 +61,7 @@ if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
-$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --path $pushOutput --source-name "Verify Camera" --original-path IMG_1234
+$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --path $pushOutput --source-name "Verify Camera" --original-path IMG_1234
 if ($LASTEXITCODE -ne 0) { throw "transfers smoke failed" }
 if (($transfersOutput | Where-Object { $_ -like "*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "transfers display path smoke failed"

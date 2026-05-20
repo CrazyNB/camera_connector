@@ -63,6 +63,7 @@ P0:
 - Scan the receiver inbox as the product's import source.
 - Record a transfer log for filtering by transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
+- Let users configure source aliases that bind camera IP addresses to names, such as `192.168.137.56 -> Z5_2`.
 - Record real-camera compatibility results.
 
 P1:
@@ -103,8 +104,9 @@ P2:
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename/path, bytes, protocol, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
-| RX-012 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
-| RX-013 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
+| RX-012 | Source alias configuration | P0 | User can list, set, and remove IP-to-name aliases; receiver and transfer views apply aliases automatically |
+| RX-013 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
+| RX-014 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics

@@ -9,6 +9,7 @@ use camera_connector_core::{
     TransferStatus,
 };
 use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(name = "camera-connector")]
@@ -32,6 +33,8 @@ enum Command {
         source_name: Option<String>,
     },
     ReceiverConfig {
+        #[arg(long)]
+        config: Option<PathBuf>,
         #[arg(long, default_value = "ftp")]
         protocol: String,
         #[arg(long, default_value = "0.0.0.0")]
@@ -50,6 +53,8 @@ enum Command {
         source_aliases: Vec<String>,
     },
     ServeFtp {
+        #[arg(long)]
+        config: Option<PathBuf>,
         #[arg(long, default_value = "0.0.0.0")]
         bind_host: String,
         #[arg(long, default_value_t = 2121)]
@@ -75,6 +80,8 @@ enum Command {
     },
     Transfers {
         #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
         path: PathBuf,
         #[arg(long)]
         transfer_id: Option<String>,
@@ -89,9 +96,31 @@ enum Command {
         #[arg(long = "source-alias")]
         source_aliases: Vec<String>,
     },
+    SourceAlias {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[command(subcommand)]
+        action: SourceAliasCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SourceAliasCommand {
+    List,
+    Set {
+        #[arg(long)]
+        ip: String,
+        #[arg(long)]
+        name: String,
+    },
+    Remove {
+        #[arg(long)]
+        ip: String,
+    },
 }
 
 struct ConfigArgs {
+    config_path: Option<PathBuf>,
     protocol: PushProtocol,
     bind_host: String,
     port: u16,
@@ -101,6 +130,12 @@ struct ConfigArgs {
     advertised_host: Option<String>,
     source_name: Option<String>,
     source_aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct AppConfig {
+    #[serde(default)]
+    source_aliases: BTreeMap<String, String>,
 }
 
 #[tokio::main]
@@ -166,6 +201,7 @@ async fn main() -> Result<()> {
             )?;
         }
         Some(Command::ReceiverConfig {
+            config,
             protocol,
             bind_host,
             port,
@@ -177,6 +213,7 @@ async fn main() -> Result<()> {
         }) => {
             let protocol = PushProtocol::from_str(&protocol)?;
             let config = build_config(ConfigArgs {
+                config_path: config,
                 protocol,
                 bind_host,
                 port,
@@ -190,6 +227,7 @@ async fn main() -> Result<()> {
             print_receiver_config(&config);
         }
         Some(Command::ServeFtp {
+            config,
             bind_host,
             port,
             output,
@@ -200,6 +238,7 @@ async fn main() -> Result<()> {
             source_aliases,
         }) => {
             let config = build_config(ConfigArgs {
+                config_path: config,
                 protocol: PushProtocol::Ftp,
                 bind_host,
                 port,
@@ -249,6 +288,7 @@ async fn main() -> Result<()> {
             }
         }
         Some(Command::Transfers {
+            config,
             path,
             transfer_id,
             original_path,
@@ -257,7 +297,7 @@ async fn main() -> Result<()> {
             remote_addr,
             source_aliases,
         }) => {
-            let source_aliases = parse_source_aliases(&source_aliases)?;
+            let source_aliases = effective_source_aliases(config.as_deref(), &source_aliases)?;
             for record in read_transfer_log(path)?
                 .into_iter()
                 .filter(|record| {
@@ -321,6 +361,9 @@ async fn main() -> Result<()> {
                 );
             }
         }
+        Some(Command::SourceAlias { config, action }) => {
+            handle_source_alias_command(config.as_deref(), action)?;
+        }
     }
 
     Ok(())
@@ -332,7 +375,8 @@ fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
     config.password = args.password;
     config.advertised_host = args.advertised_host;
     config.source_name = args.source_name;
-    config.source_aliases = parse_source_aliases(&args.source_aliases)?;
+    config.source_aliases =
+        effective_source_aliases(args.config_path.as_deref(), &args.source_aliases)?;
     Ok(config)
 }
 
@@ -402,6 +446,96 @@ fn parse_source_aliases(values: &[String]) -> Result<BTreeMap<String, String>> {
     Ok(aliases)
 }
 
+fn effective_source_aliases(
+    config_path: Option<&Path>,
+    cli_aliases: &[String],
+) -> Result<BTreeMap<String, String>> {
+    let mut aliases = load_app_config(config_path)?.source_aliases;
+    aliases.extend(parse_source_aliases(cli_aliases)?);
+    Ok(aliases)
+}
+
+fn handle_source_alias_command(
+    config_path: Option<&Path>,
+    action: SourceAliasCommand,
+) -> Result<()> {
+    let mut config = load_app_config(config_path)?;
+    match action {
+        SourceAliasCommand::List => {
+            println!("config: {}", resolved_config_path(config_path).display());
+            if config.source_aliases.is_empty() {
+                println!("source_aliases: -");
+            } else {
+                for (remote_addr, source_name) in config.source_aliases {
+                    println!("{remote_addr}\t{source_name}");
+                }
+            }
+        }
+        SourceAliasCommand::Set { ip, name } => {
+            config.source_aliases.insert(ip.clone(), name.clone());
+            let path = save_app_config(config_path, &config)?;
+            println!("saved {ip}={name}");
+            println!("config: {}", path.display());
+        }
+        SourceAliasCommand::Remove { ip } => {
+            let removed = config.source_aliases.remove(&ip);
+            let path = save_app_config(config_path, &config)?;
+            println!(
+                "{} {ip}",
+                if removed.is_some() {
+                    "removed"
+                } else {
+                    "not_found"
+                }
+            );
+            println!("config: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn load_app_config(config_path: Option<&Path>) -> Result<AppConfig> {
+    let path = resolved_config_path(config_path);
+    if !path.exists() {
+        return Ok(AppConfig::default());
+    }
+
+    let bytes = fs::read(&path)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))
+}
+
+fn save_app_config(config_path: Option<&Path>, config: &AppConfig) -> Result<PathBuf> {
+    let path = resolved_config_path(config_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_vec_pretty(config)
+        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))?;
+    fs::write(&path, json)?;
+    Ok(path)
+}
+
+fn resolved_config_path(config_path: Option<&Path>) -> PathBuf {
+    config_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_config_path)
+}
+
+fn default_config_path() -> PathBuf {
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return PathBuf::from(appdata)
+            .join("CameraConnector")
+            .join("config.json");
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        return PathBuf::from(home)
+            .join(".camera-connector")
+            .join("config.json");
+    }
+    PathBuf::from("camera-connector-config.json")
+}
+
 fn record_display_source(
     record: &TransferRecord,
     source_aliases: &BTreeMap<String, String>,
@@ -451,6 +585,54 @@ mod tests {
             record.virtual_display_path(source.as_deref()),
             "Z5_2/BB/DSC_2552.NEF"
         );
+    }
+
+    #[test]
+    fn source_alias_config_round_trips() {
+        let path = unique_temp_config_path("round-trip");
+        let mut config = AppConfig::default();
+        config
+            .source_aliases
+            .insert("192.168.137.56".to_string(), "Z5_2".to_string());
+
+        save_app_config(Some(&path), &config).expect("config saves");
+        let loaded = load_app_config(Some(&path)).expect("config loads");
+
+        assert_eq!(
+            loaded.source_aliases.get("192.168.137.56"),
+            Some(&"Z5_2".to_string())
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn source_alias_config_merges_with_cli_overrides() {
+        let path = unique_temp_config_path("merge");
+        let mut config = AppConfig::default();
+        config
+            .source_aliases
+            .insert("192.168.137.56".to_string(), "Old Name".to_string());
+        save_app_config(Some(&path), &config).expect("config saves");
+
+        let aliases = effective_source_aliases(
+            Some(&path),
+            &[
+                "192.168.137.56=Z5_2".to_string(),
+                "192.168.137.44=X-T5".to_string(),
+            ],
+        )
+        .expect("aliases merge");
+
+        assert_eq!(aliases.get("192.168.137.56"), Some(&"Z5_2".to_string()));
+        assert_eq!(aliases.get("192.168.137.44"), Some(&"X-T5".to_string()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn unique_temp_config_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "camera-connector-{name}-{}.json",
+            current_time_ms()
+        ))
     }
 }
 

@@ -41,13 +41,20 @@ Smoke outputs are written under `target/push-output`.
 Start the development FTP receiver:
 
 ```powershell
-target\debug\camera-connector.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\CameraConnector --source-alias "192.168.137.56=Z5_2"
+target\debug\camera-connector.exe source-alias set --ip 192.168.137.56 --name Z5_2
+target\debug\camera-connector.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
 Print camera-facing settings without starting the server:
 
 ```powershell
-target\debug\camera-connector.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\CameraConnector --source-alias "192.168.137.56=Z5_2"
+target\debug\camera-connector.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
+```
+
+List configured camera/source aliases:
+
+```powershell
+target\debug\camera-connector.exe source-alias list
 ```
 
 Validate local ingest without a camera:
@@ -71,6 +78,8 @@ target\debug\camera-connector.exe transfers --path C:\Users\hxn\Pictures\CameraC
 The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the local completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path remains in `transfer-log.jsonl` for filtering.
 
 Transfer records also expose a virtual display path. With an alias it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without an alias the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
+
+Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. Use `--config C:\path\to\config.json` on `source-alias`, `receiver-config`, `serve-ftp`, and `transfers` to test with an alternate config file.
 
 Duplicate uploads are preserved with numbered filenames such as `IMG_1234 (1).CR3`; existing completed files are not overwritten.
 

@@ -97,6 +97,8 @@ For display, the UI builds a virtual path from metadata:
 
 This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
 
+Source aliases are user configuration. They map camera IP addresses to names, for example `192.168.137.56 = Z5_2`. The receiver applies this mapping when writing new transfer records, and the transfer-log view applies it when reading older records.
+
 ## Real Camera Verification
 
 For each camera, record:

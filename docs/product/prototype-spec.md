@@ -84,6 +84,7 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
+- Source aliases: bind camera IP addresses to user-facing camera names.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.
