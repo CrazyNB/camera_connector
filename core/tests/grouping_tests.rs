@@ -1,4 +1,4 @@
-use nikon_importer_core::{group_received_assets, ImportSource, ObjectFormat, ReceivedAsset};
+use camera_connector_core::{group_received_assets, ImportSource, ObjectFormat, ReceivedAsset};
 
 #[test]
 fn groups_raw_and_jpeg_by_filename_stem() {
@@ -36,6 +36,41 @@ fn grouping_is_case_insensitive_for_filename_stem() {
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].group_key, "DSC_1237");
+    assert!(groups[0].jpeg.is_some());
+    assert!(groups[0].raw.is_some());
+}
+
+#[test]
+fn recognizes_common_raw_formats_across_camera_brands() {
+    let raw_cases = [
+        ("CANON.CR2", ObjectFormat::Cr2),
+        ("CANON.CR3", ObjectFormat::Cr3),
+        ("SONY.ARW", ObjectFormat::Arw),
+        ("FUJI.RAF", ObjectFormat::Raf),
+        ("PANASONIC.RW2", ObjectFormat::Rw2),
+        ("OLYMPUS.ORF", ObjectFormat::Orf),
+        ("PENTAX.PEF", ObjectFormat::Pef),
+        ("LEICA.DNG", ObjectFormat::Dng),
+        ("RAW.NEF", ObjectFormat::Nef),
+    ];
+
+    for (filename, format) in raw_cases {
+        let detected = ObjectFormat::from_filename(filename);
+        assert_eq!(detected, format, "{filename}");
+        assert!(detected.is_raw(), "{filename}");
+    }
+}
+
+#[test]
+fn groups_brand_raw_files_with_matching_jpeg() {
+    let jpeg = ReceivedAsset::new("ftp-jpg", "IMG_1001.JPG", 8_700_000, ImportSource::FtpPush);
+    let raw = ReceivedAsset::new("ftp-raw", "IMG_1001.CR3", 42_000_000, ImportSource::FtpPush);
+
+    let groups = group_received_assets(vec![raw, jpeg]);
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_key, "IMG_1001");
+    assert_eq!(groups[0].primary.format, ObjectFormat::Jpeg);
     assert!(groups[0].jpeg.is_some());
     assert!(groups[0].raw.is_some());
 }

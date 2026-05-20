@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Nikon Wireless Importer Prototype</title>
+  <title>Camera Connector Prototype</title>
   <style>
     :root {
       --bg: #f6f7f9;
@@ -551,7 +551,7 @@
 </head>
 <body>
   <aside class="brief">
-    <h1>Nikon Wireless Importer</h1>
+    <h1>Camera Connector</h1>
     <p>低保真可点击原型。重点验证接收服务、相机 FTP 设置、导入收件箱和传输记录，不覆盖完整视觉设计。</p>
     <p>推荐路径：启动 FTP 接收服务，在相机里配置上传目标，然后查看已接收文件。</p>
     <div class="route-list" aria-label="Prototype routes">
@@ -582,7 +582,7 @@
             <div class="method">
               <div>
                 <strong>FTP</strong>
-                <span>先验证 Nikon 相机主动上传，接收端提供地址、端口和账号。</span>
+                <span>先验证相机主动上传，接收端提供地址、端口和账号。</span>
               </div>
               <span class="status green">最佳</span>
             </div>
@@ -631,7 +631,7 @@
         <header class="topbar">
           <div>
             <h2>导入收件箱</h2>
-            <small>Nikon Z5_2 · FTP Push · 已接收 126 个文件</small>
+            <small>已验证相机 · FTP Push · 已接收 126 个文件</small>
           </div>
           <button class="icon-button" title="刷新">R</button>
         </header>
@@ -654,7 +654,7 @@
             <article class="file-card" data-route="preview">
               <div class="thumb photo-a"></div>
               <div class="file-meta">
-                <p class="file-name">DSC_1234.JPG + NEF</p>
+                <p class="file-name">IMG_1234.JPG + CR3</p>
                 <div class="file-sub">
                   <span class="badge">RAW+JPG</span>
                   <span>48.2 MB</span>
@@ -684,7 +684,7 @@
             <article class="file-card">
               <div class="thumb">RAW</div>
               <div class="file-meta">
-                <p class="file-name">DSC_1237.NEF</p>
+                <p class="file-name">DSC_1237.ARW</p>
                 <div class="file-sub">
                   <span class="badge">RAW</span>
                   <span>39.1 MB</span>
@@ -704,7 +704,7 @@
             <article class="file-card">
               <div class="thumb photo-b"></div>
               <div class="file-meta">
-                <p class="file-name">DSC_1239.JPG + NEF</p>
+                <p class="file-name">DSC_1239.JPG + RAF</p>
                 <div class="file-sub">
                   <span class="badge">RAW+JPG</span>
                   <span>47.7 MB</span>
@@ -744,8 +744,8 @@
               <h3>DSC_1234</h3>
               <span class="badge">RAW+JPG</span>
             </div>
-            <div class="kv"><span>JPEG</span><strong>DSC_1234.JPG · 8.7 MB</strong></div>
-            <div class="kv"><span>RAW</span><strong>DSC_1234.NEF · 39.5 MB</strong></div>
+            <div class="kv"><span>JPEG</span><strong>IMG_1234.JPG · 8.7 MB</strong></div>
+            <div class="kv"><span>RAW</span><strong>IMG_1234.CR3 · 39.5 MB</strong></div>
             <div class="kv"><span>拍摄时间</span><strong>2026-05-19 16:42</strong></div>
             <div class="kv"><span>尺寸</span><strong>6048 x 4032</strong></div>
           </section>
@@ -773,28 +773,28 @@
               <h3>当前任务</h3>
               <span class="status blue">接收中</span>
             </div>
-            <strong>DSC_1234.NEF</strong>
+            <strong>IMG_1234.CR3</strong>
             <div class="progress"><b style="width: 42%"></b></div>
             <p style="margin: 8px 0 0; color: var(--muted); font-size: 12px;">16.6 MB / 39.5 MB</p>
           </section>
           <section class="panel">
             <div class="queue-item">
               <div>
-                <strong>DSC_1234.JPG</strong>
+                <strong>IMG_1234.JPG</strong>
                 <span>已完成 · 8.7 MB</span>
               </div>
               <span class="status green">完成</span>
             </div>
             <div class="queue-item">
               <div>
-                <strong>DSC_1234.NEF</strong>
+                <strong>IMG_1234.CR3</strong>
             <span>接收中 · 39.5 MB</span>
               </div>
               <span class="status blue">42%</span>
             </div>
             <div class="queue-item">
               <div>
-                <strong>DSC_1239.NEF</strong>
+                <strong>DSC_1239.RAF</strong>
                 <span>相机可能已休眠</span>
               </div>
               <button class="secondary" style="min-height: 34px;">重试</button>
@@ -830,9 +830,9 @@
         <div class="content">
           <section class="panel">
             <div class="panel-title"><h3>保存位置</h3></div>
-            <div class="kv"><span>JPEG</span><strong>Pictures/NikonImporter</strong></div>
-            <div class="kv"><span>RAW</span><strong>Pictures/NikonImporter/RAW</strong></div>
-            <div class="kv"><span>视频</span><strong>Movies/NikonImporter</strong></div>
+            <div class="kv"><span>JPEG</span><strong>Pictures/CameraConnector</strong></div>
+            <div class="kv"><span>RAW</span><strong>Pictures/CameraConnector/RAW</strong></div>
+            <div class="kv"><span>视频</span><strong>Movies/CameraConnector</strong></div>
           </section>
           <section class="panel">
             <div class="panel-title"><h3>接收协议</h3></div>
@@ -880,3 +880,4 @@
   </script>
 </body>
 </html>
+

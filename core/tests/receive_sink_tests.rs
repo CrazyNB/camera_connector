@@ -1,4 +1,4 @@
-use nikon_importer_core::{LocalFileSink, ReceiveState};
+use camera_connector_core::{LocalFileSink, ReceiveState};
 
 #[test]
 fn writes_temp_file_then_publishes_final_file() {

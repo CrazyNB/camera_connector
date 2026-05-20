@@ -1,4 +1,4 @@
-# Nikon Push Importer Implementation Plan
+﻿# Camera Connector Implementation Plan
 
 ## Phase 1: Cleanup
 
@@ -17,7 +17,7 @@
 ## Phase 3: FTP Receiver
 
 - Add `PushProtocol` and `PushReceiverConfig`.
-- Add a minimal passive FTP receiver for Nikon upload validation.
+- Add a minimal passive FTP receiver for real-camera upload validation.
 - Support `USER`, `PASS`, `PASV`, `EPSV`, `STOR`, folder navigation commands, and basic listing commands.
 
 ## Phase 4: CLI
@@ -34,3 +34,4 @@
 - Run `cargo test --workspace`.
 - Run `cargo build --workspace`.
 - Run `scripts/verify.ps1`.
+

@@ -1,16 +1,16 @@
-# Nikon Wireless Importer PRD
+﻿# Camera Connector PRD
 
 ## 1. Product Positioning
 
-Nikon Wireless Importer is a local wireless import receiver for Nikon cameras. The current route is push-based: the camera sends JPEG, NEF, and video files to a receiver running on the phone, computer, or later a NAS.
+Camera Connector is a local wireless import receiver for cameras. The current route is push-based: the camera sends JPEG, RAW, and video files to a receiver running on the phone, computer, or later a NAS.
 
 One-line positioning:
 
-> A local Nikon wireless import receiver.
+> A local camera push import receiver.
 
 ## 2. Current Technical Decision
 
-The previous PTP/IP pull route is deprecated for this project. Real-camera validation showed that an already-paired Nikon workflow can reject a generic direct PTP/IP client and may be owned by Nikon's official receiver process. We will not continue reverse pairing or authentication work.
+The previous brand-specific PTP/IP pull route is deprecated for this project. Real-camera validation showed that an already-paired workflow can reject a generic direct PTP/IP client and may be owned by an official receiver process. We will not continue reverse pairing or authentication work.
 
 Current priorities:
 
@@ -24,7 +24,7 @@ Current priorities:
 - Field photographers who need quick local transfer without a card reader.
 - RAW+JPEG shooters who need grouped imports and clear file sizes.
 - Desktop/NAS users who want repeatable receiver-side ingest.
-- Technical validators who need a compatibility table across Nikon bodies and firmware versions.
+- Technical validators who need a compatibility table across camera vendors, bodies, and firmware versions.
 
 ## 4. Core Scenarios
 
@@ -32,7 +32,7 @@ Current priorities:
 
 1. User starts the receiver on phone/computer.
 2. App shows receiver IP, port, protocol, username, and output folder.
-3. User configures the Nikon camera FTP upload profile.
+3. User configures the camera FTP upload profile.
 4. Camera sends files to the receiver.
 5. App atomically publishes completed files and groups RAW/JPEG pairs.
 
@@ -57,6 +57,7 @@ P0:
 - Write uploaded files through a temporary file and publish only on success.
 - Sanitize uploaded paths and filenames.
 - Group RAW/JPEG/video assets by filename stem.
+- Recognize common RAW formats across vendors: NEF/NRW, CR2/CR3, ARW/SRF/SR2, RAF, RW2/RWL, ORF, PEF, and DNG.
 - Preserve duplicate uploads without overwriting completed files.
 - Scan the receiver inbox as the product's import source.
 - Record real-camera compatibility results.
@@ -94,9 +95,9 @@ P2:
 | RX-003 | Accept passive FTP upload | P0 | A client can upload a file through `PASV` + `STOR` |
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Safe path handling | P0 | Traversal and unsafe filename characters cannot escape output folder |
-| RX-006 | Asset grouping | P0 | `DSC_1234.JPG` and `DSC_1234.NEF` appear as one group |
+| RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
 | RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
-| RX-008 | Duplicate policy | P0 | Re-uploading `DSC_1234.NEF` creates `DSC_1234 (1).NEF` |
+| RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
 | RX-011 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
@@ -104,8 +105,8 @@ P2:
 
 ## 8. Success Metrics
 
-- FTP receiver accepts a real Nikon JPEG upload.
-- FTP receiver accepts a real Nikon NEF upload.
+- FTP receiver accepts a real-camera JPEG upload.
+- FTP receiver accepts a real-camera RAW upload.
 - Completed files have correct byte length.
 - Failed uploads do not leave final files.
 - Duplicate uploads do not overwrite earlier completed files.
@@ -115,7 +116,7 @@ P2:
 
 ```mermaid
 flowchart LR
-  Camera["Nikon Camera\nFTP/SFTP/FTPS upload profile"]
+  Camera["Camera\nFTP/SFTP/FTPS upload profile"]
   Network["Phone hotspot / LAN\nAP later"]
   Receiver["Push Receiver\nFTP first"]
   Sink["Local File Sink\n.tmp then publish"]
@@ -129,7 +130,8 @@ flowchart LR
 
 1. Clean PTP/IP route from code and docs.
 2. Build FTP receiver core and CLI smoke path.
-3. Validate with one real Nikon camera in FTP mode.
+3. Validate with one real camera in FTP mode.
 4. Update compatibility table and receiver setup guide.
 5. Add SFTP or FTPS based on what the real camera supports best.
 6. Resume AP-mode exploration only after push import is stable.
+

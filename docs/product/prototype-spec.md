@@ -1,8 +1,8 @@
-# Nikon Wireless Importer Prototype Spec
+﻿# Camera Connector Prototype Spec
 
 ## 1. Prototype Goal
 
-The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. The first screen should help the user start a receiver and copy settings into the Nikon camera FTP profile.
+The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. The first screen should help the user start a receiver and copy settings into the camera FTP profile.
 
 ## 2. Primary Flow
 
@@ -34,7 +34,7 @@ Content:
 
 ### Camera Setup Screen
 
-Purpose: tell the user what to enter on the Nikon camera.
+Purpose: tell the user what to enter on the camera.
 
 Content:
 
@@ -91,3 +91,4 @@ Content:
 ## 5. Deferred AP Mode
 
 AP mode keeps the original meaning: camera creates Wi-Fi and the device joins it. Do not show AP as the main flow in the current prototype. Keep it as a disabled or future compatibility item.
+

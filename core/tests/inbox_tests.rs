@@ -1,4 +1,4 @@
-use nikon_importer_core::{
+use camera_connector_core::{
     group_received_assets, scan_inbox, scan_inbox_groups, ImportSource, ObjectFormat,
 };
 

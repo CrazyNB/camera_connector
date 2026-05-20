@@ -1,4 +1,4 @@
-# Development
+﻿# Development
 
 ## Required Tools
 
@@ -40,25 +40,26 @@ Smoke outputs are written under `target/push-output`.
 Start the development FTP receiver:
 
 ```powershell
-target\debug\nikon-importer.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\NikonImporter
+target\debug\camera-connector.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
 Print camera-facing settings without starting the server:
 
 ```powershell
-target\debug\nikon-importer.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\NikonImporter
+target\debug\camera-connector.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
 Validate local ingest without a camera:
 
 ```powershell
-target\debug\nikon-importer.exe receive-file --input C:\path\to\DSC_1234.NEF --output C:\Users\hxn\Pictures\NikonImporter --source ftp
+target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 --output C:\Users\hxn\Pictures\CameraConnector --source ftp
 ```
 
 List the receiver inbox and RAW/JPEG groups:
 
 ```powershell
-target\debug\nikon-importer.exe inbox --path C:\Users\hxn\Pictures\NikonImporter --source ftp
+target\debug\camera-connector.exe inbox --path C:\Users\hxn\Pictures\CameraConnector --source ftp
 ```
 
-Duplicate uploads are preserved with numbered filenames such as `DSC_1234 (1).NEF`; existing completed files are not overwritten.
+Duplicate uploads are preserved with numbered filenames such as `IMG_1234 (1).CR3`; existing completed files are not overwritten.
+

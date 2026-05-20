@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $vsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
@@ -32,24 +32,25 @@ if (Test-Path $pushOutput) {
 New-Item -ItemType Directory -Force -Path $pushInput | Out-Null
 New-Item -ItemType Directory -Force -Path $pushOutput | Out-Null
 
-$sample = Join-Path $pushInput "DSC_1234.NEF"
+$sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
 
-& (Join-Path $root "target\debug\nikon-importer.exe") receiver-config --protocol ftp --output $pushOutput
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --protocol ftp --output $pushOutput
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 
-& (Join-Path $root "target\debug\nikon-importer.exe") receive-file --input $sample --output $pushOutput --source ftp
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
-& (Join-Path $root "target\debug\nikon-importer.exe") receive-file --input $sample --output $pushOutput --source ftp
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 
-& (Join-Path $root "target\debug\nikon-importer.exe") inbox --path $pushOutput --source ftp
+& (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
-$received = Get-Item -LiteralPath (Join-Path $pushOutput "DSC_1234.NEF")
-$duplicate = Get-Item -LiteralPath (Join-Path $pushOutput "DSC_1234 (1).NEF")
+$received = Get-Item -LiteralPath (Join-Path $pushOutput "IMG_1234.CR3")
+$duplicate = Get-Item -LiteralPath (Join-Path $pushOutput "IMG_1234 (1).CR3")
 if ($received.Length -le 0) { throw "received output is empty" }
 if ($duplicate.Length -le 0) { throw "duplicate output is empty" }
 
 Write-Output "verify.ps1 completed successfully"
+

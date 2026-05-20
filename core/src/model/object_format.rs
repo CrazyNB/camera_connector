@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 pub enum ObjectFormat {
     Jpeg,
     Nef,
+    Nrw,
+    Cr2,
+    Cr3,
+    Arw,
+    Raf,
+    Rw2,
+    Orf,
+    Pef,
+    Dng,
     Mov,
     Mp4,
     Tiff,
@@ -18,7 +27,16 @@ impl ObjectFormat {
 
         match extension.to_ascii_lowercase().as_str() {
             "jpg" | "jpeg" => Self::Jpeg,
-            "nef" | "nrw" => Self::Nef,
+            "nef" => Self::Nef,
+            "nrw" => Self::Nrw,
+            "cr2" => Self::Cr2,
+            "cr3" => Self::Cr3,
+            "arw" | "srf" | "sr2" => Self::Arw,
+            "raf" => Self::Raf,
+            "rw2" | "rwl" => Self::Rw2,
+            "orf" => Self::Orf,
+            "pef" => Self::Pef,
+            "dng" => Self::Dng,
             "mov" => Self::Mov,
             "mp4" => Self::Mp4,
             "tif" | "tiff" => Self::Tiff,
@@ -27,7 +45,19 @@ impl ObjectFormat {
     }
 
     pub fn is_raw(self) -> bool {
-        matches!(self, Self::Nef)
+        matches!(
+            self,
+            Self::Nef
+                | Self::Nrw
+                | Self::Cr2
+                | Self::Cr3
+                | Self::Arw
+                | Self::Raf
+                | Self::Rw2
+                | Self::Orf
+                | Self::Pef
+                | Self::Dng
+        )
     }
 
     pub fn is_video(self) -> bool {

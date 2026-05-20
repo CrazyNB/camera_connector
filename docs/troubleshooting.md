@@ -1,4 +1,4 @@
-# Troubleshooting
+﻿# Troubleshooting
 
 ## Camera Cannot Connect To Receiver
 
@@ -55,3 +55,4 @@ Checks:
 ## AP Mode
 
 AP mode keeps the original meaning: the camera creates Wi-Fi and the phone/computer joins it. This path is currently paused. Do not mix AP-mode validation with the FTP push receiver milestone unless we explicitly resume it.
+

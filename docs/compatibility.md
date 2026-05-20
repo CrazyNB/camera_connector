@@ -1,19 +1,21 @@
-# Nikon Push Compatibility
+# Camera Push Compatibility
 
 Record every real-camera push test here. Unknown is acceptable until a real smoke test replaces it.
 
-| Model | Firmware | Network Mode | FTP Push | SFTP Push | FTPS Push | Passive FTP | RAW | JPEG | Video | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Unknown | Pass | Pass | Pass | Unknown | FTP receiver `192.168.137.1:2121`; anonymous login; received four RAW+JPEG pairs |
-| Zf | Unknown | Phone hotspot | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
-| Z6II | Unknown | Camera AP | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | AP mode paused |
-| D780 | Unknown | LAN | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Vendor | Model | Firmware | Network Mode | FTP Push | SFTP Push | FTPS Push | Passive FTP | RAW | JPEG | Video | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Unknown | Pass | Pass | Pass | Unknown | FTP receiver `192.168.137.1:2121`; anonymous login; received four RAW+JPEG pairs |
+| Canon | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Sony | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Fujifilm | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Panasonic | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 
 ## Test Record Template
 
 ```text
 Date:
 Tester:
+Vendor:
 Camera model:
 Firmware:
 Network mode:
@@ -32,11 +34,12 @@ Observed FTP commands:
 Notes:
 ```
 
-## 2026-05-21 Z5_2 FTP Push Smoke
+## 2026-05-21 Nikon Z5_2 FTP Push Smoke
 
 ```text
 Date: 2026-05-21
 Tester: hxn
+Vendor: Nikon
 Camera model: Z5_2
 Firmware: 1.11
 Network mode: Windows hotspot

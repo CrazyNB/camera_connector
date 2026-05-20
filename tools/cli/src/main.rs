@@ -2,15 +2,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use clap::{Parser, Subcommand};
-use nikon_importer_core::{
+use camera_connector_core::{
     scan_inbox_groups, FtpPushServer, ImportSource, LocalFileSink, PushProtocol,
     PushReceiverConfig, ReceivedAsset, Result,
 };
+use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "nikon-importer")]
-#[command(about = "Push-mode wireless import receiver for Nikon cameras")]
+#[command(name = "camera-connector")]
+#[command(about = "Push-mode wireless import receiver for cameras")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Command::Version) | None => {
-            println!("nikon-importer {}", env!("CARGO_PKG_VERSION"));
+            println!("camera-connector {}", env!("CARGO_PKG_VERSION"));
         }
         Some(Command::ReceiveFile {
             input,
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
             let filename = input
                 .file_name()
                 .and_then(|name| name.to_str())
-                .ok_or(nikon_importer_core::ImporterError::InvalidUploadPath)?;
+                .ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
             let bytes = fs::read(&input)?;
             let progress = LocalFileSink::new(output).write_complete(
                 format!("{source:?}:{filename}"),
@@ -225,6 +225,6 @@ fn parse_source(value: &str) -> Result<ImportSource> {
         "sftp" | "sftp-push" => Ok(ImportSource::SftpPush),
         "ftps" | "ftps-push" => Ok(ImportSource::FtpsPush),
         "manual" | "manual-drop" => Ok(ImportSource::ManualDrop),
-        _ => Err(nikon_importer_core::ImporterError::UnsupportedProtocol),
+        _ => Err(camera_connector_core::ImporterError::UnsupportedProtocol),
     }
 }

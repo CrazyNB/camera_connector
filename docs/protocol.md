@@ -1,4 +1,4 @@
-# Nikon Push Import Protocol Notes
+﻿# Camera Push Import Protocol Notes
 
 Current technical route:
 
@@ -65,7 +65,8 @@ Requirements:
 - Remove traversal segments such as `..`.
 - Replace Windows-unsafe filename characters.
 - Keep RAW/JPEG/video files intact.
-- Group files by normalized filename stem, such as `DSC_1234.JPG` and `DSC_1234.NEF`.
+- Recognize common RAW extensions across camera brands: `NEF`, `NRW`, `CR2`, `CR3`, `ARW`, `SRF`, `SR2`, `RAF`, `RW2`, `RWL`, `ORF`, `PEF`, and `DNG`.
+- Group files by normalized filename stem, such as `IMG_1001.JPG` and `IMG_1001.CR3`.
 - Preserve duplicates with numbered filenames instead of overwriting previous completed files.
 
 ## Real Camera Verification
@@ -79,3 +80,4 @@ For each camera, record:
 - Successful `STOR` upload.
 - RAW/JPEG/video behavior.
 - Any path or folder command quirks.
+

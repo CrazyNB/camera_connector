@@ -1,7 +1,7 @@
 use std::fs;
 use std::net::SocketAddr;
 
-use nikon_importer_core::{FtpPushServer, PushProtocol, PushReceiverConfig};
+use camera_connector_core::{FtpPushServer, PushProtocol, PushReceiverConfig};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[tokio::test]

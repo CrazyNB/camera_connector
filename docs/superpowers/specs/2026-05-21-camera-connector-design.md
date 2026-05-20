@@ -1,4 +1,4 @@
-# Nikon Push Importer Design
+﻿# Camera Connector Design
 
 ## Goal
 
@@ -7,7 +7,7 @@ Replace the failed PTP/IP pull route with a push receiver. The camera sends file
 ## Architecture
 
 - `receive`: local atomic file sink and receive progress types.
-- `model`: received asset metadata, import source, format detection, RAW/JPEG grouping.
+- `model`: received asset metadata, import source, multi-brand RAW format detection, RAW/JPEG grouping.
 - `push`: receiver protocol configuration and FTP receiver.
 - `tools/cli`: validation commands for receiver settings, local ingest, and FTP serving.
 
@@ -31,3 +31,4 @@ Replace the failed PTP/IP pull route with a push receiver. The camera sends file
 - FTPS/TLS implementation.
 - Real-camera AP-mode validation.
 - Mobile background receiver behavior.
+

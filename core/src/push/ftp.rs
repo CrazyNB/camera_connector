@@ -94,11 +94,7 @@ async fn handle_control_connection(
     let mut reader = BufReader::new(stream);
     let mut state = ControlState::new(&config);
 
-    reply(
-        &mut reader,
-        "220 Nikon Wireless Importer FTP receiver ready",
-    )
-    .await?;
+    reply(&mut reader, "220 Camera Connector FTP receiver ready").await?;
 
     loop {
         let mut line = String::new();

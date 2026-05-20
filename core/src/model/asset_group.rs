@@ -68,7 +68,16 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
 fn format_rank(format: ObjectFormat) -> u8 {
     match format {
         ObjectFormat::Jpeg => 0,
-        ObjectFormat::Nef => 1,
+        ObjectFormat::Nef
+        | ObjectFormat::Nrw
+        | ObjectFormat::Cr2
+        | ObjectFormat::Cr3
+        | ObjectFormat::Arw
+        | ObjectFormat::Raf
+        | ObjectFormat::Rw2
+        | ObjectFormat::Orf
+        | ObjectFormat::Pef
+        | ObjectFormat::Dng => 1,
         ObjectFormat::Mov | ObjectFormat::Mp4 => 2,
         ObjectFormat::Tiff => 3,
         ObjectFormat::Unknown => 4,
