@@ -7,8 +7,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    append_transfer_record, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig, Result,
-    TransferRecord, TransferStatus,
+    append_transfer_record, record_device_connected, record_device_disconnected, ImporterError,
+    LocalFileSink, PushProtocol, PushReceiverConfig, Result, TransferRecord, TransferStatus,
 };
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
@@ -94,72 +94,96 @@ async fn handle_control_connection(
     config: Arc<PushReceiverConfig>,
 ) -> Result<()> {
     let local_ip = stream.local_addr()?.ip();
-    let remote_addr = stream.peer_addr().ok().map(|addr| addr.ip().to_string());
-    let mut reader = BufReader::new(stream);
-    let mut state = ControlState::new(&config);
+    let peer_addr = stream.peer_addr().ok();
+    let remote_addr = peer_addr.map(|addr| addr.ip().to_string());
+    if let Some(remote_addr) = remote_addr.as_deref() {
+        let source_name = config.resolved_source_name(Some(remote_addr));
+        record_device_connected(
+            &config.output_dir,
+            remote_addr,
+            peer_addr.map(|addr| addr.port()),
+            source_name.as_deref(),
+        )?;
+    }
+    let result: Result<()> = async {
+        let mut reader = BufReader::new(stream);
+        let mut state = ControlState::new(&config);
 
-    reply(&mut reader, "220 Camera Connector FTP receiver ready").await?;
+        reply(&mut reader, "220 Camera Connector FTP receiver ready").await?;
 
-    loop {
-        let mut line = String::new();
-        let bytes = reader.read_line(&mut line).await?;
-        if bytes == 0 {
-            return Ok(());
+        loop {
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).await?;
+            if bytes == 0 {
+                break Ok(());
+            }
+
+            let line = line.trim_end_matches(['\r', '\n']);
+            let (command, argument) = parse_command(line);
+            match command.as_str() {
+                "USER" => handle_user(&mut reader, &config, &mut state, argument).await?,
+                "PASS" => handle_pass(&mut reader, &config, &mut state, argument).await?,
+                "SYST" => reply(&mut reader, "215 UNIX Type: L8").await?,
+                "FEAT" => {
+                    write_raw(
+                        &mut reader,
+                        "211-Features\r\n PASV\r\n EPSV\r\n UTF8\r\n211 End\r\n",
+                    )
+                    .await?
+                }
+                "PWD" | "XPWD" => reply(&mut reader, &format!("257 \"{}\"", state.cwd)).await?,
+                "CWD" => {
+                    state.cwd = normalize_cwd(&state.cwd, argument);
+                    reply(&mut reader, "250 Directory changed").await?;
+                }
+                "CDUP" => {
+                    state.cwd = parent_cwd(&state.cwd);
+                    reply(&mut reader, "250 Directory changed").await?;
+                }
+                "MKD" | "XMKD" => {
+                    let path = resolve_upload_path(&state.cwd, argument);
+                    LocalFileSink::new(&config.output_dir).create_dir_all(&path)?;
+                    reply(&mut reader, &format!("257 \"{path}\" created")).await?;
+                }
+                "TYPE" => reply(&mut reader, "200 Type set").await?,
+                "OPTS" => reply(&mut reader, "200 Option accepted").await?,
+                "NOOP" => reply(&mut reader, "200 OK").await?,
+                "PASV" => enter_passive(&mut reader, &config, &mut state, local_ip, false).await?,
+                "EPSV" => enter_passive(&mut reader, &config, &mut state, local_ip, true).await?,
+                "PORT" | "EPRT" => {
+                    reply(&mut reader, "502 Active mode is not supported; use PASV").await?
+                }
+                "LIST" | "NLST" => handle_empty_listing(&mut reader, &mut state).await?,
+                "SIZE" | "MDTM" => reply(&mut reader, "550 File not found").await?,
+                "STOR" => {
+                    handle_stor(
+                        &mut reader,
+                        &config,
+                        &mut state,
+                        argument,
+                        remote_addr.clone(),
+                    )
+                    .await?
+                }
+                "QUIT" => {
+                    reply(&mut reader, "221 Goodbye").await?;
+                    break Ok(());
+                }
+                _ => reply(&mut reader, "502 Command not implemented").await?,
+            }
         }
+    }
+    .await;
 
-        let line = line.trim_end_matches(['\r', '\n']);
-        let (command, argument) = parse_command(line);
-        match command.as_str() {
-            "USER" => handle_user(&mut reader, &config, &mut state, argument).await?,
-            "PASS" => handle_pass(&mut reader, &config, &mut state, argument).await?,
-            "SYST" => reply(&mut reader, "215 UNIX Type: L8").await?,
-            "FEAT" => {
-                write_raw(
-                    &mut reader,
-                    "211-Features\r\n PASV\r\n EPSV\r\n UTF8\r\n211 End\r\n",
-                )
-                .await?
-            }
-            "PWD" | "XPWD" => reply(&mut reader, &format!("257 \"{}\"", state.cwd)).await?,
-            "CWD" => {
-                state.cwd = normalize_cwd(&state.cwd, argument);
-                reply(&mut reader, "250 Directory changed").await?;
-            }
-            "CDUP" => {
-                state.cwd = parent_cwd(&state.cwd);
-                reply(&mut reader, "250 Directory changed").await?;
-            }
-            "MKD" | "XMKD" => {
-                let path = resolve_upload_path(&state.cwd, argument);
-                LocalFileSink::new(&config.output_dir).create_dir_all(&path)?;
-                reply(&mut reader, &format!("257 \"{path}\" created")).await?;
-            }
-            "TYPE" => reply(&mut reader, "200 Type set").await?,
-            "OPTS" => reply(&mut reader, "200 Option accepted").await?,
-            "NOOP" => reply(&mut reader, "200 OK").await?,
-            "PASV" => enter_passive(&mut reader, &config, &mut state, local_ip, false).await?,
-            "EPSV" => enter_passive(&mut reader, &config, &mut state, local_ip, true).await?,
-            "PORT" | "EPRT" => {
-                reply(&mut reader, "502 Active mode is not supported; use PASV").await?
-            }
-            "LIST" | "NLST" => handle_empty_listing(&mut reader, &mut state).await?,
-            "SIZE" | "MDTM" => reply(&mut reader, "550 File not found").await?,
-            "STOR" => {
-                handle_stor(
-                    &mut reader,
-                    &config,
-                    &mut state,
-                    argument,
-                    remote_addr.clone(),
-                )
-                .await?
-            }
-            "QUIT" => {
-                reply(&mut reader, "221 Goodbye").await?;
-                return Ok(());
-            }
-            _ => reply(&mut reader, "502 Command not implemented").await?,
-        }
+    let disconnect_result = remote_addr
+        .as_deref()
+        .map(|remote_addr| record_device_disconnected(&config.output_dir, remote_addr))
+        .unwrap_or(Ok(()));
+
+    match (result, disconnect_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
     }
 }
 

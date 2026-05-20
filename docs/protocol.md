@@ -99,6 +99,17 @@ This virtual path is not a filesystem path. It is a compact grouping label; the 
 
 Source aliases are user configuration. They map camera IP addresses to names, for example `192.168.137.56 = Z5_2`. The receiver applies this mapping when writing new transfer records, and the transfer-log view applies it when reading older records.
 
+## Connected Devices
+
+The receiver writes `connected-devices.json` in the output folder. It records current and recently seen FTP control connections:
+
+- `remote_addr` and last remote port.
+- `online` and active connection count.
+- first seen, last seen, and last disconnected timestamps.
+- source name resolved from the alias configuration when available.
+
+This file powers the "connected devices" view and the "name this device" flow. It is receiver metadata, not an inbox asset.
+
 ## Real Camera Verification
 
 For each camera, record:

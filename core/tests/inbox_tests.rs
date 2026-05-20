@@ -37,6 +37,7 @@ fn scans_inbox_files_and_skips_transfer_log() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     std::fs::write(temp_dir.path().join("IMG_1001.CR3"), [1, 2, 3]).unwrap();
     std::fs::write(temp_dir.path().join("transfer-log.jsonl"), []).unwrap();
+    std::fs::write(temp_dir.path().join("connected-devices.json"), []).unwrap();
 
     let assets = scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan");
 

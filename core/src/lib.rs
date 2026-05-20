@@ -9,6 +9,8 @@ pub use model::{
 };
 pub use push::{FtpPushServer, PushProtocol, PushReceiverConfig};
 pub use receive::{
-    append_transfer_record, read_transfer_log, transfer_log_path, TransferRecord, TransferStatus,
+    append_transfer_record, connected_devices_path, read_connected_devices, read_transfer_log,
+    record_device_connected, record_device_disconnected, transfer_log_path, ConnectedDevice,
+    TransferRecord, TransferStatus,
 };
 pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};

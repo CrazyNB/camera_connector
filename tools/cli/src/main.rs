@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, read_transfer_log, scan_inbox_groups, FtpPushServer, ImportSource,
-    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, Result, TransferRecord,
-    TransferStatus,
+    append_transfer_record, read_connected_devices, read_transfer_log, scan_inbox_groups,
+    ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig,
+    ReceivedAsset, Result, TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,16 @@ enum Command {
         remote_addr: Option<String>,
         #[arg(long = "source-alias")]
         source_aliases: Vec<String>,
+    },
+    Devices {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long = "source-alias")]
+        source_aliases: Vec<String>,
+        #[arg(long)]
+        online: bool,
     },
     SourceAlias {
         #[arg(long)]
@@ -364,6 +374,36 @@ async fn main() -> Result<()> {
         Some(Command::SourceAlias { config, action }) => {
             handle_source_alias_command(config.as_deref(), action)?;
         }
+        Some(Command::Devices {
+            config,
+            path,
+            source_aliases,
+            online,
+        }) => {
+            let source_aliases = effective_source_aliases(config.as_deref(), &source_aliases)?;
+            for device in read_connected_devices(path)?
+                .into_iter()
+                .filter(|device| !online || device.online)
+            {
+                let display = device_display_source(&device, &source_aliases)
+                    .unwrap_or_else(|| remote_addr_display_label(&device.remote_addr));
+                println!(
+                    "{}\tonline={}\tconnections={}\tport={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
+                    device.remote_addr,
+                    device.online,
+                    device.active_connections,
+                    device
+                        .last_remote_port
+                        .map(|port| port.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    device_display_source(&device, &source_aliases)
+                        .as_deref()
+                        .unwrap_or("-"),
+                    display,
+                    device.last_seen_at_ms
+                );
+            }
+        }
     }
 
     Ok(())
@@ -547,6 +587,38 @@ fn record_display_source(
         .or_else(|| record.source_name.clone())
 }
 
+fn device_display_source(
+    device: &ConnectedDevice,
+    source_aliases: &BTreeMap<String, String>,
+) -> Option<String> {
+    source_aliases
+        .get(&device.remote_addr)
+        .cloned()
+        .or_else(|| device.source_name.clone())
+}
+
+fn remote_addr_display_label(remote_addr: &str) -> String {
+    if let Some(last_octet) = remote_addr
+        .rsplit('.')
+        .next()
+        .filter(|value| !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()))
+        .and_then(|value| value.parse::<u8>().ok())
+    {
+        return format!("IP-{last_octet:03}");
+    }
+
+    let digits = remote_addr
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+    if digits.is_empty() {
+        "IP".to_string()
+    } else {
+        let start = digits.len().saturating_sub(3);
+        format!("IP-{:0>3}", &digits[start..])
+    }
+}
+
 fn source_protocol_label(source: ImportSource) -> &'static str {
     match source {
         ImportSource::FtpPush => "ftp",
@@ -626,6 +698,28 @@ mod tests {
         assert_eq!(aliases.get("192.168.137.56"), Some(&"Z5_2".to_string()));
         assert_eq!(aliases.get("192.168.137.44"), Some(&"X-T5".to_string()));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn device_display_source_uses_config_alias() {
+        let aliases =
+            parse_source_aliases(&["192.168.137.56=Z5_2".to_string()]).expect("alias parses");
+        let device = ConnectedDevice {
+            remote_addr: "192.168.137.56".to_string(),
+            source_name: None,
+            first_seen_at_ms: 10,
+            last_seen_at_ms: 20,
+            last_disconnected_at_ms: None,
+            last_remote_port: Some(51120),
+            active_connections: 1,
+            online: true,
+        };
+
+        assert_eq!(
+            device_display_source(&device, &aliases).as_deref(),
+            Some("Z5_2")
+        );
+        assert_eq!(remote_addr_display_label(&device.remote_addr), "IP-056");
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

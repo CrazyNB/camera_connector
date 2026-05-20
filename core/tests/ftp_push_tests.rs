@@ -2,7 +2,8 @@ use std::fs;
 use std::net::SocketAddr;
 
 use camera_connector_core::{
-    read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig, TransferStatus,
+    read_connected_devices, read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig,
+    TransferStatus,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -33,6 +34,12 @@ async fn ftp_server_accepts_passive_stor_upload() {
     );
 
     assert_reply(&mut control, "220").await;
+    let connected = read_connected_devices(temp_dir.path()).expect("devices should read");
+    assert_eq!(connected.len(), 1);
+    assert_eq!(connected[0].remote_addr, "127.0.0.1");
+    assert_eq!(connected[0].source_name.as_deref(), Some("Studio A"));
+    assert!(connected[0].online);
+
     command(&mut control, "USER anonymous").await;
     assert_reply(&mut control, "230").await;
     command(&mut control, "TYPE I").await;
@@ -81,6 +88,10 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_eq!(records[0].final_filename, "IMG_4321.CR3");
     assert_eq!(records[0].size_bytes, 5);
     assert_eq!(records[0].status, TransferStatus::Completed);
+
+    let disconnected = read_connected_devices(temp_dir.path()).expect("devices should read");
+    assert_eq!(disconnected.len(), 1);
+    assert!(!disconnected[0].online);
 }
 
 async fn command(control: &mut BufReader<tokio::net::TcpStream>, line: &str) {

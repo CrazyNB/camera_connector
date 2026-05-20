@@ -57,6 +57,14 @@ List configured camera/source aliases:
 target\debug\camera-connector.exe source-alias list
 ```
 
+List current and recently connected devices from the receiver output folder:
+
+```powershell
+target\debug\camera-connector.exe devices --path C:\Users\hxn\Pictures\CameraConnector
+```
+
+The `devices` output reads the same source alias config, so `192.168.137.56` will display as `Z5_2` after the alias is set.
+
 Validate local ingest without a camera:
 
 ```powershell
@@ -75,7 +83,7 @@ List transfer records and filter by source name, original camera path, final fil
 target\debug\camera-connector.exe transfers --path C:\Users\hxn\Pictures\CameraConnector --source-name "Z5_2" --original-path DCIM
 ```
 
-The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the local completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path remains in `transfer-log.jsonl` for filtering.
+The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the local completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path remains in `transfer-log.jsonl` for filtering. Receiver metadata files such as `transfer-log.jsonl` and `connected-devices.json` are not shown as inbox assets.
 
 Transfer records also expose a virtual display path. With an alias it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without an alias the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 

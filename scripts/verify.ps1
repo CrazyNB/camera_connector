@@ -61,6 +61,9 @@ if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
+& (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --path $pushOutput
+if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
+
 $transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --path $pushOutput --source-name "Verify Camera" --original-path IMG_1234
 if ($LASTEXITCODE -ne 0) { throw "transfers smoke failed" }
 if (($transfersOutput | Where-Object { $_ -like "*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
