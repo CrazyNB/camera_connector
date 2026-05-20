@@ -29,6 +29,7 @@ The script runs:
 - `cargo test --workspace`
 - `cargo build --workspace`
 - Push-mode CLI smoke test:
+  - `account`
   - `receiver-config`
   - `receive-file`
   - `inbox`
@@ -41,7 +42,7 @@ Smoke outputs are written under `target/push-output`.
 Start the development FTP receiver:
 
 ```powershell
-target\debug\camera-connector.exe source-alias set --ip 192.168.137.56 --name Z5_2
+target\debug\camera-connector.exe account set --username z5 --password secret --device-name Z5_2 --ip 192.168.137.56
 target\debug\camera-connector.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
@@ -51,10 +52,10 @@ Print camera-facing settings without starting the server:
 target\debug\camera-connector.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
-List configured camera/source aliases:
+List configured camera accounts:
 
 ```powershell
-target\debug\camera-connector.exe source-alias list
+target\debug\camera-connector.exe account list
 ```
 
 List current and recently connected devices from the receiver output folder:
@@ -63,7 +64,11 @@ List current and recently connected devices from the receiver output folder:
 target\debug\camera-connector.exe devices --path C:\Users\hxn\Pictures\CameraConnector
 ```
 
-The `devices` output reads the same source alias config, so `192.168.137.56` will display as `Z5_2` after the alias is set.
+The `devices` output reads the same account config, so `192.168.137.56` will display as `Z5_2` after the IP is bound to the `z5` account. A newly discovered IP can be attached later:
+
+```powershell
+target\debug\camera-connector.exe account bind-ip --username z5 --ip 192.168.137.44
+```
 
 Validate local ingest without a camera:
 
@@ -85,9 +90,9 @@ target\debug\camera-connector.exe transfers --path C:\Users\hxn\Pictures\CameraC
 
 The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the local completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path remains in `transfer-log.jsonl` for filtering. Receiver metadata files such as `transfer-log.jsonl` and `connected-devices.json` are not shown as inbox assets.
 
-Transfer records also expose a virtual display path. With an alias it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without an alias the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
+Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 
-Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. Use `--config C:\path\to\config.json` on `source-alias`, `receiver-config`, `serve-ftp`, and `transfers` to test with an alternate config file.
+Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. Use `--config C:\path\to\config.json` on `account`, `receiver-config`, `serve-ftp`, `devices`, and `transfers` to test with an alternate config file.
 
 Duplicate uploads are preserved with numbered filenames such as `IMG_1234 (1).CR3`; existing completed files are not overwritten.
 

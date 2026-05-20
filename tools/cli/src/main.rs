@@ -6,7 +6,7 @@ use std::str::FromStr;
 use camera_connector_core::{
     append_transfer_record, read_connected_devices, read_transfer_log, scan_inbox_groups,
     ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig,
-    ReceivedAsset, Result, TransferRecord, TransferStatus,
+    ReceivedAsset, ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -49,8 +49,6 @@ enum Command {
         advertised_host: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
-        #[arg(long = "source-alias")]
-        source_aliases: Vec<String>,
     },
     ServeFtp {
         #[arg(long)]
@@ -69,8 +67,6 @@ enum Command {
         advertised_host: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
-        #[arg(long = "source-alias")]
-        source_aliases: Vec<String>,
     },
     Inbox {
         #[arg(long)]
@@ -93,37 +89,49 @@ enum Command {
         source_name: Option<String>,
         #[arg(long)]
         remote_addr: Option<String>,
-        #[arg(long = "source-alias")]
-        source_aliases: Vec<String>,
     },
     Devices {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long)]
         path: PathBuf,
-        #[arg(long = "source-alias")]
-        source_aliases: Vec<String>,
         #[arg(long)]
         online: bool,
     },
-    SourceAlias {
+    Account {
         #[arg(long)]
         config: Option<PathBuf>,
         #[command(subcommand)]
-        action: SourceAliasCommand,
+        action: AccountCommand,
     },
 }
 
 #[derive(Debug, Subcommand)]
-enum SourceAliasCommand {
+enum AccountCommand {
     List,
     Set {
         #[arg(long)]
-        ip: String,
+        username: String,
         #[arg(long)]
-        name: String,
+        password: Option<String>,
+        #[arg(long = "device-name")]
+        device_name: String,
+        #[arg(long = "ip")]
+        remote_addrs: Vec<String>,
     },
     Remove {
+        #[arg(long)]
+        username: String,
+    },
+    BindIp {
+        #[arg(long)]
+        username: String,
+        #[arg(long)]
+        ip: String,
+    },
+    UnbindIp {
+        #[arg(long)]
+        username: String,
         #[arg(long)]
         ip: String,
     },
@@ -139,13 +147,21 @@ struct ConfigArgs {
     password: Option<String>,
     advertised_host: Option<String>,
     source_name: Option<String>,
-    source_aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct AppConfig {
     #[serde(default)]
-    source_aliases: BTreeMap<String, String>,
+    accounts: BTreeMap<String, CameraAccountConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CameraAccountConfig {
+    username: String,
+    password: Option<String>,
+    device_name: String,
+    #[serde(default)]
+    remote_addrs: Vec<String>,
 }
 
 #[tokio::main]
@@ -219,7 +235,6 @@ async fn main() -> Result<()> {
             username,
             advertised_host,
             source_name,
-            source_aliases,
         }) => {
             let protocol = PushProtocol::from_str(&protocol)?;
             let config = build_config(ConfigArgs {
@@ -232,7 +247,6 @@ async fn main() -> Result<()> {
                 password: None,
                 advertised_host,
                 source_name,
-                source_aliases,
             })?;
             print_receiver_config(&config);
         }
@@ -245,7 +259,6 @@ async fn main() -> Result<()> {
             password,
             advertised_host,
             source_name,
-            source_aliases,
         }) => {
             let config = build_config(ConfigArgs {
                 config_path: config,
@@ -257,7 +270,6 @@ async fn main() -> Result<()> {
                 password,
                 advertised_host,
                 source_name,
-                source_aliases,
             })?;
             let server = FtpPushServer::bind(config.clone()).await?;
             println!("ftp receiver listening on {}", server.local_addr());
@@ -305,17 +317,15 @@ async fn main() -> Result<()> {
             final_filename,
             source_name,
             remote_addr,
-            source_aliases,
         }) => {
-            let source_aliases = effective_source_aliases(config.as_deref(), &source_aliases)?;
+            let accounts = load_app_config(config.as_deref())?.accounts;
             for record in read_transfer_log(path)?
                 .into_iter()
                 .filter(|record| {
                     source_name
                         .as_ref()
                         .map(|expected| {
-                            record_display_source(record, &source_aliases).as_ref()
-                                == Some(expected)
+                            record_display_source(record, &accounts).as_ref() == Some(expected)
                         })
                         .unwrap_or(true)
                 })
@@ -362,33 +372,31 @@ async fn main() -> Result<()> {
                     record.original_path,
                     record.size_bytes,
                     record.remote_addr.as_deref().unwrap_or("-"),
-                    record_display_source(&record, &source_aliases)
+                    record_display_source(&record, &accounts)
                         .as_deref()
                         .unwrap_or("-"),
-                    record.virtual_display_path(
-                        record_display_source(&record, &source_aliases).as_deref()
-                    )
+                    record
+                        .virtual_display_path(record_display_source(&record, &accounts).as_deref())
                 );
             }
         }
-        Some(Command::SourceAlias { config, action }) => {
-            handle_source_alias_command(config.as_deref(), action)?;
+        Some(Command::Account { config, action }) => {
+            handle_account_command(config.as_deref(), action)?;
         }
         Some(Command::Devices {
             config,
             path,
-            source_aliases,
             online,
         }) => {
-            let source_aliases = effective_source_aliases(config.as_deref(), &source_aliases)?;
+            let accounts = load_app_config(config.as_deref())?.accounts;
             for device in read_connected_devices(path)?
                 .into_iter()
                 .filter(|device| !online || device.online)
             {
-                let display = device_display_source(&device, &source_aliases)
+                let display = device_display_source(&device, &accounts)
                     .unwrap_or_else(|| remote_addr_display_label(&device.remote_addr));
                 println!(
-                    "{}\tonline={}\tconnections={}\tport={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
+                    "{}\tonline={}\tconnections={}\tport={}\tusername={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
                     device.remote_addr,
                     device.online,
                     device.active_connections,
@@ -396,7 +404,8 @@ async fn main() -> Result<()> {
                         .last_remote_port
                         .map(|port| port.to_string())
                         .unwrap_or_else(|| "-".to_string()),
-                    device_display_source(&device, &source_aliases)
+                    device.username.as_deref().unwrap_or("-"),
+                    device_display_source(&device, &accounts)
                         .as_deref()
                         .unwrap_or("-"),
                     display,
@@ -411,12 +420,14 @@ async fn main() -> Result<()> {
 
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
     let mut config = PushReceiverConfig::new(args.protocol, args.bind_host, args.port, args.output);
-    config.username = args.username;
-    config.password = args.password;
     config.advertised_host = args.advertised_host;
     config.source_name = args.source_name;
-    config.source_aliases =
-        effective_source_aliases(args.config_path.as_deref(), &args.source_aliases)?;
+    config.accounts = effective_accounts(
+        args.config_path.as_deref(),
+        args.username.as_deref(),
+        args.password.as_deref(),
+        config.source_name.as_deref(),
+    )?;
     Ok(config)
 }
 
@@ -431,33 +442,32 @@ fn print_receiver_config(config: &PushReceiverConfig) {
     );
     println!("port: {}", config.port);
     println!("output: {}", config.output_dir.display());
-    println!(
-        "username: {}",
-        config.username.as_deref().unwrap_or("anonymous")
-    );
-    println!(
-        "password: {}",
-        if config.password.is_some() {
-            "configured"
-        } else {
-            "not required"
-        }
-    );
+    println!("accounts: {}", config.accounts.len());
+    for account in &config.accounts {
+        println!(
+            "account: {}\tdevice={}\tpassword={}\tips={}",
+            account.username,
+            account.device_name,
+            if account.password.is_some() {
+                "configured"
+            } else {
+                "not required"
+            },
+            if account.remote_addrs.is_empty() {
+                "-".to_string()
+            } else {
+                account.remote_addrs.join(",")
+            }
+        );
+    }
+    if config.accounts.is_empty() {
+        println!("username: anonymous");
+        println!("password: not required");
+    }
     println!(
         "source_name: {}",
         config.source_name.as_deref().unwrap_or("-")
     );
-    if config.source_aliases.is_empty() {
-        println!("source_aliases: -");
-    } else {
-        let aliases = config
-            .source_aliases
-            .iter()
-            .map(|(remote_addr, source_name)| format!("{remote_addr}={source_name}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!("source_aliases: {aliases}");
-    }
 }
 
 fn parse_source(value: &str) -> Result<ImportSource> {
@@ -470,64 +480,112 @@ fn parse_source(value: &str) -> Result<ImportSource> {
     }
 }
 
-fn parse_source_aliases(values: &[String]) -> Result<BTreeMap<String, String>> {
-    let mut aliases = BTreeMap::new();
-    for alias in values {
-        let (remote_addr, source_name) = alias.split_once('=').ok_or_else(|| {
-            camera_connector_core::ImporterError::internal(format!(
-                "invalid source alias '{alias}', expected IP=Name"
-            ))
-        })?;
-        aliases.insert(
-            remote_addr.trim().to_string(),
-            source_name.trim().to_string(),
+fn effective_accounts(
+    config_path: Option<&Path>,
+    username: Option<&str>,
+    password: Option<&str>,
+    device_name: Option<&str>,
+) -> Result<Vec<ReceiverAccount>> {
+    let mut accounts = load_app_config(config_path)?
+        .accounts
+        .into_values()
+        .map(CameraAccountConfig::into_receiver_account)
+        .collect::<Vec<_>>();
+
+    if let Some(username) = username {
+        let transient = ReceiverAccount::new(
+            username,
+            password.map(ToOwned::to_owned),
+            device_name.unwrap_or(username),
         );
+        accounts.retain(|account| account.username != username);
+        accounts.push(transient);
     }
-    Ok(aliases)
+
+    Ok(accounts)
 }
 
-fn effective_source_aliases(
-    config_path: Option<&Path>,
-    cli_aliases: &[String],
-) -> Result<BTreeMap<String, String>> {
-    let mut aliases = load_app_config(config_path)?.source_aliases;
-    aliases.extend(parse_source_aliases(cli_aliases)?);
-    Ok(aliases)
-}
-
-fn handle_source_alias_command(
-    config_path: Option<&Path>,
-    action: SourceAliasCommand,
-) -> Result<()> {
+fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) -> Result<()> {
     let mut config = load_app_config(config_path)?;
     match action {
-        SourceAliasCommand::List => {
+        AccountCommand::List => {
             println!("config: {}", resolved_config_path(config_path).display());
-            if config.source_aliases.is_empty() {
-                println!("source_aliases: -");
+            if config.accounts.is_empty() {
+                println!("accounts: -");
             } else {
-                for (remote_addr, source_name) in config.source_aliases {
-                    println!("{remote_addr}\t{source_name}");
+                for account in config.accounts.values() {
+                    println!(
+                        "{}\tdevice={}\tpassword={}\tips={}",
+                        account.username,
+                        account.device_name,
+                        if account.password.is_some() {
+                            "configured"
+                        } else {
+                            "not required"
+                        },
+                        if account.remote_addrs.is_empty() {
+                            "-".to_string()
+                        } else {
+                            account.remote_addrs.join(",")
+                        }
+                    );
                 }
             }
         }
-        SourceAliasCommand::Set { ip, name } => {
-            config.source_aliases.insert(ip.clone(), name.clone());
+        AccountCommand::Set {
+            username,
+            password,
+            device_name,
+            remote_addrs,
+        } => {
+            config.accounts.insert(
+                username.clone(),
+                CameraAccountConfig {
+                    username: username.clone(),
+                    password,
+                    device_name: device_name.clone(),
+                    remote_addrs,
+                },
+            );
             let path = save_app_config(config_path, &config)?;
-            println!("saved {ip}={name}");
+            println!("saved account {username}\tdevice={device_name}");
             println!("config: {}", path.display());
         }
-        SourceAliasCommand::Remove { ip } => {
-            let removed = config.source_aliases.remove(&ip);
+        AccountCommand::Remove { username } => {
+            let removed = config.accounts.remove(&username);
             let path = save_app_config(config_path, &config)?;
             println!(
-                "{} {ip}",
+                "{} {username}",
                 if removed.is_some() {
                     "removed"
                 } else {
                     "not_found"
                 }
             );
+            println!("config: {}", path.display());
+        }
+        AccountCommand::BindIp { username, ip } => {
+            let Some(account) = config.accounts.get_mut(&username) else {
+                return Err(camera_connector_core::ImporterError::internal(format!(
+                    "account '{username}' not found"
+                )));
+            };
+            if !account.remote_addrs.iter().any(|addr| addr == &ip) {
+                account.remote_addrs.push(ip.clone());
+            }
+            let path = save_app_config(config_path, &config)?;
+            println!("bound {ip} to {username}");
+            println!("config: {}", path.display());
+        }
+        AccountCommand::UnbindIp { username, ip } => {
+            let Some(account) = config.accounts.get_mut(&username) else {
+                return Err(camera_connector_core::ImporterError::internal(format!(
+                    "account '{username}' not found"
+                )));
+            };
+            account.remote_addrs.retain(|addr| addr != &ip);
+            let path = save_app_config(config_path, &config)?;
+            println!("unbound {ip} from {username}");
             println!("config: {}", path.display());
         }
     }
@@ -578,23 +636,50 @@ fn default_config_path() -> PathBuf {
 
 fn record_display_source(
     record: &TransferRecord,
-    source_aliases: &BTreeMap<String, String>,
+    accounts: &BTreeMap<String, CameraAccountConfig>,
 ) -> Option<String> {
     record
         .remote_addr
         .as_deref()
-        .and_then(|remote_addr| source_aliases.get(remote_addr).cloned())
+        .and_then(|remote_addr| account_name_for_remote_addr(accounts, remote_addr))
         .or_else(|| record.source_name.clone())
 }
 
 fn device_display_source(
     device: &ConnectedDevice,
-    source_aliases: &BTreeMap<String, String>,
+    accounts: &BTreeMap<String, CameraAccountConfig>,
 ) -> Option<String> {
-    source_aliases
-        .get(&device.remote_addr)
-        .cloned()
+    device
+        .username
+        .as_deref()
+        .and_then(|username| accounts.get(username))
+        .map(|account| account.device_name.clone())
+        .or_else(|| account_name_for_remote_addr(accounts, &device.remote_addr))
         .or_else(|| device.source_name.clone())
+}
+
+fn account_name_for_remote_addr(
+    accounts: &BTreeMap<String, CameraAccountConfig>,
+    remote_addr: &str,
+) -> Option<String> {
+    accounts.values().find_map(|account| {
+        account
+            .remote_addrs
+            .iter()
+            .any(|configured| configured == remote_addr)
+            .then(|| account.device_name.clone())
+    })
+}
+
+impl CameraAccountConfig {
+    fn into_receiver_account(self) -> ReceiverAccount {
+        ReceiverAccount {
+            username: self.username,
+            password: self.password,
+            device_name: self.device_name,
+            remote_addrs: self.remote_addrs,
+        }
+    }
 }
 
 fn remote_addr_display_label(remote_addr: &str) -> String {
@@ -633,9 +718,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn display_source_alias_applies_to_existing_transfer_record() {
-        let aliases =
-            parse_source_aliases(&["192.168.137.56=Z5_2".to_string()]).expect("alias parses");
+    fn account_ip_binding_applies_to_existing_transfer_record() {
+        let mut accounts = BTreeMap::new();
+        accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
         let record = TransferRecord {
             transfer_id: "ftp:1".to_string(),
             protocol: "ftp".to_string(),
@@ -650,7 +743,7 @@ mod tests {
             completed_at_ms: Some(20),
             error: None,
         };
-        let source = record_display_source(&record, &aliases);
+        let source = record_display_source(&record, &accounts);
 
         assert_eq!(source.as_deref(), Some("Z5_2"));
         assert_eq!(
@@ -660,53 +753,71 @@ mod tests {
     }
 
     #[test]
-    fn source_alias_config_round_trips() {
+    fn account_config_round_trips() {
         let path = unique_temp_config_path("round-trip");
         let mut config = AppConfig::default();
-        config
-            .source_aliases
-            .insert("192.168.137.56".to_string(), "Z5_2".to_string());
+        config.accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
 
         save_app_config(Some(&path), &config).expect("config saves");
         let loaded = load_app_config(Some(&path)).expect("config loads");
 
-        assert_eq!(
-            loaded.source_aliases.get("192.168.137.56"),
-            Some(&"Z5_2".to_string())
-        );
+        let account = loaded.accounts.get("z5").expect("account exists");
+        assert_eq!(account.password.as_deref(), Some("secret"));
+        assert_eq!(account.device_name, "Z5_2");
+        assert_eq!(account.remote_addrs, vec!["192.168.137.56"]);
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn source_alias_config_merges_with_cli_overrides() {
-        let path = unique_temp_config_path("merge");
+    fn configured_accounts_build_receiver_accounts() {
+        let path = unique_temp_config_path("accounts");
         let mut config = AppConfig::default();
-        config
-            .source_aliases
-            .insert("192.168.137.56".to_string(), "Old Name".to_string());
+        config.accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
         save_app_config(Some(&path), &config).expect("config saves");
 
-        let aliases = effective_source_aliases(
-            Some(&path),
-            &[
-                "192.168.137.56=Z5_2".to_string(),
-                "192.168.137.44=X-T5".to_string(),
-            ],
-        )
-        .expect("aliases merge");
+        let accounts = effective_accounts(Some(&path), None, None, None)
+            .expect("accounts should load from config");
 
-        assert_eq!(aliases.get("192.168.137.56"), Some(&"Z5_2".to_string()));
-        assert_eq!(aliases.get("192.168.137.44"), Some(&"X-T5".to_string()));
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].username, "z5");
+        assert_eq!(accounts[0].password.as_deref(), Some("secret"));
+        assert_eq!(accounts[0].device_name, "Z5_2");
+        assert_eq!(accounts[0].remote_addrs, vec!["192.168.137.56"]);
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
-    fn device_display_source_uses_config_alias() {
-        let aliases =
-            parse_source_aliases(&["192.168.137.56=Z5_2".to_string()]).expect("alias parses");
+    fn device_display_source_uses_account_ip_binding() {
+        let mut accounts = BTreeMap::new();
+        accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
         let device = ConnectedDevice {
             remote_addr: "192.168.137.56".to_string(),
             source_name: None,
+            username: None,
             first_seen_at_ms: 10,
             last_seen_at_ms: 20,
             last_disconnected_at_ms: None,
@@ -716,7 +827,7 @@ mod tests {
         };
 
         assert_eq!(
-            device_display_source(&device, &aliases).as_deref(),
+            device_display_source(&device, &accounts).as_deref(),
             Some("Z5_2")
         );
         assert_eq!(remote_addr_display_label(&device.remote_addr), "IP-056");

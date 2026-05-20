@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use camera_connector_core::{
     read_connected_devices, read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig,
-    TransferStatus,
+    ReceiverAccount, TransferStatus,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -11,8 +11,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_source_name("Fallback Camera")
-        .with_source_alias("127.0.0.1", "Studio A");
+        .with_account(
+            ReceiverAccount::new("z5", Some("secret"), "Studio A").with_remote_addr("127.0.0.1"),
+        );
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -38,10 +39,16 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_eq!(connected.len(), 1);
     assert_eq!(connected[0].remote_addr, "127.0.0.1");
     assert_eq!(connected[0].source_name.as_deref(), Some("Studio A"));
+    assert_eq!(connected[0].username.as_deref(), None);
     assert!(connected[0].online);
 
-    command(&mut control, "USER anonymous").await;
+    command(&mut control, "USER z5").await;
+    assert_reply(&mut control, "331").await;
+    command(&mut control, "PASS secret").await;
     assert_reply(&mut control, "230").await;
+    let logged_in = read_connected_devices(temp_dir.path()).expect("devices should read");
+    assert_eq!(logged_in[0].username.as_deref(), Some("z5"));
+    assert_eq!(logged_in[0].source_name.as_deref(), Some("Studio A"));
     command(&mut control, "TYPE I").await;
     assert_reply(&mut control, "200").await;
     command(&mut control, "PASV").await;
@@ -79,6 +86,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
 
     let records = read_transfer_log(temp_dir.path()).expect("transfer log should read");
     assert_eq!(records.len(), 1);
+    assert_eq!(records[0].remote_addr.as_deref(), Some("127.0.0.1"));
     assert_eq!(records[0].source_name.as_deref(), Some("Studio A"));
     assert_eq!(records[0].original_path, "DCIM/100CANON/IMG_4321.CR3");
     assert_eq!(
@@ -92,6 +100,46 @@ async fn ftp_server_accepts_passive_stor_upload() {
     let disconnected = read_connected_devices(temp_dir.path()).expect("devices should read");
     assert_eq!(disconnected.len(), 1);
     assert!(!disconnected[0].online);
+}
+
+#[tokio::test]
+async fn ftp_server_rejects_unknown_account_when_accounts_are_configured() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
+    let server = FtpPushServer::bind(config)
+        .await
+        .expect("server should bind");
+    let control_addr = server.local_addr();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+    let server_task = tokio::spawn(async move {
+        server
+            .run_until(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+    });
+
+    let mut control = BufReader::new(
+        tokio::net::TcpStream::connect(control_addr)
+            .await
+            .expect("control connection should open"),
+    );
+
+    assert_reply(&mut control, "220").await;
+    command(&mut control, "USER wrong").await;
+    assert_reply(&mut control, "530").await;
+    command(&mut control, "PASV").await;
+    assert_reply(&mut control, "530").await;
+    command(&mut control, "QUIT").await;
+    assert_reply(&mut control, "221").await;
+
+    let _ = shutdown_tx.send(());
+    server_task
+        .await
+        .expect("server task should join")
+        .expect("server should stop cleanly");
 }
 
 async fn command(control: &mut BufReader<tokio::net::TcpStream>, line: &str) {

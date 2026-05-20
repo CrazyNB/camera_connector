@@ -11,6 +11,7 @@ pub(crate) const CONNECTED_DEVICES_FILENAME: &str = "connected-devices.json";
 pub struct ConnectedDevice {
     pub remote_addr: String,
     pub source_name: Option<String>,
+    pub username: Option<String>,
     pub first_seen_at_ms: i64,
     pub last_seen_at_ms: i64,
     pub last_disconnected_at_ms: Option<i64>,
@@ -28,6 +29,7 @@ pub fn record_device_connected(
     remote_addr: impl AsRef<str>,
     remote_port: Option<u16>,
     source_name: Option<&str>,
+    username: Option<&str>,
 ) -> Result<()> {
     let output_dir = output_dir.as_ref();
     let remote_addr = remote_addr.as_ref();
@@ -45,10 +47,14 @@ pub fn record_device_connected(
         if let Some(source_name) = source_name {
             device.source_name = Some(source_name.to_string());
         }
+        if let Some(username) = username {
+            device.username = Some(username.to_string());
+        }
     } else {
         devices.push(ConnectedDevice {
             remote_addr: remote_addr.to_string(),
             source_name: source_name.map(ToOwned::to_owned),
+            username: username.map(ToOwned::to_owned),
             first_seen_at_ms: now,
             last_seen_at_ms: now,
             last_disconnected_at_ms: None,
@@ -79,6 +85,33 @@ pub fn record_device_disconnected(
         device.last_seen_at_ms = now;
         if !device.online {
             device.last_disconnected_at_ms = Some(now);
+        }
+    }
+
+    write_connected_devices(output_dir, &devices)
+}
+
+pub fn record_device_authenticated(
+    output_dir: impl AsRef<Path>,
+    remote_addr: impl AsRef<str>,
+    source_name: Option<&str>,
+    username: Option<&str>,
+) -> Result<()> {
+    let output_dir = output_dir.as_ref();
+    let remote_addr = remote_addr.as_ref();
+    let now = current_time_ms();
+    let mut devices = read_connected_devices(output_dir)?;
+
+    if let Some(device) = devices
+        .iter_mut()
+        .find(|device| device.remote_addr == remote_addr)
+    {
+        device.last_seen_at_ms = now;
+        if let Some(source_name) = source_name {
+            device.source_name = Some(source_name.to_string());
+        }
+        if let Some(username) = username {
+            device.username = Some(username.to_string());
         }
     }
 

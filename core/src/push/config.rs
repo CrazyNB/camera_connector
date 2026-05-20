@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -37,6 +36,34 @@ impl std::fmt::Display for PushProtocol {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiverAccount {
+    pub username: String,
+    pub password: Option<String>,
+    pub device_name: String,
+    pub remote_addrs: Vec<String>,
+}
+
+impl ReceiverAccount {
+    pub fn new(
+        username: impl Into<String>,
+        password: Option<impl Into<String>>,
+        device_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            username: username.into(),
+            password: password.map(Into::into),
+            device_name: device_name.into(),
+            remote_addrs: Vec::new(),
+        }
+    }
+
+    pub fn with_remote_addr(mut self, remote_addr: impl Into<String>) -> Self {
+        self.remote_addrs.push(remote_addr.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushReceiverConfig {
     pub protocol: PushProtocol,
     pub bind_host: String,
@@ -46,7 +73,7 @@ pub struct PushReceiverConfig {
     pub password: Option<String>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
-    pub source_aliases: BTreeMap<String, String>,
+    pub accounts: Vec<ReceiverAccount>,
 }
 
 impl PushReceiverConfig {
@@ -65,7 +92,7 @@ impl PushReceiverConfig {
             password: None,
             advertised_host: None,
             source_name: None,
-            source_aliases: BTreeMap::new(),
+            accounts: Vec::new(),
         }
     }
 
@@ -89,19 +116,32 @@ impl PushReceiverConfig {
         self
     }
 
-    pub fn with_source_alias(
-        mut self,
-        remote_addr: impl Into<String>,
-        source_name: impl Into<String>,
-    ) -> Self {
-        self.source_aliases
-            .insert(remote_addr.into(), source_name.into());
+    pub fn with_account(mut self, account: ReceiverAccount) -> Self {
+        self.accounts.push(account);
         self
     }
 
     pub fn resolved_source_name(&self, remote_addr: Option<&str>) -> Option<String> {
-        remote_addr
-            .and_then(|addr| self.source_aliases.get(addr).cloned())
-            .or_else(|| self.source_name.clone())
+        if let Some(remote_addr) = remote_addr {
+            if let Some(account) = self.account_for_remote_addr(remote_addr) {
+                return Some(account.device_name.clone());
+            }
+        }
+        self.source_name.clone()
+    }
+
+    pub fn account_for_username(&self, username: &str) -> Option<&ReceiverAccount> {
+        self.accounts
+            .iter()
+            .find(|account| account.username == username)
+    }
+
+    pub fn account_for_remote_addr(&self, remote_addr: &str) -> Option<&ReceiverAccount> {
+        self.accounts.iter().find(|account| {
+            account
+                .remote_addrs
+                .iter()
+                .any(|configured| configured == remote_addr)
+        })
     }
 }

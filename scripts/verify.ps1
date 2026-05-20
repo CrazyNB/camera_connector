@@ -39,17 +39,17 @@ New-Item -ItemType Directory -Force -Path $pushOutput | Out-Null
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
 
-& (Join-Path $root "target\debug\camera-connector.exe") source-alias --config $configPath set --ip "192.168.137.56" --name "Verify Camera"
-if ($LASTEXITCODE -ne 0) { throw "source-alias set smoke failed" }
+& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera" --ip "192.168.137.56"
+if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
 
-$aliasList = & (Join-Path $root "target\debug\camera-connector.exe") source-alias --config $configPath list
-if ($LASTEXITCODE -ne 0) { throw "source-alias list smoke failed" }
-if (($aliasList | Where-Object { $_ -like "*192.168.137.56*Verify Camera*" }).Count -lt 1) {
-    throw "source-alias list did not include Verify Camera"
+$accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
+if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }
+if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*192.168.137.56*" }).Count -lt 1) {
+    throw "account list did not include Verify Camera"
 }
-Write-Output $aliasList
+Write-Output $accountList
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"

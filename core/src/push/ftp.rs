@@ -7,8 +7,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    append_transfer_record, record_device_connected, record_device_disconnected, ImporterError,
-    LocalFileSink, PushProtocol, PushReceiverConfig, Result, TransferRecord, TransferStatus,
+    append_transfer_record, record_device_authenticated, record_device_connected,
+    record_device_disconnected, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig,
+    ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
@@ -74,6 +75,7 @@ impl FtpPushServer {
 struct ControlState {
     authenticated: bool,
     pending_user: Option<String>,
+    authenticated_account: Option<ReceiverAccount>,
     cwd: String,
     passive_listener: Option<TcpListener>,
 }
@@ -81,8 +83,11 @@ struct ControlState {
 impl ControlState {
     fn new(config: &PushReceiverConfig) -> Self {
         Self {
-            authenticated: config.username.is_none() && config.password.is_none(),
+            authenticated: config.accounts.is_empty()
+                && config.username.is_none()
+                && config.password.is_none(),
             pending_user: None,
+            authenticated_account: None,
             cwd: "/".to_string(),
             passive_listener: None,
         }
@@ -103,6 +108,7 @@ async fn handle_control_connection(
             remote_addr,
             peer_addr.map(|addr| addr.port()),
             source_name.as_deref(),
+            None,
         )?;
     }
     let result: Result<()> = async {
@@ -121,8 +127,26 @@ async fn handle_control_connection(
             let line = line.trim_end_matches(['\r', '\n']);
             let (command, argument) = parse_command(line);
             match command.as_str() {
-                "USER" => handle_user(&mut reader, &config, &mut state, argument).await?,
-                "PASS" => handle_pass(&mut reader, &config, &mut state, argument).await?,
+                "USER" => {
+                    handle_user(
+                        &mut reader,
+                        &config,
+                        &mut state,
+                        remote_addr.as_deref(),
+                        argument,
+                    )
+                    .await?
+                }
+                "PASS" => {
+                    handle_pass(
+                        &mut reader,
+                        &config,
+                        &mut state,
+                        remote_addr.as_deref(),
+                        argument,
+                    )
+                    .await?
+                }
                 "SYST" => reply(&mut reader, "215 UNIX Type: L8").await?,
                 "FEAT" => {
                     write_raw(
@@ -191,21 +215,47 @@ async fn handle_user(
     reader: &mut BufReader<TcpStream>,
     config: &PushReceiverConfig,
     state: &mut ControlState,
+    remote_addr: Option<&str>,
     username: &str,
 ) -> Result<()> {
-    if let Some(expected) = &config.username {
-        if username != expected {
+    if !config.accounts.is_empty() {
+        let Some(account) = config.account_for_username(username).cloned() else {
             reply(reader, "530 Invalid username").await?;
             return Ok(());
-        }
-    }
+        };
 
-    state.pending_user = Some(username.to_string());
-    if config.password.is_some() {
-        reply(reader, "331 Password required").await
+        state.pending_user = Some(username.to_string());
+        if account.password.is_some() {
+            state.authenticated_account = Some(account);
+            reply(reader, "331 Password required").await
+        } else {
+            state.authenticated = true;
+            state.authenticated_account = Some(account.clone());
+            if let Some(remote_addr) = remote_addr {
+                record_device_authenticated(
+                    &config.output_dir,
+                    remote_addr,
+                    Some(&account.device_name),
+                    Some(&account.username),
+                )?;
+            }
+            reply(reader, "230 Login successful").await
+        }
     } else {
-        state.authenticated = true;
-        reply(reader, "230 Login successful").await
+        if let Some(expected) = &config.username {
+            if username != expected {
+                reply(reader, "530 Invalid username").await?;
+                return Ok(());
+            }
+        }
+
+        state.pending_user = Some(username.to_string());
+        if config.password.is_some() {
+            reply(reader, "331 Password required").await
+        } else {
+            state.authenticated = true;
+            reply(reader, "230 Login successful").await
+        }
     }
 }
 
@@ -213,19 +263,45 @@ async fn handle_pass(
     reader: &mut BufReader<TcpStream>,
     config: &PushReceiverConfig,
     state: &mut ControlState,
+    remote_addr: Option<&str>,
     password: &str,
 ) -> Result<()> {
-    let password_ok = config
-        .password
-        .as_deref()
-        .map(|expected| expected == password)
-        .unwrap_or(true);
-
-    if state.pending_user.is_some() && password_ok {
-        state.authenticated = true;
-        reply(reader, "230 Login successful").await
+    if !config.accounts.is_empty() {
+        let Some(account) = state.authenticated_account.clone() else {
+            reply(reader, "530 Authentication failed").await?;
+            return Ok(());
+        };
+        if state.pending_user.as_deref() == Some(&account.username)
+            && account.password.as_deref() == Some(password)
+        {
+            state.authenticated = true;
+            if let Some(remote_addr) = remote_addr {
+                record_device_authenticated(
+                    &config.output_dir,
+                    remote_addr,
+                    Some(&account.device_name),
+                    Some(&account.username),
+                )?;
+            }
+            reply(reader, "230 Login successful").await
+        } else {
+            state.authenticated = false;
+            state.authenticated_account = None;
+            reply(reader, "530 Authentication failed").await
+        }
     } else {
-        reply(reader, "530 Authentication failed").await
+        let password_ok = config
+            .password
+            .as_deref()
+            .map(|expected| expected == password)
+            .unwrap_or(true);
+
+        if state.pending_user.is_some() && password_ok {
+            state.authenticated = true;
+            reply(reader, "230 Login successful").await
+        } else {
+            reply(reader, "530 Authentication failed").await
+        }
     }
 }
 
@@ -318,7 +394,11 @@ async fn handle_stor(
         .output_path
         .clone()
         .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
-    let source_name = config.resolved_source_name(remote_addr.as_deref());
+    let source_name = state
+        .authenticated_account
+        .as_ref()
+        .map(|account| account.device_name.clone())
+        .or_else(|| config.resolved_source_name(remote_addr.as_deref()));
     append_transfer_record(
         &config.output_dir,
         &TransferRecord {

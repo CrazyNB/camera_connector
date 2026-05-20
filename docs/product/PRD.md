@@ -63,8 +63,8 @@ P0:
 - Scan the receiver inbox as the product's import source.
 - Record a transfer log for filtering by transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
-- Let users configure source aliases that bind camera IP addresses to names, such as `192.168.137.56 -> Z5_2`.
-- Show current and recently connected devices from receiver metadata so aliases can be bound from a discovered device instead of typed from memory.
+- Let users configure camera accounts with FTP username, password, device name, and optional known IPs.
+- Show current and recently connected devices from receiver metadata so newly seen IPs can be bound to an existing account/device instead of typed from memory.
 - Record real-camera compatibility results.
 
 P1:
@@ -95,7 +95,7 @@ P2:
 | ID | Requirement | Priority | Acceptance |
 | --- | --- | --- | --- |
 | RX-001 | Start local FTP receiver | P0 | Receiver listens on configured host and port |
-| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, username, password status, output folder |
+| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, configured accounts, password status, output folder |
 | RX-003 | Accept passive FTP upload | P0 | A client can upload a file through `PASV` + `STOR` |
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Flat safe path handling | P0 | `/DCIM/100CANON/IMG_1001.CR3` lands as `IMG_1001.CR3`; traversal and unsafe filename characters cannot escape output folder |
@@ -105,8 +105,8 @@ P2:
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename/path, bytes, protocol, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
-| RX-012 | Source alias configuration | P0 | User can list, set, and remove IP-to-name aliases; receiver and transfer views apply aliases automatically |
-| RX-013 | Connected device view | P0 | Receiver records current/recent device IPs and online state; user can name a device from that list |
+| RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, device name, and bound IPs; receiver authenticates against these accounts |
+| RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; user can bind a discovered IP to an account/device |
 | RX-014 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
 | RX-015 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |

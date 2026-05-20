@@ -13,7 +13,7 @@ The app runs a local FTP receiver. The camera is configured with:
 - Host: the phone/computer IP address on the current network.
 - Port: default `2121` for development; production may use `21` when platform permissions allow it.
 - Mode: passive FTP.
-- Username/password: optional for local validation, configurable for real camera setup.
+- Username/password: configured through camera accounts. Each account has a login username, optional password, display device name, and optional known camera IPs.
 - Destination: local import folder managed by the app.
 
 The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat output folder as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.
@@ -92,23 +92,24 @@ The product uses this log for tag-style grouping and filters. Source name, origi
 
 For display, the UI builds a virtual path from metadata:
 
-- With a source alias or configured source name: `Z5_2/BB/DSC_2552.NEF`.
+- With a camera account device name: `Z5_2/BB/DSC_2552.NEF`.
 - Without a source name: `IP-056/BB/DSC_2552.NEF`, using the last IPv4 octet from `192.168.137.56`.
 
 This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
 
-Source aliases are user configuration. They map camera IP addresses to names, for example `192.168.137.56 = Z5_2`. The receiver applies this mapping when writing new transfer records, and the transfer-log view applies it when reading older records.
+Camera accounts are user configuration. They map FTP login credentials to a device name, and can optionally bind one or more camera IP addresses to the same account. The receiver authenticates `USER`/`PASS` against this table, applies the account device name to new transfer records, and lets the device view bind a newly discovered IP to an existing account.
 
 ## Connected Devices
 
 The receiver writes `connected-devices.json` in the output folder. It records current and recently seen FTP control connections:
 
 - `remote_addr` and last remote port.
+- authenticated FTP `username` when the device has logged in.
 - `online` and active connection count.
 - first seen, last seen, and last disconnected timestamps.
-- source name resolved from the alias configuration when available.
+- source name resolved from the authenticated account or account IP binding when available.
 
-This file powers the "connected devices" view and the "name this device" flow. It is receiver metadata, not an inbox asset.
+This file powers the "connected devices" view and the "bind this IP to an account/device" flow. It is receiver metadata, not an inbox asset.
 
 ## Real Camera Verification
 

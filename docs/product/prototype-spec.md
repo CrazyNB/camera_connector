@@ -84,8 +84,8 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
-- Source aliases: bind camera IP addresses to user-facing camera names.
-- Connected devices: show online/recent device IPs and let the user create or edit a source alias from the selected device.
+- Camera accounts: manage FTP username, password status, device name, and bound IPs.
+- Connected devices: show online/recent device IPs and login usernames, then let the user bind a discovered IP to an existing account/device.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.
