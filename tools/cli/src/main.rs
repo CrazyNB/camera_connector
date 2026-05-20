@@ -1,16 +1,16 @@
 use std::fs;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
 use nikon_importer_core::{
-    scanner::scan_subnet_for_ptp, CameraEndpoint, EndpointSource, LocalFileSink, NikonCameraClient,
+    FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset,
     Result,
 };
-use tokio::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(name = "nikon-importer")]
-#[command(about = "Wireless import validation CLI for Nikon PTP/IP cameras")]
+#[command(about = "Push-mode wireless import receiver for Nikon cameras")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -19,43 +19,42 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Version,
-    Info(ConnectionArgs),
-    List(ConnectionArgs),
-    Scan {
+    ReceiveFile {
         #[arg(long)]
-        subnet: String,
-        #[arg(long, default_value_t = 15740)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value = "manual")]
+        source: String,
+    },
+    ReceiverConfig {
+        #[arg(long, default_value = "ftp")]
+        protocol: String,
+        #[arg(long, default_value = "0.0.0.0")]
+        bind_host: String,
+        #[arg(long, default_value_t = 2121)]
         port: u16,
-        #[arg(long, default_value_t = 500)]
-        timeout_ms: u64,
-        #[arg(long, default_value_t = 64)]
-        concurrency: usize,
-    },
-    Thumb {
-        #[command(flatten)]
-        connection: ConnectionArgs,
-        #[arg(long)]
-        handle: u32,
         #[arg(long)]
         output: PathBuf,
-    },
-    Pull {
-        #[command(flatten)]
-        connection: ConnectionArgs,
         #[arg(long)]
-        handle: u32,
+        username: Option<String>,
+        #[arg(long)]
+        advertised_host: Option<String>,
+    },
+    ServeFtp {
+        #[arg(long, default_value = "0.0.0.0")]
+        bind_host: String,
+        #[arg(long, default_value_t = 2121)]
+        port: u16,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        advertised_host: Option<String>,
     },
-    Endpoint(ConnectionArgs),
-}
-
-#[derive(Debug, Parser, Clone)]
-struct ConnectionArgs {
-    #[arg(long)]
-    host: String,
-    #[arg(long, default_value_t = 15740)]
-    port: u16,
 }
 
 #[tokio::main]
@@ -66,89 +65,127 @@ async fn main() -> Result<()> {
         Some(Command::Version) | None => {
             println!("nikon-importer {}", env!("CARGO_PKG_VERSION"));
         }
-        Some(Command::Endpoint(connection)) => {
-            let endpoint = endpoint(connection);
-            println!("{}", endpoint.socket_addr());
-        }
-        Some(Command::Info(connection)) => {
-            let mut client = NikonCameraClient::connect(endpoint(connection)).await?;
-            let info = client.get_camera_info().await?;
-            println!("manufacturer: {}", info.manufacturer);
-            println!("model: {}", info.model);
-            println!(
-                "firmware: {}",
-                info.firmware_version.as_deref().unwrap_or("unknown")
+        Some(Command::ReceiveFile {
+            input,
+            output,
+            source,
+        }) => {
+            let source = parse_source(&source)?;
+            let filename = input
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or(nikon_importer_core::ImporterError::InvalidUploadPath)?;
+            let bytes = fs::read(&input)?;
+            let progress = LocalFileSink::new(output).write_complete(
+                format!("{source:?}:{filename}"),
+                filename,
+                &bytes,
+            )?;
+            let asset = ReceivedAsset::new(
+                progress.transfer_id,
+                progress.filename,
+                progress.bytes_written,
+                source,
             );
-            println!("supported_operations: {}", info.supported_operations.len());
-            let _ = client.close().await;
+            println!(
+                "received {}\t{:?}\t{} bytes",
+                asset.filename, asset.format, asset.size_bytes
+            );
         }
-        Some(Command::List(connection)) => {
-            let mut client = NikonCameraClient::connect(endpoint(connection)).await?;
-            for object in client.list_objects().await? {
-                println!(
-                    "{}\t{}\t{:?}\t{} bytes",
-                    object.handle, object.filename, object.format, object.size_bytes
-                );
-            }
-            let _ = client.close().await;
-        }
-        Some(Command::Scan {
-            subnet,
+        Some(Command::ReceiverConfig {
+            protocol,
+            bind_host,
             port,
-            timeout_ms,
-            concurrency,
+            output,
+            username,
+            advertised_host,
         }) => {
-            let endpoints = scan_subnet_for_ptp(
-                &subnet,
+            let protocol = PushProtocol::from_str(&protocol)?;
+            let config = build_config(
+                protocol,
+                bind_host,
                 port,
-                Duration::from_millis(timeout_ms),
-                concurrency,
-            )
-            .await?;
-            for endpoint in endpoints {
-                println!("{}", endpoint.socket_addr());
-            }
-        }
-        Some(Command::Thumb {
-            connection,
-            handle,
-            output,
-        }) => {
-            let mut client = NikonCameraClient::connect(endpoint(connection)).await?;
-            let bytes = client.get_thumbnail(handle).await?;
-            fs::write(&output, bytes)?;
-            println!("wrote {}", output.display());
-            let _ = client.close().await;
-        }
-        Some(Command::Pull {
-            connection,
-            handle,
-            output,
-        }) => {
-            let mut client = NikonCameraClient::connect(endpoint(connection)).await?;
-            let filename = client
-                .list_objects()
-                .await?
-                .into_iter()
-                .find(|object| object.handle == handle)
-                .map(|object| object.filename)
-                .unwrap_or_else(|| format!("object-{handle}.bin"));
-            let bytes = client.get_object(handle).await?;
-            let progress = LocalFileSink::new(output).write_complete(handle, &filename, &bytes)?;
-            println!(
-                "wrote {}",
-                progress
-                    .output_path
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| filename)
+                output,
+                username,
+                None,
+                advertised_host,
             );
-            let _ = client.close().await;
+            print_receiver_config(&config);
+        }
+        Some(Command::ServeFtp {
+            bind_host,
+            port,
+            output,
+            username,
+            password,
+            advertised_host,
+        }) => {
+            let config = build_config(
+                PushProtocol::Ftp,
+                bind_host,
+                port,
+                output,
+                username,
+                password,
+                advertised_host,
+            );
+            let server = FtpPushServer::bind(config.clone()).await?;
+            println!("ftp receiver listening on {}", server.local_addr());
+            print_receiver_config(&config);
+            server.run().await?;
         }
     }
+
     Ok(())
 }
 
-fn endpoint(connection: ConnectionArgs) -> CameraEndpoint {
-    CameraEndpoint::new(connection.host, connection.port, EndpointSource::Manual)
+fn build_config(
+    protocol: PushProtocol,
+    bind_host: String,
+    port: u16,
+    output: PathBuf,
+    username: Option<String>,
+    password: Option<String>,
+    advertised_host: Option<String>,
+) -> PushReceiverConfig {
+    let mut config = PushReceiverConfig::new(protocol, bind_host, port, output);
+    config.username = username;
+    config.password = password;
+    config.advertised_host = advertised_host;
+    config
+}
+
+fn print_receiver_config(config: &PushReceiverConfig) {
+    println!("protocol: {}", config.protocol);
+    println!(
+        "host: {}",
+        config
+            .advertised_host
+            .as_deref()
+            .unwrap_or(&config.bind_host)
+    );
+    println!("port: {}", config.port);
+    println!("output: {}", config.output_dir.display());
+    println!(
+        "username: {}",
+        config.username.as_deref().unwrap_or("anonymous")
+    );
+    println!(
+        "password: {}",
+        if config.password.is_some() {
+            "configured"
+        } else {
+            "not required"
+        }
+    );
+}
+
+fn parse_source(value: &str) -> Result<ImportSource> {
+    match value.to_ascii_lowercase().as_str() {
+        "ftp" | "ftp-push" => Ok(ImportSource::FtpPush),
+        "sftp" | "sftp-push" => Ok(ImportSource::SftpPush),
+        "ftps" | "ftps-push" => Ok(ImportSource::FtpsPush),
+        "manual" | "manual-drop" => Ok(ImportSource::ManualDrop),
+        _ => Err(nikon_importer_core::ImporterError::UnsupportedProtocol),
+    }
 }

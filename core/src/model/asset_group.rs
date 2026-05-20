@@ -2,44 +2,41 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::{CameraObject, ObjectFormat};
+use super::{ObjectFormat, ReceivedAsset};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CameraAssetGroup {
+pub struct ReceivedAssetGroup {
     pub group_key: String,
-    pub primary: CameraObject,
-    pub jpeg: Option<CameraObject>,
-    pub raw: Option<CameraObject>,
-    pub video: Option<CameraObject>,
+    pub primary: ReceivedAsset,
+    pub jpeg: Option<ReceivedAsset>,
+    pub raw: Option<ReceivedAsset>,
+    pub video: Option<ReceivedAsset>,
 }
 
-pub fn group_camera_objects(objects: Vec<CameraObject>) -> Vec<CameraAssetGroup> {
-    let mut grouped: BTreeMap<String, Vec<CameraObject>> = BTreeMap::new();
+pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGroup> {
+    let mut grouped: BTreeMap<String, Vec<ReceivedAsset>> = BTreeMap::new();
 
-    for object in objects {
-        let group_key = object
+    for asset in assets {
+        let group_key = asset
             .group_key
             .clone()
-            .unwrap_or_else(|| format!("HANDLE_{}", object.handle));
-        grouped.entry(group_key).or_default().push(object);
+            .unwrap_or_else(|| asset.id.to_ascii_uppercase());
+        grouped.entry(group_key).or_default().push(asset);
     }
 
     let mut groups: Vec<_> = grouped
         .into_iter()
         .map(|(group_key, mut members)| {
-            members.sort_by_key(|object| format_rank(object.format));
+            members.sort_by_key(|asset| format_rank(asset.format));
 
             let jpeg = members
                 .iter()
-                .find(|object| object.format == ObjectFormat::Jpeg)
+                .find(|asset| asset.format == ObjectFormat::Jpeg)
                 .cloned();
-            let raw = members
-                .iter()
-                .find(|object| object.format.is_raw())
-                .cloned();
+            let raw = members.iter().find(|asset| asset.format.is_raw()).cloned();
             let video = members
                 .iter()
-                .find(|object| object.format.is_video())
+                .find(|asset| asset.format.is_video())
                 .cloned();
             let primary = jpeg
                 .clone()
@@ -47,7 +44,7 @@ pub fn group_camera_objects(objects: Vec<CameraObject>) -> Vec<CameraAssetGroup>
                 .or_else(|| video.clone())
                 .unwrap_or_else(|| members[0].clone());
 
-            CameraAssetGroup {
+            ReceivedAssetGroup {
                 group_key,
                 primary,
                 jpeg,

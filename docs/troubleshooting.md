@@ -1,63 +1,57 @@
 # Troubleshooting
 
-## No Camera Found
+## Camera Cannot Connect To Receiver
 
 User-facing copy:
 
-> 没有发现相机。请确认相机已经连接到手机热点或同一个 Wi-Fi，然后重新扫描。
+> 相机没有连上接收服务。请确认本机和相机在同一个网络，并且接收服务正在运行。
 
 Checks:
 
-- Confirm the camera is awake.
-- Confirm Wi-Fi or Connect to PC mode is enabled on the camera.
-- Try the last successful IP if available.
-- Try manual IP entry.
-- Try camera AP mode with `192.168.1.1:15740`.
+- Confirm the receiver shows the correct local IP and port.
+- Confirm Windows Firewall allows inbound TCP on the chosen FTP port.
+- Use port `2121` for development if port `21` is blocked or requires administrator privileges.
+- Confirm the camera is using FTP push/upload mode, not PTP/IP Connect to PC.
+- Confirm passive FTP is enabled on the camera when available.
 
-## Connection Timeout
+## Login Failed
 
 User-facing copy:
 
-> 连接超时。相机可能已经休眠，或当前网络无法访问相机。
+> 相机登录失败。请检查相机里保存的 FTP 用户名和密码。
 
 Checks:
 
-- Wake the camera.
-- Move the phone closer to the camera.
-- Confirm both devices are on the same network.
-- Reduce scan scope to the current subnet.
+- If no password is configured, use anonymous login.
+- If credentials are configured, update the camera profile to match the receiver.
+- Avoid special characters in the first real-camera test password.
 
-## Local Network Permission Denied
+## Upload Starts But File Does Not Appear
 
 User-facing copy:
 
-> 需要允许访问本地网络，App 才能发现和连接相机。
+> 已收到连接，但文件没有完成写入。请保持相机开启，并检查保存目录权限。
 
 Checks:
 
-- On iOS, ensure `NSLocalNetworkUsageDescription` is configured.
-- Ask the user to enable local network access in system settings.
+- Ensure the output folder exists or can be created.
+- Ensure the app can write to the output folder.
+- Check whether the camera sends nested folders and unusual filenames.
+- Confirm the final file is not left as `.tmp`.
 
-## Thumbnail Unavailable
+## Transfer Interrupted
 
 User-facing copy:
 
-> 这张照片无法读取缩略图，但仍然可以尝试下载原文件。
+> 传输中断。失败任务不会发布为最终文件，请在相机上重新发送。
 
 Checks:
 
-- Do not block the gallery.
-- Show a fallback file tile.
-- Allow original file download.
-
-## Download Interrupted
-
-User-facing copy:
-
-> 下载中断。请保持相机开启并靠近手机，然后重试。
-
-Checks:
-
-- Keep original download concurrency at `1`.
-- Delete or keep temporary partial files away from the published destination.
+- Keep receiver running in foreground for early validation.
+- Keep phone/computer close to the camera.
+- Prefer single-file or small-batch tests before large RAW batches.
 - Retry from the beginning until resume support is proven.
+
+## AP Mode
+
+AP mode keeps the original meaning: the camera creates Wi-Fi and the phone/computer joins it. This path is currently paused. Do not mix AP-mode validation with the FTP push receiver milestone unless we explicitly resume it.

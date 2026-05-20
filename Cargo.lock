@@ -256,32 +256,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "mock_camera"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "clap",
- "nikon_importer_core",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "nikon-importer-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
  "nikon_importer_core",
- "serde_json",
  "tokio",
- "tracing",
 ]
 
 [[package]]
 name = "nikon_importer_core"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "serde",
  "tempfile",
  "thiserror",

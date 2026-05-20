@@ -552,13 +552,13 @@
 <body>
   <aside class="brief">
     <h1>Nikon Wireless Importer</h1>
-    <p>低保真可点击原型。重点验证连接、相册浏览、RAW+JPEG 预览和下载队列，不覆盖完整视觉设计。</p>
-    <p>推荐路径：连接相机，然后进入相册，打开 RAW+JPG 文件，发起下载。</p>
+    <p>低保真可点击原型。重点验证接收服务、相机 FTP 设置、导入收件箱和传输记录，不覆盖完整视觉设计。</p>
+    <p>推荐路径：启动 FTP 接收服务，在相机里配置上传目标，然后查看已接收文件。</p>
     <div class="route-list" aria-label="Prototype routes">
-      <button class="active" data-route="connect">连接</button>
-      <button data-route="gallery">相机相册</button>
-      <button data-route="preview">文件预览</button>
-      <button data-route="downloads">下载队列</button>
+      <button class="active" data-route="connect">接收服务</button>
+      <button data-route="gallery">导入收件箱</button>
+      <button data-route="preview">文件详情</button>
+      <button data-route="downloads">传输记录</button>
       <button data-route="settings">设置</button>
     </div>
   </aside>
@@ -568,61 +568,61 @@
       <div id="connect" class="view">
         <header class="topbar">
           <div>
-            <h2>连接 Nikon 相机</h2>
-            <small>推荐使用手机热点模式</small>
+            <h2>启动接收服务</h2>
+            <small>优先使用 FTP Push</small>
           </div>
-          <span class="status amber">未连接</span>
+          <span class="status amber">未启动</span>
         </header>
         <div class="content">
           <section class="panel">
             <div class="panel-title">
-              <h3>选择连接方式</h3>
+              <h3>选择接收协议</h3>
               <span class="status blue">推荐</span>
             </div>
             <div class="method">
               <div>
-                <strong>手机热点</strong>
-                <span>手机开热点，相机连接热点，手机仍可用蜂窝网络。</span>
+                <strong>FTP</strong>
+                <span>先验证 Nikon 相机主动上传，接收端提供地址、端口和账号。</span>
               </div>
               <span class="status green">最佳</span>
             </div>
             <div class="method">
               <div>
-                <strong>同局域网</strong>
-                <span>相机和手机连接同一个 Wi-Fi，适合回家批量导片。</span>
+                <strong>SFTP</strong>
+                <span>后续接入 SSH 文件上传，复用同一套本地落盘和分组逻辑。</span>
               </div>
-              <button class="icon-button" title="选择同局域网">></button>
+              <button class="icon-button" title="选择 SFTP">></button>
             </div>
             <div class="method">
               <div>
-                <strong>相机 AP</strong>
-                <span>手机连接相机自己的 Wi-Fi，作为兼容兜底。</span>
+                <strong>FTPS</strong>
+                <span>等真实相机 TLS 行为确认后推进，当前作为兼容路线保留。</span>
               </div>
-              <button class="icon-button" title="选择相机 AP">></button>
+              <button class="icon-button" title="选择 FTPS">></button>
             </div>
           </section>
 
           <section class="panel">
             <div class="panel-title">
-              <h3>手动连接</h3>
-              <span class="status blue">15740</span>
+              <h3>相机填写信息</h3>
+              <span class="status blue">2121</span>
             </div>
-            <label for="ip">相机 IP</label>
-            <input id="ip" value="192.168.43.21" inputmode="decimal">
+            <label for="ip">接收端 IP</label>
+            <input id="ip" value="192.168.137.1" inputmode="decimal">
             <div class="button-row">
-              <button class="secondary" id="scanButton">扫描</button>
-              <button class="primary" data-route="gallery">连接</button>
+              <button class="secondary" id="copyButton">复制设置</button>
+              <button class="primary" data-route="gallery">启动服务</button>
             </div>
           </section>
 
-          <section class="notice" id="scanNotice">
-            没有发现相机时，请确认相机已经连接到手机热点，或者在相机菜单中开启 Connect to PC。
+          <section class="notice" id="copyNotice">
+            在相机网络菜单中选择 FTP 上传，把服务器地址填成本机 IP，端口填 2121，优先使用被动模式。
           </section>
         </div>
         <nav class="tabbar">
-          <button class="active" data-route="connect">连接</button>
-          <button data-route="gallery">相册</button>
-          <button data-route="downloads">下载</button>
+          <button class="active" data-route="connect">服务</button>
+          <button data-route="gallery">收件箱</button>
+          <button data-route="downloads">传输</button>
           <button data-route="settings">设置</button>
         </nav>
       </div>
@@ -630,8 +630,8 @@
       <div id="gallery" class="view hidden">
         <header class="topbar">
           <div>
-            <h2>相机相册</h2>
-            <small>Nikon Zf · 手机热点 · 126 个文件</small>
+            <h2>导入收件箱</h2>
+            <small>Nikon Z5_2 · FTP Push · 已接收 126 个文件</small>
           </div>
           <button class="icon-button" title="刷新">R</button>
         </header>
@@ -639,9 +639,9 @@
           <div class="camera-summary">
             <div>
               <strong>最近拍摄</strong>
-              <span>按拍摄时间倒序，首屏缩略图加载中</span>
+              <span>按接收时间倒序，RAW+JPEG 自动合并</span>
             </div>
-            <span class="status green">已连接</span>
+            <span class="status green">接收中</span>
           </div>
           <div class="segmented">
             <button class="active">全部</button>
@@ -718,12 +718,12 @@
             <strong>已选 2 个文件</strong>
             <span>预计 48.2 MB</span>
           </div>
-          <button data-route="downloads">下载</button>
+          <button data-route="downloads">查看</button>
         </div>
         <nav class="tabbar">
-          <button data-route="connect">连接</button>
-          <button class="active" data-route="gallery">相册</button>
-          <button data-route="downloads">下载</button>
+          <button data-route="connect">服务</button>
+          <button class="active" data-route="gallery">收件箱</button>
+          <button data-route="downloads">传输</button>
           <button data-route="settings">设置</button>
         </nav>
       </div>
@@ -732,10 +732,10 @@
         <header class="topbar">
           <button class="icon-button" title="返回相册" data-route="gallery"><</button>
           <div>
-            <h2>文件预览</h2>
+            <h2>文件详情</h2>
             <small>RAW+JPEG 组合</small>
           </div>
-          <span class="status blue">可下载</span>
+          <span class="status blue">已接收</span>
         </header>
         <div class="content">
           <div class="preview-hero"></div>
@@ -751,10 +751,10 @@
           </section>
           <section class="panel">
             <div class="button-row">
-              <button class="secondary" data-route="downloads">下载 JPEG</button>
-              <button class="secondary" data-route="downloads">下载 RAW</button>
+              <button class="secondary" data-route="downloads">打开 JPEG</button>
+              <button class="secondary" data-route="downloads">打开 RAW</button>
             </div>
-            <button class="primary" style="width: 100%; margin-top: 10px;" data-route="downloads">下载整组</button>
+            <button class="primary" style="width: 100%; margin-top: 10px;" data-route="downloads">查看传输记录</button>
           </section>
         </div>
       </div>
@@ -762,8 +762,8 @@
       <div id="downloads" class="view hidden">
         <header class="topbar">
           <div>
-            <h2>下载队列</h2>
-            <small>原图并发 1，优先稳定</small>
+            <h2>传输记录</h2>
+            <small>相机主动上传，接收端原子发布</small>
           </div>
           <span class="status blue">2/5</span>
         </header>
@@ -771,7 +771,7 @@
           <section class="panel">
             <div class="panel-title">
               <h3>当前任务</h3>
-              <span class="status blue">下载中</span>
+              <span class="status blue">接收中</span>
             </div>
             <strong>DSC_1234.NEF</strong>
             <div class="progress"><b style="width: 42%"></b></div>
@@ -788,7 +788,7 @@
             <div class="queue-item">
               <div>
                 <strong>DSC_1234.NEF</strong>
-                <span>下载中 · 39.5 MB</span>
+            <span>接收中 · 39.5 MB</span>
               </div>
               <span class="status blue">42%</span>
             </div>
@@ -808,13 +808,13 @@
             </div>
           </section>
           <section class="notice">
-            下载中断时，请保持相机开启并靠近手机。失败任务不会发布为最终文件。
+            传输中断时，请在相机上重新发送。失败任务不会发布为最终文件。
           </section>
         </div>
         <nav class="tabbar">
-          <button data-route="connect">连接</button>
-          <button data-route="gallery">相册</button>
-          <button class="active" data-route="downloads">下载</button>
+          <button data-route="connect">服务</button>
+          <button data-route="gallery">收件箱</button>
+          <button class="active" data-route="downloads">传输</button>
           <button data-route="settings">设置</button>
         </nav>
       </div>
@@ -823,7 +823,7 @@
         <header class="topbar">
           <div>
             <h2>设置</h2>
-            <small>保存位置、隐私和诊断</small>
+            <small>接收目录、凭据和诊断</small>
           </div>
           <span class="status green">本地</span>
         </header>
@@ -835,20 +835,20 @@
             <div class="kv"><span>视频</span><strong>Movies/NikonImporter</strong></div>
           </section>
           <section class="panel">
-            <div class="panel-title"><h3>当前相机能力</h3></div>
-            <div class="kv"><span>型号</span><strong>Nikon Zf</strong></div>
-            <div class="kv"><span>缩略图</span><strong>支持</strong></div>
-            <div class="kv"><span>RAW 下载</span><strong>支持</strong></div>
-            <div class="kv"><span>视频下载</span><strong>待验证</strong></div>
+            <div class="panel-title"><h3>接收协议</h3></div>
+            <div class="kv"><span>FTP</span><strong>优先验证</strong></div>
+            <div class="kv"><span>SFTP</span><strong>待接入</strong></div>
+            <div class="kv"><span>FTPS</span><strong>待验证</strong></div>
+            <div class="kv"><span>AP 模式</span><strong>保留原义，暂缓</strong></div>
           </section>
           <section class="notice">
             照片只在你的设备和相机之间传输。诊断日志不会记录图片内容、完整 EXIF 或精确 GPS 坐标。
           </section>
         </div>
         <nav class="tabbar">
-          <button data-route="connect">连接</button>
-          <button data-route="gallery">相册</button>
-          <button data-route="downloads">下载</button>
+          <button data-route="connect">服务</button>
+          <button data-route="gallery">收件箱</button>
+          <button data-route="downloads">传输</button>
           <button class="active" data-route="settings">设置</button>
         </nav>
       </div>
@@ -873,9 +873,9 @@
       button.addEventListener("click", () => show(button.dataset.route));
     });
 
-    document.getElementById("scanButton").addEventListener("click", () => {
-      const notice = document.getElementById("scanNotice");
-      notice.textContent = "扫描到 Nikon Zf · 192.168.43.21。也可以直接点击连接进入相册。";
+    document.getElementById("copyButton").addEventListener("click", () => {
+      const notice = document.getElementById("copyNotice");
+      notice.textContent = "已复制 FTP 设置：服务器 192.168.137.1，端口 2121，被动模式，匿名登录。";
     });
   </script>
 </body>

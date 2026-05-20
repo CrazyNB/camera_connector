@@ -28,26 +28,28 @@ The script runs:
 - `cargo clippy --workspace -- -D warnings`
 - `cargo test --workspace`
 - `cargo build --workspace`
-- mock camera CLI smoke test:
-  - `scan`
-  - `info`
-  - `list`
-  - `thumb`
-  - `pull`
+- Push-mode CLI smoke test:
+  - `receiver-config`
+  - `receive-file`
 
-Smoke outputs are written under `target/mock-output`.
+Smoke outputs are written under `target/push-output`.
 
-## Mock Camera
+## Manual FTP Receiver
 
-Manual mock run:
+Start the development FTP receiver:
 
 ```powershell
-target\debug\mock-camera.exe --host 127.0.0.1 --port 15740
+target\debug\nikon-importer.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\NikonImporter
 ```
 
-In another terminal:
+Print camera-facing settings without starting the server:
 
 ```powershell
-target\debug\nikon-importer.exe info --host 127.0.0.1 --port 15740
-target\debug\nikon-importer.exe list --host 127.0.0.1 --port 15740
+target\debug\nikon-importer.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\NikonImporter
+```
+
+Validate local ingest without a camera:
+
+```powershell
+target\debug\nikon-importer.exe receive-file --input C:\path\to\DSC_1234.NEF --output C:\Users\hxn\Pictures\NikonImporter --source ftp
 ```

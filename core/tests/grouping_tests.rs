@@ -1,11 +1,11 @@
-use nikon_importer_core::{group_camera_objects, CameraObject, ObjectFormat};
+use nikon_importer_core::{group_received_assets, ImportSource, ObjectFormat, ReceivedAsset};
 
 #[test]
 fn groups_raw_and_jpeg_by_filename_stem() {
-    let jpeg = CameraObject::new(1, 1, "DSC_1234.JPG", 8_700_000);
-    let raw = CameraObject::new(2, 1, "DSC_1234.NEF", 39_500_000);
+    let jpeg = ReceivedAsset::new("ftp-1", "DSC_1234.JPG", 8_700_000, ImportSource::FtpPush);
+    let raw = ReceivedAsset::new("ftp-2", "DSC_1234.NEF", 39_500_000, ImportSource::FtpPush);
 
-    let groups = group_camera_objects(vec![raw, jpeg]);
+    let groups = group_received_assets(vec![raw, jpeg]);
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].group_key, "DSC_1234");
@@ -17,9 +17,9 @@ fn groups_raw_and_jpeg_by_filename_stem() {
 
 #[test]
 fn standalone_video_remains_single_group() {
-    let video = CameraObject::new(3, 1, "DSC_1236.MOV", 212_000_000);
+    let video = ReceivedAsset::new("ftp-3", "DSC_1236.MOV", 212_000_000, ImportSource::FtpPush);
 
-    let groups = group_camera_objects(vec![video]);
+    let groups = group_received_assets(vec![video]);
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].group_key, "DSC_1236");
@@ -29,10 +29,10 @@ fn standalone_video_remains_single_group() {
 
 #[test]
 fn grouping_is_case_insensitive_for_filename_stem() {
-    let jpeg = CameraObject::new(4, 1, "dsc_1237.jpg", 8_100_000);
-    let raw = CameraObject::new(5, 1, "DSC_1237.NEF", 40_000_000);
+    let jpeg = ReceivedAsset::new("ftp-4", "dsc_1237.jpg", 8_100_000, ImportSource::FtpPush);
+    let raw = ReceivedAsset::new("ftp-5", "DSC_1237.NEF", 40_000_000, ImportSource::FtpPush);
 
-    let groups = group_camera_objects(vec![jpeg, raw]);
+    let groups = group_received_assets(vec![jpeg, raw]);
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].group_key, "DSC_1237");
