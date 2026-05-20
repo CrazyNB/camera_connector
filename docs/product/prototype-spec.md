@@ -58,6 +58,7 @@ Content:
 - File format, size, received time.
 - Format tabs for all/JPG/RAW/video.
 - Tag-style filters for source name, original path, transfer id, and remote IP.
+- Virtual display names such as `Z5_2/BB/DSC_2552.NEF`; fall back to `IP-056/...` when no source name is configured.
 - Failed/interrupted transfer state.
 - Duplicate uploads shown as numbered files, not silent overwrites.
 - No local subfolders from camera-side FTP upload paths.

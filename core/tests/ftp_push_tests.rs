@@ -10,7 +10,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_source_name("Studio A");
+        .with_source_name("Fallback Camera")
+        .with_source_alias("127.0.0.1", "Studio A");
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -73,6 +74,10 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].source_name.as_deref(), Some("Studio A"));
     assert_eq!(records[0].original_path, "DCIM/100CANON/IMG_4321.CR3");
+    assert_eq!(
+        records[0].virtual_display_path(None),
+        "Studio A/DCIM/100CANON/IMG_4321.CR3"
+    );
     assert_eq!(records[0].final_filename, "IMG_4321.CR3");
     assert_eq!(records[0].size_bytes, 5);
     assert_eq!(records[0].status, TransferStatus::Completed);

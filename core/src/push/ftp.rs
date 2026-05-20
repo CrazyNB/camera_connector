@@ -294,6 +294,7 @@ async fn handle_stor(
         .output_path
         .clone()
         .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
+    let source_name = config.resolved_source_name(remote_addr.as_deref());
     append_transfer_record(
         &config.output_dir,
         &TransferRecord {
@@ -305,7 +306,7 @@ async fn handle_stor(
             final_path,
             size_bytes: progress.bytes_written,
             remote_addr,
-            source_name: config.source_name.clone(),
+            source_name,
             started_at_ms,
             completed_at_ms: Some(current_time_ms()),
             error: None,

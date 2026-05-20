@@ -25,3 +25,52 @@ fn appends_and_reads_transfer_log_records() {
     let records = read_transfer_log(temp_dir.path()).expect("records should read");
     assert_eq!(records, vec![record]);
 }
+
+#[test]
+fn builds_virtual_display_path_from_source_and_original_path() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let record = TransferRecord {
+        transfer_id: "ftp:1".to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: "BB/DSC_2552.NEF".to_string(),
+        final_filename: "DSC_2552.NEF".to_string(),
+        final_path: temp_dir.path().join("DSC_2552.NEF"),
+        size_bytes: 42,
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: Some("Z5_2".to_string()),
+        started_at_ms: 10,
+        completed_at_ms: Some(20),
+        error: None,
+    };
+
+    assert_eq!(record.virtual_display_path(None), "Z5_2/BB/DSC_2552.NEF");
+    assert_eq!(
+        record.virtual_display_path(Some("Studio Camera")),
+        "Studio Camera/BB/DSC_2552.NEF"
+    );
+}
+
+#[test]
+fn falls_back_to_last_ip_octet_for_virtual_display_path() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let record = TransferRecord {
+        transfer_id: "ftp:1".to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: "BB/DSC_2552.NEF".to_string(),
+        final_filename: "DSC_2552 (1).NEF".to_string(),
+        final_path: temp_dir.path().join("DSC_2552 (1).NEF"),
+        size_bytes: 42,
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: None,
+        started_at_ms: 10,
+        completed_at_ms: Some(20),
+        error: None,
+    };
+
+    assert_eq!(
+        record.virtual_display_path(None),
+        "IP-056/BB/DSC_2552 (1).NEF"
+    );
+}

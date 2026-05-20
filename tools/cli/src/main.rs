@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -45,6 +46,8 @@ enum Command {
         advertised_host: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
+        #[arg(long = "source-alias")]
+        source_aliases: Vec<String>,
     },
     ServeFtp {
         #[arg(long, default_value = "0.0.0.0")]
@@ -61,6 +64,8 @@ enum Command {
         advertised_host: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
+        #[arg(long = "source-alias")]
+        source_aliases: Vec<String>,
     },
     Inbox {
         #[arg(long)]
@@ -81,6 +86,8 @@ enum Command {
         source_name: Option<String>,
         #[arg(long)]
         remote_addr: Option<String>,
+        #[arg(long = "source-alias")]
+        source_aliases: Vec<String>,
     },
 }
 
@@ -93,6 +100,7 @@ struct ConfigArgs {
     password: Option<String>,
     advertised_host: Option<String>,
     source_name: Option<String>,
+    source_aliases: Vec<String>,
 }
 
 #[tokio::main]
@@ -165,6 +173,7 @@ async fn main() -> Result<()> {
             username,
             advertised_host,
             source_name,
+            source_aliases,
         }) => {
             let protocol = PushProtocol::from_str(&protocol)?;
             let config = build_config(ConfigArgs {
@@ -176,7 +185,8 @@ async fn main() -> Result<()> {
                 password: None,
                 advertised_host,
                 source_name,
-            });
+                source_aliases,
+            })?;
             print_receiver_config(&config);
         }
         Some(Command::ServeFtp {
@@ -187,6 +197,7 @@ async fn main() -> Result<()> {
             password,
             advertised_host,
             source_name,
+            source_aliases,
         }) => {
             let config = build_config(ConfigArgs {
                 protocol: PushProtocol::Ftp,
@@ -197,7 +208,8 @@ async fn main() -> Result<()> {
                 password,
                 advertised_host,
                 source_name,
-            });
+                source_aliases,
+            })?;
             let server = FtpPushServer::bind(config.clone()).await?;
             println!("ftp receiver listening on {}", server.local_addr());
             print_receiver_config(&config);
@@ -243,13 +255,18 @@ async fn main() -> Result<()> {
             final_filename,
             source_name,
             remote_addr,
+            source_aliases,
         }) => {
+            let source_aliases = parse_source_aliases(&source_aliases)?;
             for record in read_transfer_log(path)?
                 .into_iter()
                 .filter(|record| {
                     source_name
                         .as_ref()
-                        .map(|expected| record.source_name.as_ref() == Some(expected))
+                        .map(|expected| {
+                            record_display_source(record, &source_aliases).as_ref()
+                                == Some(expected)
+                        })
                         .unwrap_or(true)
                 })
                 .filter(|record| {
@@ -288,14 +305,19 @@ async fn main() -> Result<()> {
                 })
             {
                 println!(
-                    "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}",
+                    "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}\tdisplay={}",
                     record.transfer_id,
                     record.status,
                     record.final_filename,
                     record.original_path,
                     record.size_bytes,
                     record.remote_addr.as_deref().unwrap_or("-"),
-                    record.source_name.as_deref().unwrap_or("-")
+                    record_display_source(&record, &source_aliases)
+                        .as_deref()
+                        .unwrap_or("-"),
+                    record.virtual_display_path(
+                        record_display_source(&record, &source_aliases).as_deref()
+                    )
                 );
             }
         }
@@ -304,13 +326,14 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_config(args: ConfigArgs) -> PushReceiverConfig {
+fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
     let mut config = PushReceiverConfig::new(args.protocol, args.bind_host, args.port, args.output);
     config.username = args.username;
     config.password = args.password;
     config.advertised_host = args.advertised_host;
     config.source_name = args.source_name;
-    config
+    config.source_aliases = parse_source_aliases(&args.source_aliases)?;
+    Ok(config)
 }
 
 fn print_receiver_config(config: &PushReceiverConfig) {
@@ -340,6 +363,17 @@ fn print_receiver_config(config: &PushReceiverConfig) {
         "source_name: {}",
         config.source_name.as_deref().unwrap_or("-")
     );
+    if config.source_aliases.is_empty() {
+        println!("source_aliases: -");
+    } else {
+        let aliases = config
+            .source_aliases
+            .iter()
+            .map(|(remote_addr, source_name)| format!("{remote_addr}={source_name}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("source_aliases: {aliases}");
+    }
 }
 
 fn parse_source(value: &str) -> Result<ImportSource> {
@@ -352,12 +386,71 @@ fn parse_source(value: &str) -> Result<ImportSource> {
     }
 }
 
+fn parse_source_aliases(values: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut aliases = BTreeMap::new();
+    for alias in values {
+        let (remote_addr, source_name) = alias.split_once('=').ok_or_else(|| {
+            camera_connector_core::ImporterError::internal(format!(
+                "invalid source alias '{alias}', expected IP=Name"
+            ))
+        })?;
+        aliases.insert(
+            remote_addr.trim().to_string(),
+            source_name.trim().to_string(),
+        );
+    }
+    Ok(aliases)
+}
+
+fn record_display_source(
+    record: &TransferRecord,
+    source_aliases: &BTreeMap<String, String>,
+) -> Option<String> {
+    record
+        .remote_addr
+        .as_deref()
+        .and_then(|remote_addr| source_aliases.get(remote_addr).cloned())
+        .or_else(|| record.source_name.clone())
+}
+
 fn source_protocol_label(source: ImportSource) -> &'static str {
     match source {
         ImportSource::FtpPush => "ftp",
         ImportSource::SftpPush => "sftp",
         ImportSource::FtpsPush => "ftps",
         ImportSource::ManualDrop => "manual",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_source_alias_applies_to_existing_transfer_record() {
+        let aliases =
+            parse_source_aliases(&["192.168.137.56=Z5_2".to_string()]).expect("alias parses");
+        let record = TransferRecord {
+            transfer_id: "ftp:1".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "BB/DSC_2552.NEF".to_string(),
+            final_filename: "DSC_2552.NEF".to_string(),
+            final_path: PathBuf::from("DSC_2552.NEF"),
+            size_bytes: 42,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: None,
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        };
+        let source = record_display_source(&record, &aliases);
+
+        assert_eq!(source.as_deref(), Some("Z5_2"));
+        assert_eq!(
+            record.virtual_display_path(source.as_deref()),
+            "Z5_2/BB/DSC_2552.NEF"
+        );
     }
 }
 

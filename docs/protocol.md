@@ -90,6 +90,13 @@ The receiver writes `transfer-log.jsonl` in the output folder. Each completed tr
 
 The product uses this log for tag-style grouping and filters. Source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
+For display, the UI builds a virtual path from metadata:
+
+- With a source alias or configured source name: `Z5_2/BB/DSC_2552.NEF`.
+- Without a source name: `IP-056/BB/DSC_2552.NEF`, using the last IPv4 octet from `192.168.137.56`.
+
+This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
+
 ## Real Camera Verification
 
 For each camera, record:

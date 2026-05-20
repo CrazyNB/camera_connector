@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -45,6 +46,7 @@ pub struct PushReceiverConfig {
     pub password: Option<String>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
+    pub source_aliases: BTreeMap<String, String>,
 }
 
 impl PushReceiverConfig {
@@ -63,6 +65,7 @@ impl PushReceiverConfig {
             password: None,
             advertised_host: None,
             source_name: None,
+            source_aliases: BTreeMap::new(),
         }
     }
 
@@ -84,5 +87,21 @@ impl PushReceiverConfig {
     pub fn with_source_name(mut self, source_name: impl Into<String>) -> Self {
         self.source_name = Some(source_name.into());
         self
+    }
+
+    pub fn with_source_alias(
+        mut self,
+        remote_addr: impl Into<String>,
+        source_name: impl Into<String>,
+    ) -> Self {
+        self.source_aliases
+            .insert(remote_addr.into(), source_name.into());
+        self
+    }
+
+    pub fn resolved_source_name(&self, remote_addr: Option<&str>) -> Option<String> {
+        remote_addr
+            .and_then(|addr| self.source_aliases.get(addr).cloned())
+            .or_else(|| self.source_name.clone())
     }
 }
