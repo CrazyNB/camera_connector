@@ -57,6 +57,8 @@ P0:
 - Write uploaded files through a temporary file and publish only on success.
 - Sanitize uploaded paths and filenames.
 - Group RAW/JPEG/video assets by filename stem.
+- Preserve duplicate uploads without overwriting completed files.
+- Scan the receiver inbox as the product's import source.
 - Record real-camera compatibility results.
 
 P1:
@@ -93,9 +95,11 @@ P2:
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Safe path handling | P0 | Traversal and unsafe filename characters cannot escape output folder |
 | RX-006 | Asset grouping | P0 | `DSC_1234.JPG` and `DSC_1234.NEF` appear as one group |
-| RX-007 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
-| RX-008 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
-| RX-009 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
+| RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
+| RX-008 | Duplicate policy | P0 | Re-uploading `DSC_1234.NEF` creates `DSC_1234 (1).NEF` |
+| RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
+| RX-010 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
+| RX-011 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -104,6 +108,7 @@ P2:
 - FTP receiver accepts a real Nikon NEF upload.
 - Completed files have correct byte length.
 - Failed uploads do not leave final files.
+- Duplicate uploads do not overwrite earlier completed files.
 - User can configure the camera using only the receiver settings shown by the app.
 
 ## 9. Architecture

@@ -16,6 +16,8 @@ Replace the failed PTP/IP pull route with a push receiver. The camera sends file
 - Delete PTP/IP, scanner, direct camera client, and mock PTP camera code.
 - Implement passive FTP `STOR` receiver.
 - Preserve local file safety through sanitized relative paths and temporary-file publishing.
+- Preserve duplicate uploads with numbered filenames.
+- Scan the receiver output folder into grouped inbox assets.
 - Keep AP mode paused while preserving its original meaning.
 
 ## Verification

@@ -55,6 +55,7 @@ Content:
 - RAW+JPEG grouping.
 - File format, size, received time.
 - Failed/interrupted transfer state.
+- Duplicate uploads shown as numbered files, not silent overwrites.
 
 ### Transfer Screen
 

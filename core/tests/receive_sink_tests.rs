@@ -41,3 +41,25 @@ fn creates_sanitized_upload_directories_without_marker_files() {
     assert!(directory.is_dir());
     assert!(!directory.join(".keep").exists());
 }
+
+#[test]
+fn duplicate_uploads_are_published_with_numbered_filenames() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let sink = LocalFileSink::new(temp_dir.path());
+
+    sink.write_complete("ftp-1", "DSC_2467.NEF", &[1])
+        .expect("first file should write");
+    let duplicate = sink
+        .write_complete("ftp-2", "DSC_2467.NEF", &[2, 3])
+        .expect("duplicate file should write");
+
+    assert_eq!(
+        std::fs::read(temp_dir.path().join("DSC_2467.NEF")).unwrap(),
+        vec![1]
+    );
+    assert_eq!(
+        std::fs::read(temp_dir.path().join("DSC_2467 (1).NEF")).unwrap(),
+        vec![2, 3]
+    );
+    assert_eq!(duplicate.filename, "DSC_2467 (1).NEF");
+}

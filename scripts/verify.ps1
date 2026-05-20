@@ -41,7 +41,15 @@ if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 & (Join-Path $root "target\debug\nikon-importer.exe") receive-file --input $sample --output $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
+& (Join-Path $root "target\debug\nikon-importer.exe") receive-file --input $sample --output $pushOutput --source ftp
+if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
+
+& (Join-Path $root "target\debug\nikon-importer.exe") inbox --path $pushOutput --source ftp
+if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
+
 $received = Get-Item -LiteralPath (Join-Path $pushOutput "DSC_1234.NEF")
+$duplicate = Get-Item -LiteralPath (Join-Path $pushOutput "DSC_1234 (1).NEF")
 if ($received.Length -le 0) { throw "received output is empty" }
+if ($duplicate.Length -le 0) { throw "duplicate output is empty" }
 
 Write-Output "verify.ps1 completed successfully"

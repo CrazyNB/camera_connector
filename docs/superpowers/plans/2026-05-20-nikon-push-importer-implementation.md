@@ -11,6 +11,8 @@
 - Add `ReceivedAsset`, `ImportSource`, and `ReceivedAssetGroup`.
 - Add `ReceiveProgress`, `ReceiveState`, and `LocalFileSink`.
 - Add safe relative path handling and atomic publish.
+- Add duplicate filename preservation.
+- Add inbox scanning and grouped asset output.
 
 ## Phase 3: FTP Receiver
 
@@ -23,6 +25,7 @@
 - Add `receiver-config`.
 - Add `receive-file`.
 - Add `serve-ftp`.
+- Add `inbox`.
 
 ## Phase 5: Verification
 

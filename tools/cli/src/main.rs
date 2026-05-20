@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
 use nikon_importer_core::{
-    FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    Result,
+    scan_inbox_groups, FtpPushServer, ImportSource, LocalFileSink, PushProtocol,
+    PushReceiverConfig, ReceivedAsset, Result,
 };
 
 #[derive(Debug, Parser)]
@@ -54,6 +54,12 @@ enum Command {
         password: Option<String>,
         #[arg(long)]
         advertised_host: Option<String>,
+    },
+    Inbox {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long, default_value = "ftp")]
+        source: String,
     },
 }
 
@@ -133,6 +139,39 @@ async fn main() -> Result<()> {
             println!("ftp receiver listening on {}", server.local_addr());
             print_receiver_config(&config);
             server.run().await?;
+        }
+        Some(Command::Inbox { path, source }) => {
+            let source = parse_source(&source)?;
+            let groups = scan_inbox_groups(path, source)?;
+            for group in groups {
+                let jpeg = group
+                    .jpeg
+                    .as_ref()
+                    .map(|asset| asset.filename.as_str())
+                    .unwrap_or("-");
+                let raw = group
+                    .raw
+                    .as_ref()
+                    .map(|asset| asset.filename.as_str())
+                    .unwrap_or("-");
+                let video = group
+                    .video
+                    .as_ref()
+                    .map(|asset| asset.filename.as_str())
+                    .unwrap_or("-");
+                let total_bytes = group
+                    .jpeg
+                    .iter()
+                    .chain(group.raw.iter())
+                    .chain(group.video.iter())
+                    .map(|asset| asset.size_bytes)
+                    .sum::<u64>();
+
+                println!(
+                    "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes",
+                    group.group_key, group.primary.filename, jpeg, raw, video, total_bytes
+                );
+            }
         }
     }
 

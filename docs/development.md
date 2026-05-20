@@ -31,6 +31,7 @@ The script runs:
 - Push-mode CLI smoke test:
   - `receiver-config`
   - `receive-file`
+  - `inbox`
 
 Smoke outputs are written under `target/push-output`.
 
@@ -53,3 +54,11 @@ Validate local ingest without a camera:
 ```powershell
 target\debug\nikon-importer.exe receive-file --input C:\path\to\DSC_1234.NEF --output C:\Users\hxn\Pictures\NikonImporter --source ftp
 ```
+
+List the receiver inbox and RAW/JPEG groups:
+
+```powershell
+target\debug\nikon-importer.exe inbox --path C:\Users\hxn\Pictures\NikonImporter --source ftp
+```
+
+Duplicate uploads are preserved with numbered filenames such as `DSC_1234 (1).NEF`; existing completed files are not overwritten.

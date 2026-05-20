@@ -8,4 +8,4 @@ pub use model::{
     group_received_assets, ImportSource, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
 };
 pub use push::{FtpPushServer, PushProtocol, PushReceiverConfig};
-pub use receive::{LocalFileSink, ReceiveProgress, ReceiveState};
+pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};

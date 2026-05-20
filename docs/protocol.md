@@ -66,6 +66,7 @@ Requirements:
 - Replace Windows-unsafe filename characters.
 - Keep RAW/JPEG/video files intact.
 - Group files by normalized filename stem, such as `DSC_1234.JPG` and `DSC_1234.NEF`.
+- Preserve duplicates with numbered filenames instead of overwriting previous completed files.
 
 ## Real Camera Verification
 

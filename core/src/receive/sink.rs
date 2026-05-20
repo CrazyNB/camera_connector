@@ -22,7 +22,7 @@ impl LocalFileSink {
         bytes: &[u8],
     ) -> Result<ReceiveProgress> {
         let safe_path = safe_relative_path(relative_path)?;
-        let final_path = self.output_dir.join(&safe_path);
+        let final_path = available_path(self.output_dir.join(&safe_path));
         let parent = final_path
             .parent()
             .ok_or(ImporterError::InvalidUploadPath)?;
@@ -38,7 +38,7 @@ impl LocalFileSink {
 
         Ok(ReceiveProgress::completed(
             transfer_id,
-            safe_path.to_string_lossy(),
+            relative_display_path(&self.output_dir, &final_path),
             bytes.len() as u64,
             final_path,
         ))
@@ -50,6 +50,32 @@ impl LocalFileSink {
         fs::create_dir_all(&final_path)?;
         Ok(final_path)
     }
+}
+
+fn available_path(path: PathBuf) -> PathBuf {
+    if !path.exists() {
+        return path;
+    }
+
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("upload");
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    for index in 1.. {
+        let filename = match extension {
+            Some(extension) => format!("{stem} ({index}).{extension}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = parent.join(filename);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("unbounded duplicate filename search should always return");
 }
 
 fn temp_path_for(final_path: &Path) -> PathBuf {
@@ -85,6 +111,18 @@ fn safe_relative_path(path: &str) -> Result<PathBuf> {
     }
 
     Ok(safe)
+}
+
+fn relative_display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str().map(ToOwned::to_owned),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn safe_filename(filename: &str) -> String {
