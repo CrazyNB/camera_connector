@@ -26,20 +26,37 @@ fn sanitizes_windows_unsafe_filename_characters() {
     sink.write_complete("ftp-42", "NIKON/../DSC:1234?.NEF", &[1])
         .expect("file should write");
 
-    assert!(temp_dir.path().join("NIKON").join("DSC_1234_.NEF").exists());
+    assert!(temp_dir.path().join("DSC_1234_.NEF").exists());
+    assert!(!temp_dir.path().join("NIKON").exists());
 }
 
 #[test]
-fn creates_sanitized_upload_directories_without_marker_files() {
+fn ignores_remote_directory_creation_for_flat_inbox() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let sink = LocalFileSink::new(temp_dir.path());
 
-    sink.create_dir_all("NIKON/../CARD:1")
-        .expect("directory should be created");
+    let directory = sink
+        .create_dir_all("NIKON/../CARD:1")
+        .expect("directory command should be accepted");
 
-    let directory = temp_dir.path().join("NIKON").join("CARD_1");
     assert!(directory.is_dir());
+    assert_eq!(directory, temp_dir.path());
+    assert!(!temp_dir.path().join("NIKON").exists());
     assert!(!directory.join(".keep").exists());
+}
+
+#[test]
+fn remote_upload_paths_are_flattened_to_filename_only() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let sink = LocalFileSink::new(temp_dir.path());
+
+    let progress = sink
+        .write_complete("ftp-42", "/DCIM/100CANON/IMG_1001.CR3", &[1])
+        .expect("file should write");
+
+    assert_eq!(progress.filename, "IMG_1001.CR3");
+    assert!(temp_dir.path().join("IMG_1001.CR3").exists());
+    assert!(!temp_dir.path().join("DCIM").exists());
 }
 
 #[test]

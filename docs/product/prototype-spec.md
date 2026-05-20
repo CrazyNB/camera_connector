@@ -14,7 +14,8 @@ flowchart TD
   D --> E["Configure camera FTP profile"]
   E --> F["Camera uploads files"]
   F --> G["Receiver publishes completed files"]
-  G --> H["Inbox groups RAW/JPEG/video assets"]
+  G --> H["Flat inbox groups RAW/JPEG/video assets"]
+  G --> I["Transfer log stores original path and source tags"]
 ```
 
 ## 3. Screens
@@ -44,6 +45,7 @@ Content:
 - Destination folder behavior.
 - Passive FTP note.
 - Test upload checklist.
+- Explanation that camera-side folders are accepted but flattened locally.
 
 ### Inbox Screen
 
@@ -54,8 +56,11 @@ Content:
 - Recent received files.
 - RAW+JPEG grouping.
 - File format, size, received time.
+- Format tabs for all/JPG/RAW/video.
+- Tag-style filters for source name, original path, transfer id, and remote IP.
 - Failed/interrupted transfer state.
 - Duplicate uploads shown as numbered files, not silent overwrites.
+- No local subfolders from camera-side FTP upload paths.
 
 ### Transfer Screen
 
@@ -66,6 +71,7 @@ Content:
 - Current upload filename.
 - Bytes received.
 - Completed, receiving, failed, canceled states.
+- Transfer id, original path, source name, and remote IP tags.
 - Retry guidance: retry from the camera.
 
 ### Settings Screen
@@ -77,6 +83,7 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
+- Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.
 

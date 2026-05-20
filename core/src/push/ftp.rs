@@ -6,7 +6,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 
-use crate::{ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig, Result};
+use crate::{
+    append_transfer_record, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig, Result,
+    TransferRecord, TransferStatus,
+};
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -91,6 +94,7 @@ async fn handle_control_connection(
     config: Arc<PushReceiverConfig>,
 ) -> Result<()> {
     let local_ip = stream.local_addr()?.ip();
+    let remote_addr = stream.peer_addr().ok().map(|addr| addr.ip().to_string());
     let mut reader = BufReader::new(stream);
     let mut state = ControlState::new(&config);
 
@@ -140,7 +144,16 @@ async fn handle_control_connection(
             }
             "LIST" | "NLST" => handle_empty_listing(&mut reader, &mut state).await?,
             "SIZE" | "MDTM" => reply(&mut reader, "550 File not found").await?,
-            "STOR" => handle_stor(&mut reader, &config, &mut state, argument).await?,
+            "STOR" => {
+                handle_stor(
+                    &mut reader,
+                    &config,
+                    &mut state,
+                    argument,
+                    remote_addr.clone(),
+                )
+                .await?
+            }
             "QUIT" => {
                 reply(&mut reader, "221 Goodbye").await?;
                 return Ok(());
@@ -252,6 +265,7 @@ async fn handle_stor(
     config: &PushReceiverConfig,
     state: &mut ControlState,
     argument: &str,
+    remote_addr: Option<String>,
 ) -> Result<()> {
     if !state.authenticated {
         reply(reader, "530 Login required").await?;
@@ -264,13 +278,39 @@ async fn handle_stor(
     };
 
     let upload_path = resolve_upload_path(&state.cwd, argument);
+    let started_at_ms = current_time_ms();
     reply(reader, "150 Opening data connection").await?;
     let (mut data, _) = timeout(DATA_TIMEOUT, listener.accept()).await??;
     let mut bytes = Vec::new();
     timeout(DATA_TIMEOUT, data.read_to_end(&mut bytes)).await??;
 
-    let transfer_id = format!("ftp:{upload_path}");
-    LocalFileSink::new(&config.output_dir).write_complete(transfer_id, &upload_path, &bytes)?;
+    let transfer_id = format!("ftp:{started_at_ms}:{upload_path}");
+    let progress = LocalFileSink::new(&config.output_dir).write_complete(
+        &transfer_id,
+        &upload_path,
+        &bytes,
+    )?;
+    let final_path = progress
+        .output_path
+        .clone()
+        .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
+    append_transfer_record(
+        &config.output_dir,
+        &TransferRecord {
+            transfer_id,
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: upload_path,
+            final_filename: progress.filename,
+            final_path,
+            size_bytes: progress.bytes_written,
+            remote_addr,
+            source_name: config.source_name.clone(),
+            started_at_ms,
+            completed_at_ms: Some(current_time_ms()),
+            error: None,
+        },
+    )?;
     reply(reader, "226 Transfer complete").await
 }
 
@@ -336,4 +376,11 @@ fn advertised_ip(config: &PushReceiverConfig, local_ip: IpAddr) -> Ipv4Addr {
             _ => None,
         })
         .unwrap_or(Ipv4Addr::LOCALHOST)
+}
+
+fn current_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }

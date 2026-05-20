@@ -44,6 +44,7 @@ pub struct PushReceiverConfig {
     pub username: Option<String>,
     pub password: Option<String>,
     pub advertised_host: Option<String>,
+    pub source_name: Option<String>,
 }
 
 impl PushReceiverConfig {
@@ -61,6 +62,7 @@ impl PushReceiverConfig {
             username: None,
             password: None,
             advertised_host: None,
+            source_name: None,
         }
     }
 
@@ -76,6 +78,11 @@ impl PushReceiverConfig {
 
     pub fn with_advertised_host(mut self, host: impl Into<String>) -> Self {
         self.advertised_host = Some(host.into());
+        self
+    }
+
+    pub fn with_source_name(mut self, source_name: impl Into<String>) -> Self {
+        self.source_name = Some(source_name.into());
         self
     }
 }

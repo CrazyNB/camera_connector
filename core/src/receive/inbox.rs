@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use super::transfer_log::TRANSFER_LOG_FILENAME;
 use crate::{group_received_assets, ImportSource, ReceivedAsset, ReceivedAssetGroup, Result};
 
 pub fn scan_inbox(root: impl AsRef<Path>, source: ImportSource) -> Result<Vec<ReceivedAsset>> {
@@ -40,7 +41,7 @@ fn collect_assets(
             continue;
         }
 
-        if !metadata.is_file() || is_temporary_upload(&path) {
+        if !metadata.is_file() || is_temporary_upload(&path) || is_receiver_metadata(&path) {
             continue;
         }
 
@@ -62,6 +63,13 @@ fn is_temporary_upload(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.to_ascii_lowercase().ends_with(".tmp"))
+        .unwrap_or(false)
+}
+
+fn is_receiver_metadata(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case(TRANSFER_LOG_FILENAME))
         .unwrap_or(false)
 }
 

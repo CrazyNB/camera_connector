@@ -45,10 +45,9 @@ impl LocalFileSink {
     }
 
     pub fn create_dir_all(&self, relative_path: &str) -> Result<PathBuf> {
-        let safe_path = safe_relative_path(relative_path)?;
-        let final_path = self.output_dir.join(safe_path);
-        fs::create_dir_all(&final_path)?;
-        Ok(final_path)
+        let _ = safe_relative_path(relative_path)?;
+        fs::create_dir_all(&self.output_dir)?;
+        Ok(self.output_dir.clone())
     }
 }
 
@@ -90,27 +89,25 @@ fn temp_path_for(final_path: &Path) -> PathBuf {
 
 fn safe_relative_path(path: &str) -> Result<PathBuf> {
     let normalized = path.replace('\\', "/");
-    let mut safe = PathBuf::new();
+    let Some(filename) = normalized
+        .split('/')
+        .rev()
+        .find(|part| !part.is_empty() && *part != "." && *part != "..")
+    else {
+        return Err(ImporterError::InvalidUploadPath);
+    };
 
-    for part in normalized.split('/') {
-        if part.is_empty() || part == "." || part == ".." {
-            continue;
-        }
-        let sanitized = safe_filename(part);
-        if !sanitized.is_empty() {
-            safe.push(sanitized);
-        }
-    }
+    let safe = PathBuf::from(safe_filename(filename));
 
     if safe.as_os_str().is_empty()
         || safe
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err(ImporterError::InvalidUploadPath);
+        Err(ImporterError::InvalidUploadPath)
+    } else {
+        Ok(safe)
     }
-
-    Ok(safe)
 }
 
 fn relative_display_path(root: &Path, path: &Path) -> String {

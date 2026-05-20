@@ -33,6 +33,18 @@ fn scans_inbox_files_and_skips_temporary_uploads() {
 }
 
 #[test]
+fn scans_inbox_files_and_skips_transfer_log() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    std::fs::write(temp_dir.path().join("IMG_1001.CR3"), [1, 2, 3]).unwrap();
+    std::fs::write(temp_dir.path().join("transfer-log.jsonl"), []).unwrap();
+
+    let assets = scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan");
+
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0].filename, "IMG_1001.CR3");
+}
+
+#[test]
 fn scans_inbox_groups_raw_jpeg_pairs() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     std::fs::write(temp_dir.path().join("DSC_2467.JPG"), [1]).unwrap();

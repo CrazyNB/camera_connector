@@ -1,13 +1,16 @@
 use std::fs;
 use std::net::SocketAddr;
 
-use camera_connector_core::{FtpPushServer, PushProtocol, PushReceiverConfig};
+use camera_connector_core::{
+    read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig, TransferStatus,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[tokio::test]
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path());
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_source_name("Studio A");
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -41,7 +44,11 @@ async fn ftp_server_accepts_passive_stor_upload() {
     let mut data = tokio::net::TcpStream::connect(data_addr)
         .await
         .expect("data connection should open");
-    command(&mut control, "STOR DSC_4321.NEF").await;
+    command(&mut control, "CWD DCIM").await;
+    assert_reply(&mut control, "250").await;
+    command(&mut control, "CWD 100CANON").await;
+    assert_reply(&mut control, "250").await;
+    command(&mut control, "STOR IMG_4321.CR3").await;
     assert_reply(&mut control, "150").await;
     data.write_all(&[1, 2, 3, 4, 5])
         .await
@@ -58,8 +65,17 @@ async fn ftp_server_accepts_passive_stor_upload() {
         .expect("server task should join")
         .expect("server should stop cleanly");
 
-    let bytes = fs::read(temp_dir.path().join("DSC_4321.NEF")).expect("uploaded file should read");
+    let bytes = fs::read(temp_dir.path().join("IMG_4321.CR3")).expect("uploaded file should read");
     assert_eq!(bytes, vec![1, 2, 3, 4, 5]);
+    assert!(!temp_dir.path().join("DCIM").exists());
+
+    let records = read_transfer_log(temp_dir.path()).expect("transfer log should read");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].source_name.as_deref(), Some("Studio A"));
+    assert_eq!(records[0].original_path, "DCIM/100CANON/IMG_4321.CR3");
+    assert_eq!(records[0].final_filename, "IMG_4321.CR3");
+    assert_eq!(records[0].size_bytes, 5);
+    assert_eq!(records[0].status, TransferStatus::Completed);
 }
 
 async fn command(control: &mut BufReader<tokio::net::TcpStream>, line: &str) {

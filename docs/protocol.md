@@ -16,6 +16,8 @@ The app runs a local FTP receiver. The camera is configured with:
 - Username/password: optional for local validation, configurable for real camera setup.
 - Destination: local import folder managed by the app.
 
+The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat output folder as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.
+
 Minimum FTP commands supported by the core receiver:
 
 - `USER`
@@ -36,7 +38,7 @@ Minimum FTP commands supported by the core receiver:
 - `STOR`
 - `QUIT`
 
-`STOR` writes bytes to a temporary file first, then atomically publishes the final file.
+`STOR` writes bytes to a temporary file first, then atomically publishes the final file. The transfer record is appended after the completed file is published.
 
 ## SFTP Push
 
@@ -46,8 +48,9 @@ Requirements:
 
 - SSH server endpoint owned by the app or companion service.
 - Configurable username/password or key material.
-- Same local storage sink as FTP.
+- Same flat local storage sink as FTP.
 - Same asset grouping and duplicate handling.
+- Same transfer log fields as FTP.
 
 ## FTPS Push
 
@@ -57,17 +60,35 @@ Requirements:
 
 - Explicit FTPS preferred if the camera supports it.
 - Certificate and trust flow must be simple enough for camera configuration.
-- Same storage sink as FTP.
+- Same flat storage sink as FTP.
+- Same transfer log fields as FTP.
 
 ## Storage Rules
 
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
-- Replace Windows-unsafe filename characters.
+- Use only the final remote filename for local storage.
+- Do not create local folders from camera-side upload paths.
+- Replace Windows-unsafe filename characters in the final filename.
 - Keep RAW/JPEG/video files intact.
 - Recognize common RAW extensions across camera brands: `NEF`, `NRW`, `CR2`, `CR3`, `ARW`, `SRF`, `SR2`, `RAF`, `RW2`, `RWL`, `ORF`, `PEF`, and `DNG`.
 - Group files by normalized filename stem, such as `IMG_1001.JPG` and `IMG_1001.CR3`.
 - Preserve duplicates with numbered filenames instead of overwriting previous completed files.
+
+## Transfer Log
+
+The receiver writes `transfer-log.jsonl` in the output folder. Each completed transfer records:
+
+- `transfer_id`: stable enough to reference a single transfer.
+- `protocol`: FTP, SFTP, FTPS, or manual validation source.
+- `original_path`: remote path sent by the camera, such as `DCIM/100CANON/IMG_1001.CR3`.
+- `final_filename` and `final_path`: flattened local result.
+- `size_bytes`.
+- `remote_addr`: camera IP when available.
+- `source_name`: optional user-set camera/source label.
+- `started_at_ms` and `completed_at_ms`.
+
+The product uses this log for tag-style grouping and filters. Source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 ## Real Camera Verification
 

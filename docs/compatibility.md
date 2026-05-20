@@ -26,6 +26,7 @@ Port:
 Authentication:
 Passive mode:
 Camera folder setting:
+Local storage policy:
 JPEG upload:
 RAW upload:
 Video upload:
@@ -51,10 +52,11 @@ Port: 2121
 Authentication: anonymous
 Passive mode: Pass
 Camera folder setting: default/root
+Local storage policy: flat inbox, original path kept in transfer log
 JPEG upload: Pass, DSC_2463.JPG, DSC_2465.JPG, DSC_2466.JPG, DSC_2467.JPG
 RAW upload: Pass, DSC_2463.NEF, DSC_2465.NEF, DSC_2466.NEF, DSC_2467.NEF
 Video upload: Not tested
 Large file stability: Not tested beyond four RAW+JPEG pairs
 Observed FTP commands: passive FTP upload via receiver implementation
-Notes: Files landed in C:\Users\hxn\Pictures\NikonImporter while control connection remained established.
+Notes: Files landed in C:\Users\hxn\Pictures\CameraConnector while control connection remained established.
 ```
