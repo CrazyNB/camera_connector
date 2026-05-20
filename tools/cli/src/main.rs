@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -493,11 +494,13 @@ fn effective_accounts(
         .collect::<Vec<_>>();
 
     if let Some(username) = username {
-        let transient = ReceiverAccount::new(
-            username,
-            password.map(ToOwned::to_owned),
-            device_name.unwrap_or(username),
-        );
+        let transient = validate_account_config(CameraAccountConfig {
+            username: username.to_string(),
+            password: password.map(ToOwned::to_owned),
+            device_name: device_name.unwrap_or(username).to_string(),
+            remote_addrs: Vec::new(),
+        })?
+        .into_receiver_account();
         accounts.retain(|account| account.username != username);
         accounts.push(transient);
     }
@@ -538,17 +541,21 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             device_name,
             remote_addrs,
         } => {
-            config.accounts.insert(
-                username.clone(),
-                CameraAccountConfig {
-                    username: username.clone(),
-                    password,
-                    device_name: device_name.clone(),
-                    remote_addrs,
-                },
-            );
+            let account = validate_account_config(CameraAccountConfig {
+                username,
+                password,
+                device_name,
+                remote_addrs,
+            })?;
+            config
+                .accounts
+                .insert(account.username.clone(), account.clone());
+            ensure_unique_account_ips(&config.accounts)?;
             let path = save_app_config(config_path, &config)?;
-            println!("saved account {username}\tdevice={device_name}");
+            println!(
+                "saved account {}\tdevice={}",
+                account.username, account.device_name
+            );
             println!("config: {}", path.display());
         }
         AccountCommand::Remove { username } => {
@@ -565,6 +572,8 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             println!("config: {}", path.display());
         }
         AccountCommand::BindIp { username, ip } => {
+            let ip = normalize_ip(&ip)?;
+            ensure_ip_available_for_account(&config.accounts, &username, &ip)?;
             let Some(account) = config.accounts.get_mut(&username) else {
                 return Err(camera_connector_core::ImporterError::internal(format!(
                     "account '{username}' not found"
@@ -578,6 +587,7 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             println!("config: {}", path.display());
         }
         AccountCommand::UnbindIp { username, ip } => {
+            let ip = normalize_ip(&ip)?;
             let Some(account) = config.accounts.get_mut(&username) else {
                 return Err(camera_connector_core::ImporterError::internal(format!(
                     "account '{username}' not found"
@@ -599,8 +609,16 @@ fn load_app_config(config_path: Option<&Path>) -> Result<AppConfig> {
     }
 
     let bytes = fs::read(&path)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))
+    let mut config: AppConfig = serde_json::from_slice(&bytes)
+        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))?;
+    config.accounts = config
+        .accounts
+        .into_values()
+        .map(validate_account_config)
+        .map(|result| result.map(|account| (account.username.clone(), account)))
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    ensure_unique_account_ips(&config.accounts)?;
+    Ok(config)
 }
 
 fn save_app_config(config_path: Option<&Path>, config: &AppConfig) -> Result<PathBuf> {
@@ -680,6 +698,72 @@ impl CameraAccountConfig {
             remote_addrs: self.remote_addrs,
         }
     }
+}
+
+fn validate_account_config(mut account: CameraAccountConfig) -> Result<CameraAccountConfig> {
+    account.username = normalized_required("username", &account.username)?;
+    account.device_name = normalized_required("device name", &account.device_name)?;
+    account.remote_addrs = normalize_ips(&account.remote_addrs)?;
+    Ok(account)
+}
+
+fn normalized_required(field: &str, value: &str) -> Result<String> {
+    let normalized = value.trim().to_string();
+    if normalized.is_empty() {
+        return Err(camera_connector_core::ImporterError::internal(format!(
+            "{field} cannot be empty"
+        )));
+    }
+    Ok(normalized)
+}
+
+fn normalize_ips(values: &[String]) -> Result<Vec<String>> {
+    let mut ips = Vec::new();
+    for value in values {
+        let ip = normalize_ip(value)?;
+        if !ips.iter().any(|existing| existing == &ip) {
+            ips.push(ip);
+        }
+    }
+    Ok(ips)
+}
+
+fn normalize_ip(value: &str) -> Result<String> {
+    let value = value.trim();
+    let parsed = IpAddr::from_str(value).map_err(|_| {
+        camera_connector_core::ImporterError::internal(format!("invalid IP address '{value}'"))
+    })?;
+    Ok(parsed.to_string())
+}
+
+fn ensure_unique_account_ips(accounts: &BTreeMap<String, CameraAccountConfig>) -> Result<()> {
+    let mut owners = BTreeMap::<String, String>::new();
+    for account in accounts.values() {
+        for ip in &account.remote_addrs {
+            if let Some(existing) = owners.insert(ip.clone(), account.username.clone()) {
+                return Err(camera_connector_core::ImporterError::internal(format!(
+                    "IP address '{ip}' is already bound to account '{existing}'"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_ip_available_for_account(
+    accounts: &BTreeMap<String, CameraAccountConfig>,
+    username: &str,
+    ip: &str,
+) -> Result<()> {
+    for account in accounts.values() {
+        if account.username != username && account.remote_addrs.iter().any(|addr| addr == ip) {
+            return Err(camera_connector_core::ImporterError::internal(format!(
+                "IP address '{ip}' is already bound to account '{}'",
+                account.username
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn remote_addr_display_label(remote_addr: &str) -> String {
@@ -831,6 +915,80 @@ mod tests {
             Some("Z5_2")
         );
         assert_eq!(remote_addr_display_label(&device.remote_addr), "IP-056");
+    }
+
+    #[test]
+    fn account_set_rejects_blank_identity() {
+        let path = unique_temp_config_path("blank-account");
+
+        let result = handle_account_command(
+            Some(&path),
+            AccountCommand::Set {
+                username: "  ".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn account_set_rejects_invalid_ip() {
+        let path = unique_temp_config_path("invalid-ip");
+
+        let result = handle_account_command(
+            Some(&path),
+            AccountCommand::Set {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["not-an-ip".to_string()],
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn account_bind_ip_rejects_ip_used_by_another_account() {
+        let path = unique_temp_config_path("duplicate-ip");
+        let mut config = AppConfig::default();
+        config.accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: vec!["192.168.137.56".to_string()],
+            },
+        );
+        config.accounts.insert(
+            "xt5".to_string(),
+            CameraAccountConfig {
+                username: "xt5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "X-T5".to_string(),
+                remote_addrs: Vec::new(),
+            },
+        );
+        save_app_config(Some(&path), &config).expect("config saves");
+
+        let result = handle_account_command(
+            Some(&path),
+            AccountCommand::BindIp {
+                username: "xt5".to_string(),
+                ip: "192.168.137.56".to_string(),
+            },
+        );
+
+        assert!(result.is_err());
+        let loaded = load_app_config(Some(&path)).expect("config loads");
+        assert!(loaded.accounts["xt5"].remote_addrs.is_empty());
+        let _ = std::fs::remove_file(path);
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {
