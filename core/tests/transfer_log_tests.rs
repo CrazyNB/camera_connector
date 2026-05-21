@@ -110,3 +110,56 @@ fn transfer_log_can_record_non_path_storage_locations() {
     let records = read_transfer_log(temp_dir.path()).expect("records should read");
     assert_eq!(records, vec![record]);
 }
+
+#[test]
+fn transfer_record_resolves_legacy_final_path_as_local_location() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let record = TransferRecord {
+        transfer_id: "ftp:legacy".to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: "IMG_0003.NEF".to_string(),
+        final_filename: "IMG_0003.NEF".to_string(),
+        final_path: Some(temp_dir.path().join("IMG_0003.NEF")),
+        final_location: None,
+        size_bytes: 128,
+        remote_addr: None,
+        source_name: None,
+        started_at_ms: 50,
+        completed_at_ms: Some(60),
+        error: None,
+    };
+
+    assert_eq!(
+        record.resolved_final_location(),
+        Some(StoredObjectLocation::local_path(
+            temp_dir.path().join("IMG_0003.NEF")
+        ))
+    );
+    assert_eq!(record.final_location_kind(), Some("local_path"));
+}
+
+#[test]
+fn transfer_record_formats_platform_location_labels() {
+    let record = TransferRecord {
+        transfer_id: "sftp:ios".to_string(),
+        protocol: "sftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: "IMG_0004.DNG".to_string(),
+        final_filename: "IMG_0004.DNG".to_string(),
+        final_path: None,
+        final_location: Some(StoredObjectLocation::photo_asset("photos-local-id-1")),
+        size_bytes: 256,
+        remote_addr: None,
+        source_name: None,
+        started_at_ms: 70,
+        completed_at_ms: Some(80),
+        error: None,
+    };
+
+    assert_eq!(record.final_location_kind(), Some("photo_asset"));
+    assert_eq!(
+        record.final_location_label().as_deref(),
+        Some("photos-local-id-1")
+    );
+}

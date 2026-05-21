@@ -36,4 +36,21 @@ impl StoredObjectLocation {
             _ => None,
         }
     }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::LocalPath { .. } => "local_path",
+            Self::DocumentUri { .. } => "document_uri",
+            Self::MediaUri { .. } => "media_uri",
+            Self::PhotoAsset { .. } => "photo_asset",
+        }
+    }
+
+    pub fn display_label(&self) -> String {
+        match self {
+            Self::LocalPath { path } => path.display().to_string(),
+            Self::DocumentUri { uri } | Self::MediaUri { uri } => uri.clone(),
+            Self::PhotoAsset { local_identifier } => local_identifier.clone(),
+        }
+    }
 }

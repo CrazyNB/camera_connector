@@ -82,6 +82,12 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
         views[0].virtual_display_path,
         "Z5_2/DCIM/100NIKON/DSC_0001.NEF"
     );
+    assert_eq!(views[0].final_location_kind.as_deref(), Some("local_path"));
+    assert!(views[0]
+        .final_location_label
+        .as_deref()
+        .unwrap_or_default()
+        .ends_with("DSC_0001.NEF"));
 
     let _ = std::fs::remove_dir_all(output_dir);
 }

@@ -39,6 +39,8 @@ pub struct TransferRecordView {
     pub record: TransferRecord,
     pub display_source: Option<String>,
     pub virtual_display_path: String,
+    pub final_location_kind: Option<String>,
+    pub final_location_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +135,8 @@ impl CameraConnectorService {
                 let display_source = record_display_source(&record);
                 let virtual_display_path = record.virtual_display_path(display_source.as_deref());
                 TransferRecordView {
+                    final_location_kind: record.final_location_kind().map(ToOwned::to_owned),
+                    final_location_label: record.final_location_label(),
                     record,
                     display_source,
                     virtual_display_path,

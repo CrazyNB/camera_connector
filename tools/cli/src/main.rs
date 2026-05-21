@@ -5,7 +5,7 @@ use std::str::FromStr;
 use camera_connector_core::{
     append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result,
-    TransferQuery, TransferRecord, TransferStatus,
+    TransferQuery, TransferRecord, TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -425,18 +425,7 @@ async fn main() -> Result<()> {
                     remote_addr,
                 },
             )? {
-                let record = view.record;
-                println!(
-                    "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}\tdisplay={}",
-                    record.transfer_id,
-                    record.status,
-                    record.final_filename,
-                    record.original_path,
-                    record.size_bytes,
-                    record.remote_addr.as_deref().unwrap_or("-"),
-                    view.display_source.as_deref().unwrap_or("-"),
-                    view.virtual_display_path
-                );
+                println!("{}", transfer_view_line(&view));
             }
         }
         Some(Command::Account { config, action }) => {
@@ -470,6 +459,23 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn transfer_view_line(view: &TransferRecordView) -> String {
+    let record = &view.record;
+    format!(
+        "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}\tdisplay={}\tlocation_kind={}\tlocation={}",
+        record.transfer_id,
+        record.status,
+        record.final_filename,
+        record.original_path,
+        record.size_bytes,
+        record.remote_addr.as_deref().unwrap_or("-"),
+        view.display_source.as_deref().unwrap_or("-"),
+        view.virtual_display_path,
+        view.final_location_kind.as_deref().unwrap_or("-"),
+        view.final_location_label.as_deref().unwrap_or("-")
+    )
 }
 
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
@@ -589,7 +595,9 @@ fn source_protocol_label(source: ImportSource) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use camera_connector_core::{CameraConnectorConfig, ReceiverAccountConfig};
+    use camera_connector_core::{
+        CameraConnectorConfig, ReceiverAccountConfig, StoredObjectLocation,
+    };
 
     #[test]
     fn account_config_round_trips() {
@@ -699,6 +707,38 @@ mod tests {
         .expect("serve-sftp command should parse");
 
         assert!(matches!(cli.command, Some(Command::ServeSftp { .. })));
+    }
+
+    #[test]
+    fn transfer_view_line_prints_platform_location() {
+        let view = TransferRecordView {
+            record: TransferRecord {
+                transfer_id: "sftp:1".to_string(),
+                protocol: "sftp".to_string(),
+                status: TransferStatus::Completed,
+                original_path: "DCIM/IMG_0001.DNG".to_string(),
+                final_filename: "IMG_0001.DNG".to_string(),
+                final_path: None,
+                final_location: Some(StoredObjectLocation::document_uri(
+                    "content://camera-connector/IMG_0001.DNG",
+                )),
+                size_bytes: 42,
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Camera".to_string()),
+                started_at_ms: 10,
+                completed_at_ms: Some(20),
+                error: None,
+            },
+            display_source: Some("Camera".to_string()),
+            virtual_display_path: "Camera/DCIM/IMG_0001.DNG".to_string(),
+            final_location_kind: Some("document_uri".to_string()),
+            final_location_label: Some("content://camera-connector/IMG_0001.DNG".to_string()),
+        };
+
+        let line = transfer_view_line(&view);
+
+        assert!(line.contains("location_kind=document_uri"));
+        assert!(line.contains("location=content://camera-connector/IMG_0001.DNG"));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

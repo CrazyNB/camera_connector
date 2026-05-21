@@ -35,6 +35,26 @@ pub struct TransferRecord {
 }
 
 impl TransferRecord {
+    pub fn resolved_final_location(&self) -> Option<StoredObjectLocation> {
+        self.final_location.clone().or_else(|| {
+            self.final_path
+                .clone()
+                .map(StoredObjectLocation::local_path)
+        })
+    }
+
+    pub fn final_location_kind(&self) -> Option<&'static str> {
+        self.final_location
+            .as_ref()
+            .map(StoredObjectLocation::kind)
+            .or_else(|| self.final_path.as_ref().map(|_| "local_path"))
+    }
+
+    pub fn final_location_label(&self) -> Option<String> {
+        self.resolved_final_location()
+            .map(|location| location.display_label())
+    }
+
     pub fn virtual_display_path(&self, source_override: Option<&str>) -> String {
         let mut parts = Vec::new();
 
