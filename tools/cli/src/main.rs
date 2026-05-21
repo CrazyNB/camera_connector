@@ -1,13 +1,11 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, read_connected_devices, read_transfer_log, scan_inbox_groups,
-    CameraConnectorConfig, ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverAccountConfig, Result, TransferRecord,
-    TransferStatus,
+    append_transfer_record, CameraConnectorService, FtpPushServer, ImportSource, LocalFileSink,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result, TransferQuery,
+    TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -251,7 +249,8 @@ async fn main() -> Result<()> {
         }
         Some(Command::Inbox { path, source }) => {
             let source = parse_source(&source)?;
-            let groups = scan_inbox_groups(path, source)?;
+            let service = CameraConnectorService::new(None);
+            let groups = service.inbox_groups(path, source)?;
             for group in groups {
                 let jpeg = group
                     .jpeg
@@ -291,52 +290,18 @@ async fn main() -> Result<()> {
             source_name,
             remote_addr,
         }) => {
-            let accounts = CameraConnectorConfig::load(config.as_deref())?.accounts;
-            for record in read_transfer_log(path)?
-                .into_iter()
-                .filter(|record| {
-                    source_name
-                        .as_ref()
-                        .map(|expected| {
-                            record_display_source(record, &accounts).as_ref() == Some(expected)
-                        })
-                        .unwrap_or(true)
-                })
-                .filter(|record| {
-                    remote_addr
-                        .as_ref()
-                        .map(|expected| record.remote_addr.as_ref() == Some(expected))
-                        .unwrap_or(true)
-                })
-                .filter(|record| {
-                    transfer_id
-                        .as_ref()
-                        .map(|expected| record.transfer_id.contains(expected))
-                        .unwrap_or(true)
-                })
-                .filter(|record| {
-                    original_path
-                        .as_ref()
-                        .map(|expected| {
-                            record
-                                .original_path
-                                .to_ascii_lowercase()
-                                .contains(&expected.to_ascii_lowercase())
-                        })
-                        .unwrap_or(true)
-                })
-                .filter(|record| {
-                    final_filename
-                        .as_ref()
-                        .map(|expected| {
-                            record
-                                .final_filename
-                                .to_ascii_lowercase()
-                                .contains(&expected.to_ascii_lowercase())
-                        })
-                        .unwrap_or(true)
-                })
-            {
+            let service = CameraConnectorService::new(config);
+            for view in service.transfers(
+                path,
+                TransferQuery {
+                    transfer_id,
+                    original_path,
+                    final_filename,
+                    source_name,
+                    remote_addr,
+                },
+            )? {
+                let record = view.record;
                 println!(
                     "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}\tdisplay={}",
                     record.transfer_id,
@@ -345,11 +310,8 @@ async fn main() -> Result<()> {
                     record.original_path,
                     record.size_bytes,
                     record.remote_addr.as_deref().unwrap_or("-"),
-                    record_display_source(&record, &accounts)
-                        .as_deref()
-                        .unwrap_or("-"),
-                    record
-                        .virtual_display_path(record_display_source(&record, &accounts).as_deref())
+                    view.display_source.as_deref().unwrap_or("-"),
+                    view.virtual_display_path
                 );
             }
         }
@@ -362,13 +324,9 @@ async fn main() -> Result<()> {
             username,
             online,
         }) => {
-            let accounts = CameraConnectorConfig::load(config.as_deref())?.accounts;
-            for device in read_connected_devices(path)?
-                .into_iter()
-                .filter(|device| device_matches_filters(device, username.as_deref(), online))
-            {
-                let display = device_display_source(&device, &accounts)
-                    .unwrap_or_else(|| remote_addr_display_label(&device.remote_addr));
+            let service = CameraConnectorService::new(config);
+            for view in service.connected_devices(path, username.as_deref(), online)? {
+                let device = view.device;
                 println!(
                     "{}\tonline={}\tconnections={}\tport={}\tusername={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
                     device.remote_addr,
@@ -379,10 +337,8 @@ async fn main() -> Result<()> {
                         .map(|port| port.to_string())
                         .unwrap_or_else(|| "-".to_string()),
                     device.username.as_deref().unwrap_or("-"),
-                    device_display_source(&device, &accounts)
-                        .as_deref()
-                        .unwrap_or("-"),
-                    display,
+                    device.source_name.as_deref().unwrap_or("-"),
+                    view.display_source,
                     device.last_seen_at_ms
                 );
             }
@@ -392,24 +348,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn device_matches_filters(device: &ConnectedDevice, username: Option<&str>, online: bool) -> bool {
-    (!online || device.online)
-        && username
-            .map(|expected| device.username.as_deref() == Some(expected))
-            .unwrap_or(true)
-}
-
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
-    let mut config = PushReceiverConfig::new(args.protocol, args.bind_host, args.port, args.output);
-    config.advertised_host = args.advertised_host;
-    config.source_name = args.source_name;
-    config.accounts = CameraConnectorConfig::load(args.config_path.as_deref())?
-        .effective_accounts(
-            args.username.as_deref(),
-            args.password.as_deref(),
-            config.source_name.as_deref(),
-        )?;
-    Ok(config)
+    CameraConnectorService::new(args.config_path).receiver_config(ReceiverConfigRequest {
+        protocol: args.protocol,
+        bind_host: args.bind_host,
+        port: args.port,
+        output_dir: args.output,
+        username: args.username,
+        password: args.password,
+        advertised_host: args.advertised_host,
+        source_name: args.source_name,
+    })
 }
 
 fn print_receiver_config(config: &PushReceiverConfig) {
@@ -457,13 +406,11 @@ fn parse_source(value: &str) -> Result<ImportSource> {
 }
 
 fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) -> Result<()> {
-    let mut config = CameraConnectorConfig::load(config_path)?;
+    let service = CameraConnectorService::new(config_path.map(Path::to_path_buf));
     match action {
         AccountCommand::List => {
-            println!(
-                "config: {}",
-                CameraConnectorConfig::resolved_path(config_path).display()
-            );
+            let config = service.load_config()?;
+            println!("config: {}", service.config_path().display());
             if config.accounts.is_empty() {
                 println!("accounts: -");
             } else {
@@ -486,10 +433,8 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             password,
             device_name,
         } => {
-            let account = config
-                .set_account(username, password.as_deref(), device_name)?
-                .clone();
-            let path = config.save(config_path)?;
+            let (account, path) =
+                service.set_account(username, password.as_deref(), device_name)?;
             println!(
                 "saved account {}\tdevice={}",
                 account.username, account.device_name
@@ -497,61 +442,15 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             println!("config: {}", path.display());
         }
         AccountCommand::Remove { username } => {
-            let removed = config.remove_account(&username);
-            let path = config.save(config_path)?;
+            let (removed, path) = service.remove_account(&username)?;
             println!(
                 "{} {username}",
-                if removed.is_some() {
-                    "removed"
-                } else {
-                    "not_found"
-                }
+                if removed { "removed" } else { "not_found" }
             );
             println!("config: {}", path.display());
         }
     }
     Ok(())
-}
-
-fn record_display_source(
-    record: &TransferRecord,
-    _accounts: &BTreeMap<String, ReceiverAccountConfig>,
-) -> Option<String> {
-    record.source_name.clone()
-}
-
-fn device_display_source(
-    device: &ConnectedDevice,
-    accounts: &BTreeMap<String, ReceiverAccountConfig>,
-) -> Option<String> {
-    device
-        .username
-        .as_deref()
-        .and_then(|username| accounts.get(username))
-        .map(|account| account.device_name.clone())
-        .or_else(|| device.source_name.clone())
-}
-
-fn remote_addr_display_label(remote_addr: &str) -> String {
-    if let Some(last_octet) = remote_addr
-        .rsplit('.')
-        .next()
-        .filter(|value| !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()))
-        .and_then(|value| value.parse::<u8>().ok())
-    {
-        return format!("IP-{last_octet:03}");
-    }
-
-    let digits = remote_addr
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect::<String>();
-    if digits.is_empty() {
-        "IP".to_string()
-    } else {
-        let start = digits.len().saturating_sub(3);
-        format!("IP-{:0>3}", &digits[start..])
-    }
 }
 
 fn source_protocol_label(source: ImportSource) -> &'static str {
@@ -566,32 +465,7 @@ fn source_protocol_label(source: ImportSource) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn transfer_display_source_uses_record_source_name_not_ip_binding() {
-        let accounts = BTreeMap::new();
-        let record = TransferRecord {
-            transfer_id: "ftp:1".to_string(),
-            protocol: "ftp".to_string(),
-            status: TransferStatus::Completed,
-            original_path: "BB/DSC_2552.NEF".to_string(),
-            final_filename: "DSC_2552.NEF".to_string(),
-            final_path: PathBuf::from("DSC_2552.NEF"),
-            size_bytes: 42,
-            remote_addr: Some("192.168.137.56".to_string()),
-            source_name: Some("Z5_2".to_string()),
-            started_at_ms: 10,
-            completed_at_ms: Some(20),
-            error: None,
-        };
-        let source = record_display_source(&record, &accounts);
-
-        assert_eq!(source.as_deref(), Some("Z5_2"));
-        assert_eq!(
-            record.virtual_display_path(source.as_deref()),
-            "Z5_2/BB/DSC_2552.NEF"
-        );
-    }
+    use camera_connector_core::{CameraConnectorConfig, ReceiverAccountConfig};
 
     #[test]
     fn account_config_round_trips() {
@@ -647,58 +521,6 @@ mod tests {
             .expect("password should verify"));
         assert_eq!(accounts[0].device_name, "Z5_2");
         let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn device_display_source_uses_authenticated_username() {
-        let mut accounts = BTreeMap::new();
-        accounts.insert(
-            "z5".to_string(),
-            ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
-        );
-        let device = ConnectedDevice {
-            remote_addr: "192.168.137.56".to_string(),
-            source_name: None,
-            username: Some("z5".to_string()),
-            first_seen_at_ms: 10,
-            last_seen_at_ms: 20,
-            last_disconnected_at_ms: None,
-            last_remote_port: Some(51120),
-            active_connections: 1,
-            online: true,
-        };
-
-        assert_eq!(
-            device_display_source(&device, &accounts).as_deref(),
-            Some("Z5_2")
-        );
-        assert_eq!(remote_addr_display_label(&device.remote_addr), "IP-056");
-    }
-
-    #[test]
-    fn device_filter_matches_username_and_online_state() {
-        let online_device = ConnectedDevice {
-            remote_addr: "192.168.137.56".to_string(),
-            source_name: Some("Z5_2".to_string()),
-            username: Some("z5".to_string()),
-            first_seen_at_ms: 10,
-            last_seen_at_ms: 20,
-            last_disconnected_at_ms: None,
-            last_remote_port: Some(51120),
-            active_connections: 1,
-            online: true,
-        };
-        let offline_device = ConnectedDevice {
-            online: false,
-            active_connections: 0,
-            last_disconnected_at_ms: Some(30),
-            ..online_device.clone()
-        };
-
-        assert!(device_matches_filters(&online_device, Some("z5"), true));
-        assert!(!device_matches_filters(&offline_device, Some("z5"), true));
-        assert!(!device_matches_filters(&online_device, Some("xt5"), false));
-        assert!(device_matches_filters(&offline_device, Some("z5"), false));
     }
 
     #[test]

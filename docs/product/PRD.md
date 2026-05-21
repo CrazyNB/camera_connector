@@ -134,15 +134,17 @@ flowchart LR
   Log["Transfer Log\nid + original path + source tags"]
   Index["Asset Index\nformat + RAW/JPEG grouping"]
   CoreConfig["Core Config\naccounts + credential storage"]
+  Service["Core Service\nreceiver + views"]
   UI["CLI / Mobile / Desktop UI"]
 
-  Camera --> Network --> Receiver --> Sink --> Index --> UI
-  Receiver --> Log --> UI
+  Camera --> Network --> Receiver --> Sink --> Index --> Service --> UI
+  Receiver --> Log --> Service
   CoreConfig --> Receiver
-  UI --> CoreConfig
+  CoreConfig --> Service
+  UI --> Service
 ```
 
-The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, and inbox model.
+The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views.
 
 ## 10. Milestones
 
