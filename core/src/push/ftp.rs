@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
@@ -386,17 +387,20 @@ async fn handle_stor(
 
     let upload_path = resolve_upload_path(&state.cwd, argument);
     let started_at_ms = current_time_ms();
+    let transfer_id = format!("ftp:{started_at_ms}:{upload_path}");
     reply(reader, "150 Opening data connection").await?;
     let (mut data, _) = timeout(DATA_TIMEOUT, listener.accept()).await??;
-    let mut bytes = Vec::new();
-    timeout(DATA_TIMEOUT, data.read_to_end(&mut bytes)).await??;
-
-    let transfer_id = format!("ftp:{started_at_ms}:{upload_path}");
-    let progress = LocalFileSink::new(&config.output_dir).write_complete(
-        &transfer_id,
-        &upload_path,
-        &bytes,
-    )?;
+    let mut upload =
+        LocalFileSink::new(&config.output_dir).begin_write(&transfer_id, &upload_path)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = timeout(DATA_TIMEOUT, data.read(&mut buffer)).await??;
+        if bytes_read == 0 {
+            break;
+        }
+        upload.write_all(&buffer[..bytes_read])?;
+    }
+    let progress = upload.finish()?;
     let final_path = progress
         .output_path
         .clone()

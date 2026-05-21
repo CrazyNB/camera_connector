@@ -6,6 +6,7 @@ use camera_connector_core::{
     ReceiverAccount, TransferStatus,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::time::{sleep, Duration};
 
 #[tokio::test]
 async fn ftp_server_accepts_passive_stor_upload() {
@@ -66,6 +67,11 @@ async fn ftp_server_accepts_passive_stor_upload() {
     data.write_all(&[1, 2, 3, 4, 5])
         .await
         .expect("data should write");
+    assert!(
+        wait_for_path(temp_dir.path().join("IMG_4321.CR3.tmp")).await,
+        "temporary upload file should exist before the data connection closes"
+    );
+    assert!(!temp_dir.path().join("IMG_4321.CR3").exists());
     data.shutdown().await.expect("data should close");
     assert_reply(&mut control, "226").await;
 
@@ -173,4 +179,15 @@ fn passive_addr_from_reply(reply: &str) -> SocketAddr {
     format!("{}.{}.{}.{}:{port}", parts[0], parts[1], parts[2], parts[3])
         .parse()
         .expect("passive address should parse")
+}
+
+async fn wait_for_path(path: impl AsRef<std::path::Path>) -> bool {
+    let path = path.as_ref();
+    for _ in 0..20 {
+        if path.exists() {
+            return true;
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    false
 }
