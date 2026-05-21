@@ -1,8 +1,9 @@
 use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
-    write_receiver_runtime_status, CameraConnectorConfig, CameraConnectorService, ImportSource,
-    PushProtocol, ReceiverAuthMode, ReceiverConfigRequest, ReceiverRuntimePhase,
-    ReceiverRuntimeStatus, StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
+    write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
+    ImportSource, ObjectFormat, PushProtocol, ReceiverAuthMode, ReceiverConfigRequest,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, StoredObjectLocation, TransferQuery,
+    TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -236,6 +237,95 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
         Some("content://media/external/images/media/2222")
     );
     assert_eq!(groups[0].primary.source, ImportSource::FtpPush);
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn service_filters_transfer_asset_groups_by_metadata_and_format() {
+    let state_dir = unique_temp_dir("service-transfer-group-filter");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:jpg".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_3000.JPG".to_string(),
+            final_filename: "IMG_3000.JPG".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_3000.JPG",
+            )),
+            size_bytes: 100,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("first transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:raw".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_3000.NEF".to_string(),
+            final_filename: "IMG_3000.NEF".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_3000.NEF",
+            )),
+            size_bytes: 200,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: None,
+        },
+    )
+    .expect("second transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:other".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/101/IMG_4000.JPG".to_string(),
+            final_filename: "IMG_4000.JPG".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_4000.JPG",
+            )),
+            size_bytes: 150,
+            remote_addr: Some("192.168.137.44".to_string()),
+            source_name: Some("X-T5".to_string()),
+            started_at_ms: 12,
+            completed_at_ms: Some(22),
+            error: None,
+        },
+    )
+    .expect("third transfer should append");
+
+    let service = CameraConnectorService::new(None);
+    let groups = service
+        .transfer_asset_groups_with_query(
+            &state_dir,
+            AssetGroupQuery {
+                source_name: Some("Z5_2".to_string()),
+                original_path: Some("dcim/100".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                format: Some(ObjectFormat::Nef),
+            },
+        )
+        .expect("filtered groups should load");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_key, "IMG_3000");
+    assert!(groups[0].jpeg.is_some());
+    assert!(groups[0].raw.is_some());
 
     let _ = std::fs::remove_dir_all(state_dir);
 }

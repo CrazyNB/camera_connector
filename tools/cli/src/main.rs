@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
-    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverConfigRequest, Result, StoredObjectLocation, TransferQuery, TransferRecord,
-    TransferRecordView, TransferStatus,
+    append_transfer_record, AssetGroupQuery, CameraConnectorRuntime, CameraConnectorService,
+    ImportSource, LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverConfigRequest, Result, StoredObjectLocation, TransferQuery,
+    TransferRecord, TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -104,6 +104,14 @@ enum Command {
         source: String,
         #[arg(long)]
         from_transfers: bool,
+        #[arg(long)]
+        source_name: Option<String>,
+        #[arg(long)]
+        original_path: Option<String>,
+        #[arg(long)]
+        remote_addr: Option<String>,
+        #[arg(long)]
+        format: Option<String>,
     },
     Transfers {
         #[arg(long)]
@@ -378,11 +386,23 @@ async fn main() -> Result<()> {
             path,
             source,
             from_transfers,
+            source_name,
+            original_path,
+            remote_addr,
+            format,
         }) => {
             let source = parse_source(&source)?;
             let service = CameraConnectorService::new(None);
             let groups = if from_transfers {
-                service.transfer_asset_groups(path)?
+                service.transfer_asset_groups_with_query(
+                    path,
+                    AssetGroupQuery {
+                        source_name,
+                        original_path,
+                        remote_addr,
+                        format: format.as_deref().map(parse_object_format).transpose()?,
+                    },
+                )?
             } else {
                 service.inbox_groups(path, source)?
             };
@@ -571,6 +591,28 @@ fn parse_source(value: &str) -> Result<ImportSource> {
     }
 }
 
+fn parse_object_format(value: &str) -> Result<ObjectFormat> {
+    let format = match value.to_ascii_lowercase().as_str() {
+        "jpg" | "jpeg" => ObjectFormat::Jpeg,
+        "nef" => ObjectFormat::Nef,
+        "nrw" => ObjectFormat::Nrw,
+        "cr2" => ObjectFormat::Cr2,
+        "cr3" => ObjectFormat::Cr3,
+        "arw" | "srf" | "sr2" => ObjectFormat::Arw,
+        "raf" => ObjectFormat::Raf,
+        "rw2" | "rwl" => ObjectFormat::Rw2,
+        "orf" => ObjectFormat::Orf,
+        "pef" => ObjectFormat::Pef,
+        "dng" => ObjectFormat::Dng,
+        "mov" => ObjectFormat::Mov,
+        "mp4" => ObjectFormat::Mp4,
+        "tif" | "tiff" => ObjectFormat::Tiff,
+        "unknown" => ObjectFormat::Unknown,
+        _ => return Err(camera_connector_core::ImporterError::InvalidUploadPath),
+    };
+    Ok(format)
+}
+
 fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) -> Result<()> {
     let service = CameraConnectorService::new(config_path.map(Path::to_path_buf));
     match action {
@@ -752,6 +794,14 @@ mod tests {
             "--path",
             "C:\\CameraConnector\\state",
             "--from-transfers",
+            "--source-name",
+            "Z5_2",
+            "--original-path",
+            "DCIM",
+            "--remote-addr",
+            "192.168.137.56",
+            "--format",
+            "nef",
         ])
         .expect("inbox from transfers command should parse");
 
@@ -759,6 +809,10 @@ mod tests {
             cli.command,
             Some(Command::Inbox {
                 from_transfers: true,
+                source_name: Some(_),
+                original_path: Some(_),
+                remote_addr: Some(_),
+                format: Some(_),
                 ..
             })
         ));

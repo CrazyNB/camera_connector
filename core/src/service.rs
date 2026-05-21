@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
-    scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, PushProtocol,
-    PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
     ReceiverRuntimeStatus, Result, TransferRecord, TransferStatus,
 };
 
@@ -33,6 +33,14 @@ pub struct TransferQuery {
     pub final_filename: Option<String>,
     pub source_name: Option<String>,
     pub remote_addr: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AssetGroupQuery {
+    pub source_name: Option<String>,
+    pub original_path: Option<String>,
+    pub remote_addr: Option<String>,
+    pub format: Option<ObjectFormat>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,12 +129,23 @@ impl CameraConnectorService {
         &self,
         state_dir: impl AsRef<Path>,
     ) -> Result<Vec<ReceivedAssetGroup>> {
+        self.transfer_asset_groups_with_query(state_dir, AssetGroupQuery::default())
+    }
+
+    pub fn transfer_asset_groups_with_query(
+        &self,
+        state_dir: impl AsRef<Path>,
+        query: AssetGroupQuery,
+    ) -> Result<Vec<ReceivedAssetGroup>> {
         let assets = read_transfer_log(state_dir)?
             .into_iter()
             .filter(|record| record.status == TransferStatus::Completed)
             .map(asset_from_transfer_record)
             .collect::<Vec<_>>();
-        Ok(group_received_assets(assets))
+        Ok(group_received_assets(assets)
+            .into_iter()
+            .filter(|group| asset_group_matches(group, &query))
+            .collect())
     }
 
     pub fn receiver_status(
@@ -180,6 +199,56 @@ impl CameraConnectorService {
             .collect::<Vec<_>>();
         Ok(views)
     }
+}
+
+fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> bool {
+    group_assets(group)
+        .into_iter()
+        .any(|asset| asset_matches(asset, query))
+}
+
+fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {
+    let mut assets = Vec::new();
+    assets.push(&group.primary);
+    if let Some(asset) = group.jpeg.as_ref() {
+        assets.push(asset);
+    }
+    if let Some(asset) = group.raw.as_ref() {
+        assets.push(asset);
+    }
+    if let Some(asset) = group.video.as_ref() {
+        assets.push(asset);
+    }
+    assets
+}
+
+fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {
+    query
+        .source_name
+        .as_ref()
+        .map(|expected| asset.display_source.as_ref() == Some(expected))
+        .unwrap_or(true)
+        && query
+            .remote_addr
+            .as_ref()
+            .map(|expected| asset.remote_addr.as_ref() == Some(expected))
+            .unwrap_or(true)
+        && query
+            .original_path
+            .as_ref()
+            .map(|expected| {
+                asset
+                    .original_path
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(&expected.to_ascii_lowercase())
+            })
+            .unwrap_or(true)
+        && query
+            .format
+            .map(|expected| asset.format == expected)
+            .unwrap_or(true)
 }
 
 fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {

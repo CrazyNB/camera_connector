@@ -247,6 +247,13 @@ if (($logBackedInboxOutput | Where-Object { $_ -like "*source=Verify Camera*disp
 }
 Write-Output $logBackedInboxOutput
 
+$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --source-name "Verify Camera" --original-path IMG_1234 --format cr3
+if ($LASTEXITCODE -ne 0) { throw "filtered log-backed inbox smoke failed" }
+if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*source=Verify Camera*" }).Count -lt 1) {
+    throw "filtered log-backed inbox did not include expected group"
+}
+Write-Output $filteredLogBackedInboxOutput
+
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 
