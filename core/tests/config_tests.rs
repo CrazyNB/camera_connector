@@ -1,5 +1,6 @@
 use camera_connector_core::{
     FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer, ReceiverAccount,
+    SftpPushServer,
 };
 use std::str::FromStr;
 
@@ -50,6 +51,16 @@ async fn push_receiver_server_rejects_sftp_until_implemented() {
     let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path());
 
     let result = PushReceiverServer::bind(config).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn sftp_server_reports_not_implemented() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path());
+
+    let result = SftpPushServer::bind(config).await;
 
     assert!(result.is_err());
 }
