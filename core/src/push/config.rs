@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -102,6 +104,92 @@ pub struct ReceiverAccountConfig {
     pub device_name: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraConnectorConfig {
+    #[serde(default)]
+    pub accounts: BTreeMap<String, ReceiverAccountConfig>,
+}
+
+impl CameraConnectorConfig {
+    pub fn load(config_path: Option<&Path>) -> Result<Self> {
+        let path = resolved_config_path(config_path);
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        let bytes = fs::read(&path)?;
+        let mut config: Self = serde_json::from_slice(&bytes)
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
+        config.accounts = config
+            .accounts
+            .into_values()
+            .map(ReceiverAccountConfig::validated)
+            .map(|result| result.map(|account| (account.username.clone(), account)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        Ok(config)
+    }
+
+    pub fn save(&self, config_path: Option<&Path>) -> Result<PathBuf> {
+        let path = resolved_config_path(config_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_vec_pretty(self)
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
+        fs::write(&path, json)?;
+        Ok(path)
+    }
+
+    pub fn resolved_path(config_path: Option<&Path>) -> PathBuf {
+        resolved_config_path(config_path)
+    }
+
+    pub fn default_path() -> PathBuf {
+        default_config_path()
+    }
+
+    pub fn set_account(
+        &mut self,
+        username: impl Into<String>,
+        password: Option<&str>,
+        device_name: impl Into<String>,
+    ) -> Result<&ReceiverAccountConfig> {
+        let account = ReceiverAccountConfig::new(username, password, device_name)?;
+        let username = account.username.clone();
+        self.accounts.insert(username.clone(), account);
+        self.accounts
+            .get(&username)
+            .ok_or_else(|| ImporterError::internal("saved account is missing"))
+    }
+
+    pub fn remove_account(&mut self, username: &str) -> Option<ReceiverAccountConfig> {
+        self.accounts.remove(username)
+    }
+
+    pub fn effective_accounts(
+        self,
+        username: Option<&str>,
+        password: Option<&str>,
+        device_name: Option<&str>,
+    ) -> Result<Vec<ReceiverAccount>> {
+        let mut accounts = self
+            .accounts
+            .into_values()
+            .map(ReceiverAccountConfig::into_receiver_account)
+            .collect::<Vec<_>>();
+
+        if let Some(username) = username {
+            let transient =
+                ReceiverAccountConfig::new(username, password, device_name.unwrap_or(username))?
+                    .into_receiver_account();
+            accounts.retain(|account| account.username != username);
+            accounts.push(transient);
+        }
+
+        Ok(accounts)
+    }
+}
+
 impl ReceiverAccountConfig {
     pub fn new(
         username: impl Into<String>,
@@ -189,6 +277,26 @@ fn normalized_required(field: &str, value: &str) -> Result<String> {
         return Err(ImporterError::internal(format!("{field} cannot be empty")));
     }
     Ok(normalized)
+}
+
+fn resolved_config_path(config_path: Option<&Path>) -> PathBuf {
+    config_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_config_path)
+}
+
+fn default_config_path() -> PathBuf {
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return PathBuf::from(appdata)
+            .join("CameraConnector")
+            .join("config.json");
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        return PathBuf::from(home)
+            .join(".camera-connector")
+            .join("config.json");
+    }
+    PathBuf::from("camera-connector-config.json")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

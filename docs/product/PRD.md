@@ -133,11 +133,16 @@ flowchart LR
   Sink["Flat File Sink\n.tmp then publish"]
   Log["Transfer Log\nid + original path + source tags"]
   Index["Asset Index\nformat + RAW/JPEG grouping"]
+  CoreConfig["Core Config\naccounts + credential storage"]
   UI["CLI / Mobile / Desktop UI"]
 
   Camera --> Network --> Receiver --> Sink --> Index --> UI
   Receiver --> Log --> UI
+  CoreConfig --> Receiver
+  UI --> CoreConfig
 ```
+
+The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, and inbox model.
 
 ## 10. Milestones
 

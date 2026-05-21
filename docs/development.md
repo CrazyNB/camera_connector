@@ -93,5 +93,7 @@ Transfer records also expose a virtual display path. With an account device name
 
 Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. Use `--config C:\path\to\config.json` on `account`, `receiver-config`, `serve-ftp`, `devices`, and `transfers` to test with an alternate config file.
 
+The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, transfer logs, connected devices, flat inbox handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call core APIs, and print results.
+
 Duplicate uploads are preserved with numbered filenames such as `IMG_1234 (1).CR3`; existing completed files are not overwritten.
 

@@ -5,11 +5,11 @@ use std::str::FromStr;
 
 use camera_connector_core::{
     append_transfer_record, read_connected_devices, read_transfer_log, scan_inbox_groups,
-    ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig,
-    ReceivedAsset, ReceiverAccount, ReceiverAccountConfig, Result, TransferRecord, TransferStatus,
+    CameraConnectorConfig, ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverAccountConfig, Result, TransferRecord,
+    TransferStatus,
 };
 use clap::{Parser, Subcommand};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(name = "camera-connector")]
@@ -135,12 +135,6 @@ struct ConfigArgs {
     password: Option<String>,
     advertised_host: Option<String>,
     source_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-struct AppConfig {
-    #[serde(default)]
-    accounts: BTreeMap<String, ReceiverAccountConfig>,
 }
 
 #[tokio::main]
@@ -297,7 +291,7 @@ async fn main() -> Result<()> {
             source_name,
             remote_addr,
         }) => {
-            let accounts = load_app_config(config.as_deref())?.accounts;
+            let accounts = CameraConnectorConfig::load(config.as_deref())?.accounts;
             for record in read_transfer_log(path)?
                 .into_iter()
                 .filter(|record| {
@@ -368,7 +362,7 @@ async fn main() -> Result<()> {
             username,
             online,
         }) => {
-            let accounts = load_app_config(config.as_deref())?.accounts;
+            let accounts = CameraConnectorConfig::load(config.as_deref())?.accounts;
             for device in read_connected_devices(path)?
                 .into_iter()
                 .filter(|device| device_matches_filters(device, username.as_deref(), online))
@@ -409,12 +403,12 @@ fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
     let mut config = PushReceiverConfig::new(args.protocol, args.bind_host, args.port, args.output);
     config.advertised_host = args.advertised_host;
     config.source_name = args.source_name;
-    config.accounts = effective_accounts(
-        args.config_path.as_deref(),
-        args.username.as_deref(),
-        args.password.as_deref(),
-        config.source_name.as_deref(),
-    )?;
+    config.accounts = CameraConnectorConfig::load(args.config_path.as_deref())?
+        .effective_accounts(
+            args.username.as_deref(),
+            args.password.as_deref(),
+            config.source_name.as_deref(),
+        )?;
     Ok(config)
 }
 
@@ -462,37 +456,14 @@ fn parse_source(value: &str) -> Result<ImportSource> {
     }
 }
 
-fn effective_accounts(
-    config_path: Option<&Path>,
-    username: Option<&str>,
-    password: Option<&str>,
-    device_name: Option<&str>,
-) -> Result<Vec<ReceiverAccount>> {
-    let mut accounts = load_app_config(config_path)?
-        .accounts
-        .into_values()
-        .map(ReceiverAccountConfig::into_receiver_account)
-        .collect::<Vec<_>>();
-
-    if let Some(username) = username {
-        let transient = ReceiverAccountConfig::new(
-            username.to_string(),
-            password,
-            device_name.unwrap_or(username).to_string(),
-        )?
-        .into_receiver_account();
-        accounts.retain(|account| account.username != username);
-        accounts.push(transient);
-    }
-
-    Ok(accounts)
-}
-
 fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) -> Result<()> {
-    let mut config = load_app_config(config_path)?;
+    let mut config = CameraConnectorConfig::load(config_path)?;
     match action {
         AccountCommand::List => {
-            println!("config: {}", resolved_config_path(config_path).display());
+            println!(
+                "config: {}",
+                CameraConnectorConfig::resolved_path(config_path).display()
+            );
             if config.accounts.is_empty() {
                 println!("accounts: -");
             } else {
@@ -515,11 +486,10 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             password,
             device_name,
         } => {
-            let account = ReceiverAccountConfig::new(username, password.as_deref(), device_name)?;
-            config
-                .accounts
-                .insert(account.username.clone(), account.clone());
-            let path = save_app_config(config_path, &config)?;
+            let account = config
+                .set_account(username, password.as_deref(), device_name)?
+                .clone();
+            let path = config.save(config_path)?;
             println!(
                 "saved account {}\tdevice={}",
                 account.username, account.device_name
@@ -527,8 +497,8 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             println!("config: {}", path.display());
         }
         AccountCommand::Remove { username } => {
-            let removed = config.accounts.remove(&username);
-            let path = save_app_config(config_path, &config)?;
+            let removed = config.remove_account(&username);
+            let path = config.save(config_path)?;
             println!(
                 "{} {username}",
                 if removed.is_some() {
@@ -541,55 +511,6 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
         }
     }
     Ok(())
-}
-
-fn load_app_config(config_path: Option<&Path>) -> Result<AppConfig> {
-    let path = resolved_config_path(config_path);
-    if !path.exists() {
-        return Ok(AppConfig::default());
-    }
-
-    let bytes = fs::read(&path)?;
-    let mut config: AppConfig = serde_json::from_slice(&bytes)
-        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))?;
-    config.accounts = config
-        .accounts
-        .into_values()
-        .map(ReceiverAccountConfig::validated)
-        .map(|result| result.map(|account| (account.username.clone(), account)))
-        .collect::<Result<BTreeMap<_, _>>>()?;
-    Ok(config)
-}
-
-fn save_app_config(config_path: Option<&Path>, config: &AppConfig) -> Result<PathBuf> {
-    let path = resolved_config_path(config_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_vec_pretty(config)
-        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))?;
-    fs::write(&path, json)?;
-    Ok(path)
-}
-
-fn resolved_config_path(config_path: Option<&Path>) -> PathBuf {
-    config_path
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_config_path)
-}
-
-fn default_config_path() -> PathBuf {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata)
-            .join("CameraConnector")
-            .join("config.json");
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
-        return PathBuf::from(home)
-            .join(".camera-connector")
-            .join("config.json");
-    }
-    PathBuf::from("camera-connector-config.json")
 }
 
 fn record_display_source(
@@ -675,17 +596,17 @@ mod tests {
     #[test]
     fn account_config_round_trips() {
         let path = unique_temp_config_path("round-trip");
-        let mut config = AppConfig::default();
+        let mut config = CameraConnectorConfig::default();
         config.accounts.insert(
             "z5".to_string(),
             ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
         );
 
-        save_app_config(Some(&path), &config).expect("config saves");
+        config.save(Some(&path)).expect("config saves");
         let raw = std::fs::read_to_string(&path).expect("config should read");
         assert!(!raw.contains("secret"));
         assert!(raw.contains("password_hash"));
-        let loaded = load_app_config(Some(&path)).expect("config loads");
+        let loaded = CameraConnectorConfig::load(Some(&path)).expect("config loads");
 
         let account = loaded.accounts.get("z5").expect("account exists");
         assert!(account.password_hash.is_some());
@@ -704,14 +625,16 @@ mod tests {
     #[test]
     fn configured_accounts_build_receiver_accounts() {
         let path = unique_temp_config_path("accounts");
-        let mut config = AppConfig::default();
+        let mut config = CameraConnectorConfig::default();
         config.accounts.insert(
             "z5".to_string(),
             ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
         );
-        save_app_config(Some(&path), &config).expect("config saves");
+        config.save(Some(&path)).expect("config saves");
 
-        let accounts = effective_accounts(Some(&path), None, None, None)
+        let accounts = CameraConnectorConfig::load(Some(&path))
+            .expect("config loads")
+            .effective_accounts(None, None, None)
             .expect("accounts should load from config");
 
         assert_eq!(accounts.len(), 1);
