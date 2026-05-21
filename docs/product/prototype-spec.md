@@ -30,6 +30,7 @@ Content:
 - Host/IP and port.
 - Selected camera account, username, and password status.
 - Output folder.
+- Runtime status from receiver metadata, including stale/offline detection after force quit or crash.
 - Start/stop receiver action.
 - Firewall/setup warning when needed.
 
@@ -86,6 +87,7 @@ Content:
 - Credentials.
 - Camera accounts: manage FTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
 - Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
+- Receiver status metadata: show phase, auth mode, bound address, account count, output folder, and diagnostic message.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.

@@ -113,6 +113,22 @@ This file powers the "connected devices" view and shows the latest IP used by ea
 
 When the FTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old control connections still exist, so the device view only returns to online after the camera opens a new connection.
 
+## Receiver Runtime Status
+
+The receiver writes `receiver-status.json` in the output folder. It records:
+
+- `phase`: stopped, starting, running, stopping, or failed.
+- `protocol`: FTP, SFTP, or FTPS when known.
+- `auth_mode`: anonymous or accounts.
+- `local_addr`: the socket address that accepted camera connections.
+- `output_dir`.
+- `account_count`.
+- `message`: failure or diagnostic text.
+
+The status file is receiver metadata, not an inbox asset. Inbox scans must ignore it, just like `transfer-log.jsonl` and `connected-devices.json`.
+
+Status readers should treat a stale `Running` file as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
+
 ## Real Camera Verification
 
 For each camera, record:

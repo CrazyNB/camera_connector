@@ -67,6 +67,7 @@ P0:
 - Persist camera account passwords as core-generated hashes; never store or display plaintext passwords after setup.
 - Show current and recently connected devices from receiver metadata so the latest IP is visible as connection state, not account identity.
 - Expose receiver runtime lifecycle from core: stopped, starting, running, stopping, and failed.
+- Persist receiver runtime status as receiver metadata and detect stale `Running` status when the listener is no longer reachable.
 - Record real-camera compatibility results.
 
 P1:
@@ -109,7 +110,7 @@ P2:
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, and device name; receiver authenticates against these accounts, stores password hashes rather than plaintext passwords, and rejects invalid account config |
 | RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
-| RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message |
+| RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
 | RX-015 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
 | RX-016 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |

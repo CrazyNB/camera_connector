@@ -649,6 +649,14 @@
                 <span>Output</span>
                 <strong>Pictures/CameraConnector</strong>
               </div>
+              <div class="runtime-cell">
+                <span>Status file</span>
+                <strong>receiver-status.json</strong>
+              </div>
+              <div class="runtime-cell">
+                <span>Stale check</span>
+                <strong>端口不可达则离线</strong>
+              </div>
             </div>
           </section>
 
@@ -952,7 +960,7 @@
               <button class="secondary" style="min-height: 34px;">编辑</button>
             </div>
             <div class="kv"><span>IP 策略</span><strong>仅作为本次连接来源，重连变化后自动更新</strong></div>
-            <div class="kv"><span>运行时</span><strong>phase=Running · auth=Accounts · accounts=1</strong></div>
+            <div class="kv"><span>运行时</span><strong>phase=Running · auth=Accounts · accounts=1 · stale=auto-offline</strong></div>
             <div class="button-row" style="margin-top: 10px;">
               <button class="secondary">刷新</button>
               <button class="secondary">新增账号</button>
