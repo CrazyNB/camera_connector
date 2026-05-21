@@ -70,6 +70,24 @@ enum Command {
         #[arg(long)]
         source_name: Option<String>,
     },
+    ServeSftp {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long, default_value = "0.0.0.0")]
+        bind_host: String,
+        #[arg(long, default_value_t = 2222)]
+        port: u16,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        advertised_host: Option<String>,
+        #[arg(long)]
+        source_name: Option<String>,
+    },
     Inbox {
         #[arg(long)]
         path: PathBuf,
@@ -290,6 +308,38 @@ async fn main() -> Result<()> {
                 camera_connector_core::ImporterError::internal("missing local address")
             })?;
             println!("ftp receiver listening on {local_addr}");
+            print_receiver_config(&receiver_config);
+            tokio::signal::ctrl_c().await?;
+            runtime.stop_receiver().await?;
+        }
+        Some(Command::ServeSftp {
+            config,
+            bind_host,
+            port,
+            output,
+            username,
+            password,
+            advertised_host,
+            source_name,
+        }) => {
+            let service = CameraConnectorService::new(config.clone());
+            let runtime = CameraConnectorRuntime::new(service.clone());
+            let request = ReceiverConfigRequest {
+                protocol: PushProtocol::Sftp,
+                bind_host,
+                port,
+                output_dir: output,
+                username,
+                password,
+                advertised_host,
+                source_name,
+            };
+            let receiver_config = service.receiver_config(request.clone())?;
+            let status = runtime.start_receiver(request).await?;
+            let local_addr = status.local_addr.ok_or_else(|| {
+                camera_connector_core::ImporterError::internal("missing local address")
+            })?;
+            println!("sftp receiver listening on {local_addr}");
             print_receiver_config(&receiver_config);
             tokio::signal::ctrl_c().await?;
             runtime.stop_receiver().await?;
@@ -607,6 +657,19 @@ mod tests {
         let result = parse_source("ftps");
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_serve_sftp_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "serve-sftp",
+            "--output",
+            "C:\\CameraConnector",
+        ])
+        .expect("serve-sftp command should parse");
+
+        assert!(matches!(cli.command, Some(Command::ServeSftp { .. })));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {
