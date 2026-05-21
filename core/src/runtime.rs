@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -23,23 +24,30 @@ struct RuntimeInner {
     task: Option<JoinHandle<()>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiverRuntimeStatus {
     pub phase: ReceiverRuntimePhase,
     pub protocol: Option<PushProtocol>,
+    pub auth_mode: ReceiverAuthMode,
     pub local_addr: Option<SocketAddr>,
     pub output_dir: Option<PathBuf>,
     pub account_count: usize,
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReceiverRuntimePhase {
     Stopped,
     Starting,
     Running,
     Stopping,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReceiverAuthMode {
+    Anonymous,
+    Accounts,
 }
 
 impl CameraConnectorRuntime {
@@ -82,6 +90,7 @@ impl CameraConnectorRuntime {
             inner.status = ReceiverRuntimeStatus {
                 phase: ReceiverRuntimePhase::Starting,
                 protocol: Some(request.protocol),
+                auth_mode: ReceiverAuthMode::Anonymous,
                 local_addr: None,
                 output_dir: Some(request.output_dir.clone()),
                 account_count: 0,
@@ -105,6 +114,7 @@ impl CameraConnectorRuntime {
                 self.set_status(ReceiverRuntimeStatus {
                     phase: ReceiverRuntimePhase::Failed,
                     protocol: Some(protocol),
+                    auth_mode: auth_mode(account_count),
                     local_addr: None,
                     output_dir: Some(output_dir),
                     account_count,
@@ -133,6 +143,7 @@ impl CameraConnectorRuntime {
                 Err(error) => ReceiverRuntimeStatus {
                     phase: ReceiverRuntimePhase::Failed,
                     protocol: Some(protocol),
+                    auth_mode: auth_mode(account_count),
                     local_addr: None,
                     output_dir: Some(task_output_dir),
                     account_count,
@@ -144,6 +155,7 @@ impl CameraConnectorRuntime {
         let status = ReceiverRuntimeStatus {
             phase: ReceiverRuntimePhase::Running,
             protocol: Some(protocol),
+            auth_mode: auth_mode(account_count),
             local_addr: Some(local_addr),
             output_dir: Some(output_dir),
             account_count,
@@ -190,6 +202,7 @@ impl CameraConnectorRuntime {
         self.set_status(ReceiverRuntimeStatus {
             phase: ReceiverRuntimePhase::Failed,
             protocol: None,
+            auth_mode: ReceiverAuthMode::Anonymous,
             local_addr: None,
             output_dir: None,
             account_count: 0,
@@ -209,9 +222,18 @@ fn stopped_status() -> ReceiverRuntimeStatus {
     ReceiverRuntimeStatus {
         phase: ReceiverRuntimePhase::Stopped,
         protocol: None,
+        auth_mode: ReceiverAuthMode::Anonymous,
         local_addr: None,
         output_dir: None,
         account_count: 0,
         message: None,
+    }
+}
+
+fn auth_mode(account_count: usize) -> ReceiverAuthMode {
+    if account_count == 0 {
+        ReceiverAuthMode::Anonymous
+    } else {
+        ReceiverAuthMode::Accounts
     }
 }

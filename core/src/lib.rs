@@ -20,7 +20,9 @@ pub use receive::{
     TransferRecord, TransferStatus,
 };
 pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};
-pub use runtime::{CameraConnectorRuntime, ReceiverRuntimePhase, ReceiverRuntimeStatus};
+pub use runtime::{
+    CameraConnectorRuntime, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,
+};
 pub use service::{
     CameraConnectorService, ConnectedDeviceView, ReceiverConfigRequest, TransferQuery,
     TransferRecordView,
