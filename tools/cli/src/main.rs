@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, AssetGroupQuery, CameraConnectorRuntime, CameraConnectorService,
-    ImportSource, LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverConfigRequest, Result, StoredObjectLocation, TransferQuery,
-    TransferRecord, TransferRecordView, TransferStatus,
+    append_transfer_record, AssetFacetCount, AssetGroupQuery, AssetGroupSummary,
+    CameraConnectorRuntime, CameraConnectorService, ImportSource, LocalFileSink, ObjectFormat,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverConfigRequest,
+    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
+    TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -104,6 +105,8 @@ enum Command {
         source: String,
         #[arg(long)]
         from_transfers: bool,
+        #[arg(long)]
+        summary: bool,
         #[arg(long)]
         source_name: Option<String>,
         #[arg(long)]
@@ -386,6 +389,7 @@ async fn main() -> Result<()> {
             path,
             source,
             from_transfers,
+            summary,
             source_name,
             original_path,
             remote_addr,
@@ -393,16 +397,18 @@ async fn main() -> Result<()> {
         }) => {
             let source = parse_source(&source)?;
             let service = CameraConnectorService::new(None);
+            let query = AssetGroupQuery {
+                source_name,
+                original_path,
+                remote_addr,
+                format: format.as_deref().map(parse_object_format).transpose()?,
+            };
+            if summary && from_transfers {
+                let summary = service.transfer_asset_summary_with_query(&path, query.clone())?;
+                println!("{}", asset_group_summary_line(&summary));
+            }
             let groups = if from_transfers {
-                service.transfer_asset_groups_with_query(
-                    path,
-                    AssetGroupQuery {
-                        source_name,
-                        original_path,
-                        remote_addr,
-                        format: format.as_deref().map(parse_object_format).transpose()?,
-                    },
-                )?
+                service.transfer_asset_groups_with_query(path, query)?
             } else {
                 service.inbox_groups(path, source)?
             };
@@ -485,6 +491,30 @@ fn print_asset_groups(groups: Vec<ReceivedAssetGroup>) {
     for group in groups {
         println!("{}", asset_group_line(&group));
     }
+}
+
+fn asset_group_summary_line(summary: &AssetGroupSummary) -> String {
+    format!(
+        "summary\tgroups={}\tassets={}\tjpeg_groups={}\traw_groups={}\tvideo_groups={}\tsources={}\tremotes={}",
+        summary.group_count,
+        summary.asset_count,
+        summary.groups_with_jpeg,
+        summary.groups_with_raw,
+        summary.groups_with_video,
+        facet_counts_label(&summary.source_counts),
+        facet_counts_label(&summary.remote_addr_counts)
+    )
+}
+
+fn facet_counts_label(counts: &[AssetFacetCount]) -> String {
+    if counts.is_empty() {
+        return "-".to_string();
+    }
+    counts
+        .iter()
+        .map(|count| format!("{}:{}", count.value, count.group_count))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn asset_group_line(group: &ReceivedAssetGroup) -> String {
@@ -794,6 +824,7 @@ mod tests {
             "--path",
             "C:\\CameraConnector\\state",
             "--from-transfers",
+            "--summary",
             "--source-name",
             "Z5_2",
             "--original-path",
@@ -809,6 +840,7 @@ mod tests {
             cli.command,
             Some(Command::Inbox {
                 from_transfers: true,
+                summary: true,
                 source_name: Some(_),
                 original_path: Some(_),
                 remote_addr: Some(_),
@@ -877,6 +909,32 @@ mod tests {
         assert!(line.contains("remote=192.168.137.56"));
         assert!(line.contains("original=DCIM/IMG_0001.CR3"));
         assert!(line.contains("display=Z5_2/DCIM/IMG_0001.CR3"));
+    }
+
+    #[test]
+    fn asset_group_summary_line_prints_filter_counts() {
+        let summary = AssetGroupSummary {
+            group_count: 2,
+            asset_count: 3,
+            groups_with_jpeg: 1,
+            groups_with_raw: 1,
+            groups_with_video: 1,
+            source_counts: vec![AssetFacetCount {
+                value: "Z5_2".to_string(),
+                group_count: 2,
+            }],
+            remote_addr_counts: vec![AssetFacetCount {
+                value: "192.168.137.56".to_string(),
+                group_count: 2,
+            }],
+        };
+
+        let line = asset_group_summary_line(&summary);
+
+        assert!(line.contains("groups=2"));
+        assert!(line.contains("raw_groups=1"));
+        assert!(line.contains("sources=Z5_2:2"));
+        assert!(line.contains("remotes=192.168.137.56:2"));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

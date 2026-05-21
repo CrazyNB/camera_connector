@@ -331,6 +331,93 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
 }
 
 #[test]
+fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
+    let state_dir = unique_temp_dir("service-transfer-group-summary");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:jpg".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_5000.JPG".to_string(),
+            final_filename: "IMG_5000.JPG".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_5000.JPG",
+            )),
+            size_bytes: 100,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("jpg transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:raw".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_5000.NEF".to_string(),
+            final_filename: "IMG_5000.NEF".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_5000.NEF",
+            )),
+            size_bytes: 200,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: None,
+        },
+    )
+    .expect("raw transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "sftp:video".to_string(),
+            protocol: "sftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "PRIVATE/CLIP_1.MOV".to_string(),
+            final_filename: "CLIP_1.MOV".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::media_uri(
+                "content://media/external/video/media/1",
+            )),
+            size_bytes: 300,
+            remote_addr: Some("192.168.137.44".to_string()),
+            source_name: Some("X-T5".to_string()),
+            started_at_ms: 12,
+            completed_at_ms: Some(22),
+            error: None,
+        },
+    )
+    .expect("video transfer should append");
+
+    let service = CameraConnectorService::new(None);
+    let summary = service
+        .transfer_asset_summary_with_query(&state_dir, AssetGroupQuery::default())
+        .expect("summary should load");
+
+    assert_eq!(summary.group_count, 2);
+    assert_eq!(summary.asset_count, 3);
+    assert_eq!(summary.groups_with_jpeg, 1);
+    assert_eq!(summary.groups_with_raw, 1);
+    assert_eq!(summary.groups_with_video, 1);
+    assert_eq!(summary.source_counts[0].value, "X-T5");
+    assert_eq!(summary.source_counts[0].group_count, 1);
+    assert_eq!(summary.source_counts[1].value, "Z5_2");
+    assert_eq!(summary.source_counts[1].group_count, 1);
+    assert_eq!(summary.remote_addr_counts.len(), 2);
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_reads_receiver_runtime_status() {
     let output_dir = unique_temp_dir("service-runtime-status");
     std::fs::create_dir_all(&output_dir).expect("output dir should create");

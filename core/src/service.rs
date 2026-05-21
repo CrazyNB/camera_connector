@@ -53,6 +53,23 @@ pub struct TransferRecordView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetFacetCount {
+    pub value: String,
+    pub group_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetGroupSummary {
+    pub group_count: usize,
+    pub asset_count: usize,
+    pub groups_with_jpeg: usize,
+    pub groups_with_raw: usize,
+    pub groups_with_video: usize,
+    pub source_counts: Vec<AssetFacetCount>,
+    pub remote_addr_counts: Vec<AssetFacetCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectedDeviceView {
     pub device: ConnectedDevice,
     pub display_source: String,
@@ -148,6 +165,15 @@ impl CameraConnectorService {
             .collect())
     }
 
+    pub fn transfer_asset_summary_with_query(
+        &self,
+        state_dir: impl AsRef<Path>,
+        query: AssetGroupQuery,
+    ) -> Result<AssetGroupSummary> {
+        self.transfer_asset_groups_with_query(state_dir, query)
+            .map(|groups| summarize_asset_groups(&groups))
+    }
+
     pub fn receiver_status(
         &self,
         output_dir: impl AsRef<Path>,
@@ -201,6 +227,37 @@ impl CameraConnectorService {
     }
 }
 
+fn summarize_asset_groups(groups: &[ReceivedAssetGroup]) -> AssetGroupSummary {
+    let mut source_counts = BTreeMap::<String, usize>::new();
+    let mut remote_addr_counts = BTreeMap::<String, usize>::new();
+
+    for group in groups {
+        if let Some(source) = group.primary.display_source.as_ref() {
+            *source_counts.entry(source.clone()).or_default() += 1;
+        }
+        if let Some(remote_addr) = group.primary.remote_addr.as_ref() {
+            *remote_addr_counts.entry(remote_addr.clone()).or_default() += 1;
+        }
+    }
+
+    AssetGroupSummary {
+        group_count: groups.len(),
+        asset_count: groups.iter().map(|group| group_assets(group).len()).sum(),
+        groups_with_jpeg: groups.iter().filter(|group| group.jpeg.is_some()).count(),
+        groups_with_raw: groups.iter().filter(|group| group.raw.is_some()).count(),
+        groups_with_video: groups.iter().filter(|group| group.video.is_some()).count(),
+        source_counts: facet_counts(source_counts),
+        remote_addr_counts: facet_counts(remote_addr_counts),
+    }
+}
+
+fn facet_counts(counts: BTreeMap<String, usize>) -> Vec<AssetFacetCount> {
+    counts
+        .into_iter()
+        .map(|(value, group_count)| AssetFacetCount { value, group_count })
+        .collect()
+}
+
 fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> bool {
     group_assets(group)
         .into_iter()
@@ -209,17 +266,23 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
 
 fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {
     let mut assets = Vec::new();
-    assets.push(&group.primary);
+    push_unique_asset(&mut assets, &group.primary);
     if let Some(asset) = group.jpeg.as_ref() {
-        assets.push(asset);
+        push_unique_asset(&mut assets, asset);
     }
     if let Some(asset) = group.raw.as_ref() {
-        assets.push(asset);
+        push_unique_asset(&mut assets, asset);
     }
     if let Some(asset) = group.video.as_ref() {
-        assets.push(asset);
+        push_unique_asset(&mut assets, asset);
     }
     assets
+}
+
+fn push_unique_asset<'a>(assets: &mut Vec<&'a ReceivedAsset>, asset: &'a ReceivedAsset) {
+    if !assets.iter().any(|existing| existing.id == asset.id) {
+        assets.push(asset);
+    }
 }
 
 fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {

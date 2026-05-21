@@ -234,8 +234,11 @@ if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
-$logBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers
+$logBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --summary
 if ($LASTEXITCODE -ne 0) { throw "log-backed inbox smoke failed" }
+if (($logBackedInboxOutput | Where-Object { $_ -like "summary*groups=2*raw_groups=2*sources=Verify Camera:2*" }).Count -lt 1) {
+    throw "log-backed inbox did not expose summary counts"
+}
 if (($logBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.CR3*" }).Count -lt 1) {
     throw "log-backed inbox did not group transfers"
 }
