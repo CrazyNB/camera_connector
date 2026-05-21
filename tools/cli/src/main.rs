@@ -130,6 +130,16 @@ enum AccountCommand {
         #[arg(long)]
         ip: String,
     },
+    BindDevice {
+        #[arg(long)]
+        username: String,
+        #[arg(long = "devices-path")]
+        devices_path: PathBuf,
+        #[arg(long)]
+        ip: Option<String>,
+        #[arg(long)]
+        online: bool,
+    },
     UnbindIp {
         #[arg(long)]
         username: String,
@@ -573,18 +583,16 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
         }
         AccountCommand::BindIp { username, ip } => {
             let ip = normalize_ip(&ip)?;
-            ensure_ip_available_for_account(&config.accounts, &username, &ip)?;
-            let Some(account) = config.accounts.get_mut(&username) else {
-                return Err(camera_connector_core::ImporterError::internal(format!(
-                    "account '{username}' not found"
-                )));
-            };
-            if !account.remote_addrs.iter().any(|addr| addr == &ip) {
-                account.remote_addrs.push(ip.clone());
-            }
-            let path = save_app_config(config_path, &config)?;
-            println!("bound {ip} to {username}");
-            println!("config: {}", path.display());
+            bind_ip_to_account(config_path, &mut config, &username, &ip)?;
+        }
+        AccountCommand::BindDevice {
+            username,
+            devices_path,
+            ip,
+            online,
+        } => {
+            let ip = resolve_device_ip(&devices_path, ip.as_deref(), online)?;
+            bind_ip_to_account(config_path, &mut config, &username, &ip)?;
         }
         AccountCommand::UnbindIp { username, ip } => {
             let ip = normalize_ip(&ip)?;
@@ -600,6 +608,48 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
         }
     }
     Ok(())
+}
+
+fn bind_ip_to_account(
+    config_path: Option<&Path>,
+    config: &mut AppConfig,
+    username: &str,
+    ip: &str,
+) -> Result<()> {
+    ensure_ip_available_for_account(&config.accounts, username, ip)?;
+    let Some(account) = config.accounts.get_mut(username) else {
+        return Err(camera_connector_core::ImporterError::internal(format!(
+            "account '{username}' not found"
+        )));
+    };
+    if !account.remote_addrs.iter().any(|addr| addr == ip) {
+        account.remote_addrs.push(ip.to_string());
+    }
+    let path = save_app_config(config_path, config)?;
+    println!("bound {ip} to {username}");
+    println!("config: {}", path.display());
+    Ok(())
+}
+
+fn resolve_device_ip(devices_path: &Path, ip: Option<&str>, online_only: bool) -> Result<String> {
+    if let Some(ip) = ip {
+        return normalize_ip(ip);
+    }
+
+    let devices = read_connected_devices(devices_path)?
+        .into_iter()
+        .filter(|device| !online_only || device.online)
+        .collect::<Vec<_>>();
+
+    match devices.as_slice() {
+        [device] => normalize_ip(&device.remote_addr),
+        [] => Err(camera_connector_core::ImporterError::internal(
+            "no connected device found to bind",
+        )),
+        _ => Err(camera_connector_core::ImporterError::internal(
+            "multiple connected devices found; pass --ip",
+        )),
+    }
 }
 
 fn load_app_config(config_path: Option<&Path>) -> Result<AppConfig> {
@@ -990,6 +1040,97 @@ mod tests {
         let loaded = load_app_config(Some(&path)).expect("config loads");
         assert!(loaded.accounts["xt5"].remote_addrs.is_empty());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn account_bind_device_uses_only_online_device() {
+        let config_path = unique_temp_config_path("bind-device-config");
+        let devices_dir = tempfile::tempdir().expect("devices dir should be created");
+        let mut config = AppConfig::default();
+        config.accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: Vec::new(),
+            },
+        );
+        save_app_config(Some(&config_path), &config).expect("config saves");
+        camera_connector_core::record_device_connected(
+            devices_dir.path(),
+            "192.168.137.56",
+            Some(51120),
+            None,
+            None,
+        )
+        .expect("device records");
+
+        handle_account_command(
+            Some(&config_path),
+            AccountCommand::BindDevice {
+                username: "z5".to_string(),
+                devices_path: devices_dir.path().to_path_buf(),
+                ip: None,
+                online: true,
+            },
+        )
+        .expect("device binds");
+
+        let loaded = load_app_config(Some(&config_path)).expect("config loads");
+        assert_eq!(
+            loaded.accounts["z5"].remote_addrs,
+            vec!["192.168.137.56".to_string()]
+        );
+        let _ = std::fs::remove_file(config_path);
+    }
+
+    #[test]
+    fn account_bind_device_rejects_ambiguous_devices_without_ip() {
+        let config_path = unique_temp_config_path("bind-device-ambiguous");
+        let devices_dir = tempfile::tempdir().expect("devices dir should be created");
+        let mut config = AppConfig::default();
+        config.accounts.insert(
+            "z5".to_string(),
+            CameraAccountConfig {
+                username: "z5".to_string(),
+                password: Some("secret".to_string()),
+                device_name: "Z5_2".to_string(),
+                remote_addrs: Vec::new(),
+            },
+        );
+        save_app_config(Some(&config_path), &config).expect("config saves");
+        camera_connector_core::record_device_connected(
+            devices_dir.path(),
+            "192.168.137.56",
+            Some(51120),
+            None,
+            None,
+        )
+        .expect("first device records");
+        camera_connector_core::record_device_connected(
+            devices_dir.path(),
+            "192.168.137.44",
+            Some(51121),
+            None,
+            None,
+        )
+        .expect("second device records");
+
+        let result = handle_account_command(
+            Some(&config_path),
+            AccountCommand::BindDevice {
+                username: "z5".to_string(),
+                devices_path: devices_dir.path().to_path_buf(),
+                ip: None,
+                online: true,
+            },
+        );
+
+        assert!(result.is_err());
+        let loaded = load_app_config(Some(&config_path)).expect("config loads");
+        assert!(loaded.accounts["z5"].remote_addrs.is_empty());
+        let _ = std::fs::remove_file(config_path);
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

@@ -70,6 +70,12 @@ The `devices` output reads the same account config, so `192.168.137.56` will dis
 target\debug\camera-connector.exe account bind-ip --username z5 --ip 192.168.137.44
 ```
 
+If exactly one relevant device is visible in the receiver metadata, bind it without copying the IP:
+
+```powershell
+target\debug\camera-connector.exe account bind-device --username z5 --devices-path C:\Users\hxn\Pictures\CameraConnector --online
+```
+
 Validate local ingest without a camera:
 
 ```powershell

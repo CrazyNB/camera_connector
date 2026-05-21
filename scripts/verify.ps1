@@ -151,6 +151,13 @@ if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -a
     throw "FTP smoke transfer log did not record account source and remote address"
 }
 
+& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath bind-device --username "verify" --devices-path $ftpSmokeOutput --ip "127.0.0.1"
+if ($LASTEXITCODE -ne 0) { throw "account bind-device smoke failed" }
+$accountListAfterBind = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
+if (($accountListAfterBind | Where-Object { $_ -like "*verify*127.0.0.1*" }).Count -lt 1) {
+    throw "account bind-device did not persist FTP smoke IP"
+}
+
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
