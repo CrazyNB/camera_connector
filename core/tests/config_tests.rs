@@ -46,21 +46,25 @@ async fn push_receiver_server_binds_ftp_receiver() {
 }
 
 #[tokio::test]
-async fn push_receiver_server_rejects_sftp_until_implemented() {
+async fn push_receiver_server_binds_sftp_receiver() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path());
 
-    let result = PushReceiverServer::bind(config).await;
+    let receiver = PushReceiverServer::bind(config)
+        .await
+        .expect("SFTP receiver should bind through facade");
 
-    assert!(result.is_err());
+    assert_eq!(receiver.local_addr().ip().to_string(), "127.0.0.1");
 }
 
 #[tokio::test]
-async fn sftp_server_reports_not_implemented() {
+async fn sftp_server_binds_listener() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path());
 
-    let result = SftpPushServer::bind(config).await;
+    let server = SftpPushServer::bind(config)
+        .await
+        .expect("SFTP receiver should bind listener");
 
-    assert!(result.is_err());
+    assert_eq!(server.local_addr().ip().to_string(), "127.0.0.1");
 }

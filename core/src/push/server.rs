@@ -20,17 +20,14 @@ impl PushReceiverServer {
     pub fn local_addr(&self) -> SocketAddr {
         match self {
             Self::Ftp(server) => server.local_addr(),
-            Self::Sftp(_) => unreachable!("SFTP receiver bind is not implemented"),
+            Self::Sftp(server) => server.local_addr(),
         }
     }
 
     pub async fn run_until(self, shutdown: impl Future<Output = ()>) -> Result<()> {
         match self {
             Self::Ftp(server) => server.run_until(shutdown).await,
-            Self::Sftp(_) => {
-                shutdown.await;
-                unreachable!("SFTP receiver bind is not implemented")
-            }
+            Self::Sftp(server) => server.run_until(shutdown).await,
         }
     }
 }
