@@ -84,7 +84,7 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
-- Camera accounts: manage FTP username, password status, and device name.
+- Camera accounts: manage FTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
 - Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
 - Flat inbox policy.
 - Duplicate policy.

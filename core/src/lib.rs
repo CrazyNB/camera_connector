@@ -7,7 +7,10 @@ pub use error::{ImporterError, Result};
 pub use model::{
     group_received_assets, ImportSource, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
 };
-pub use push::{FtpPushServer, PushProtocol, PushReceiverConfig, ReceiverAccount};
+pub use push::{
+    FtpPushServer, PushProtocol, PushReceiverConfig, ReceiverAccount, ReceiverAccountConfig,
+    ReceiverPassword,
+};
 pub use receive::{
     append_transfer_record, connected_devices_path, mark_all_connected_devices_offline,
     read_connected_devices, read_transfer_log, record_device_authenticated,

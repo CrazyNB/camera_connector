@@ -13,7 +13,7 @@ The app runs a local FTP receiver. The camera is configured with:
 - Host: the phone/computer IP address on the current network.
 - Port: default `2121` for development; production may use `21` when platform permissions allow it.
 - Mode: passive FTP.
-- Username/password: configured through camera accounts. Each account has a login username, optional password, and display device name.
+- Username/password: configured through camera accounts. Each account has a login username, optional password, and display device name. Password handling is owned by the core account model; persisted config stores an Argon2id password hash, not the plaintext camera password.
 - Destination: local import folder managed by the app.
 
 The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat output folder as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.
@@ -97,7 +97,7 @@ For display, the UI builds a virtual path from metadata:
 
 This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
 
-Camera accounts are user configuration. They map FTP login credentials to a device name. The receiver authenticates `USER`/`PASS` against this table and applies the account device name to new connection and transfer records. IP addresses are observed per connection and transfer; they are not persisted as account identity.
+Camera accounts are user configuration. They map FTP login credentials to a device name. The receiver authenticates `USER`/`PASS` against this table and applies the account device name to new connection and transfer records. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 
 ## Connected Devices
 

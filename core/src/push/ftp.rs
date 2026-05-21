@@ -273,9 +273,14 @@ async fn handle_pass(
             reply(reader, "530 Authentication failed").await?;
             return Ok(());
         };
-        if state.pending_user.as_deref() == Some(&account.username)
-            && account.password.as_deref() == Some(password)
-        {
+        let password_ok = account
+            .password
+            .as_ref()
+            .map(|configured| configured.verify(password))
+            .transpose()?
+            .unwrap_or(true);
+
+        if state.pending_user.as_deref() == Some(&account.username) && password_ok {
             state.authenticated = true;
             if let Some(remote_addr) = remote_addr {
                 record_device_authenticated(

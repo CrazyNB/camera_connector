@@ -6,7 +6,7 @@ use std::str::FromStr;
 use camera_connector_core::{
     append_transfer_record, read_connected_devices, read_transfer_log, scan_inbox_groups,
     ConnectedDevice, FtpPushServer, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig,
-    ReceivedAsset, ReceiverAccount, Result, TransferRecord, TransferStatus,
+    ReceivedAsset, ReceiverAccount, ReceiverAccountConfig, Result, TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -140,14 +140,7 @@ struct ConfigArgs {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct AppConfig {
     #[serde(default)]
-    accounts: BTreeMap<String, CameraAccountConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct CameraAccountConfig {
-    username: String,
-    password: Option<String>,
-    device_name: String,
+    accounts: BTreeMap<String, ReceiverAccountConfig>,
 }
 
 #[tokio::main]
@@ -478,15 +471,15 @@ fn effective_accounts(
     let mut accounts = load_app_config(config_path)?
         .accounts
         .into_values()
-        .map(CameraAccountConfig::into_receiver_account)
+        .map(ReceiverAccountConfig::into_receiver_account)
         .collect::<Vec<_>>();
 
     if let Some(username) = username {
-        let transient = validate_account_config(CameraAccountConfig {
-            username: username.to_string(),
-            password: password.map(ToOwned::to_owned),
-            device_name: device_name.unwrap_or(username).to_string(),
-        })?
+        let transient = ReceiverAccountConfig::new(
+            username.to_string(),
+            password,
+            device_name.unwrap_or(username).to_string(),
+        )?
         .into_receiver_account();
         accounts.retain(|account| account.username != username);
         accounts.push(transient);
@@ -508,7 +501,7 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
                         "{}\tdevice={}\tpassword={}",
                         account.username,
                         account.device_name,
-                        if account.password.is_some() {
+                        if account.password_configured() {
                             "configured"
                         } else {
                             "not required"
@@ -522,11 +515,7 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
             password,
             device_name,
         } => {
-            let account = validate_account_config(CameraAccountConfig {
-                username,
-                password,
-                device_name,
-            })?;
+            let account = ReceiverAccountConfig::new(username, password.as_deref(), device_name)?;
             config
                 .accounts
                 .insert(account.username.clone(), account.clone());
@@ -566,7 +555,7 @@ fn load_app_config(config_path: Option<&Path>) -> Result<AppConfig> {
     config.accounts = config
         .accounts
         .into_values()
-        .map(validate_account_config)
+        .map(ReceiverAccountConfig::validated)
         .map(|result| result.map(|account| (account.username.clone(), account)))
         .collect::<Result<BTreeMap<_, _>>>()?;
     Ok(config)
@@ -605,14 +594,14 @@ fn default_config_path() -> PathBuf {
 
 fn record_display_source(
     record: &TransferRecord,
-    _accounts: &BTreeMap<String, CameraAccountConfig>,
+    _accounts: &BTreeMap<String, ReceiverAccountConfig>,
 ) -> Option<String> {
     record.source_name.clone()
 }
 
 fn device_display_source(
     device: &ConnectedDevice,
-    accounts: &BTreeMap<String, CameraAccountConfig>,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
 ) -> Option<String> {
     device
         .username
@@ -620,33 +609,6 @@ fn device_display_source(
         .and_then(|username| accounts.get(username))
         .map(|account| account.device_name.clone())
         .or_else(|| device.source_name.clone())
-}
-
-impl CameraAccountConfig {
-    fn into_receiver_account(self) -> ReceiverAccount {
-        ReceiverAccount {
-            username: self.username,
-            password: self.password,
-            device_name: self.device_name,
-        }
-    }
-}
-
-fn validate_account_config(mut account: CameraAccountConfig) -> Result<CameraAccountConfig> {
-    account.username = normalized_required("username", &account.username)?;
-    account.device_name = normalized_required("device name", &account.device_name)?;
-    account.clone().into_receiver_account().validate()?;
-    Ok(account)
-}
-
-fn normalized_required(field: &str, value: &str) -> Result<String> {
-    let normalized = value.trim().to_string();
-    if normalized.is_empty() {
-        return Err(camera_connector_core::ImporterError::internal(format!(
-            "{field} cannot be empty"
-        )));
-    }
-    Ok(normalized)
 }
 
 fn remote_addr_display_label(remote_addr: &str) -> String {
@@ -716,19 +678,26 @@ mod tests {
         let mut config = AppConfig::default();
         config.accounts.insert(
             "z5".to_string(),
-            CameraAccountConfig {
-                username: "z5".to_string(),
-                password: Some("secret".to_string()),
-                device_name: "Z5_2".to_string(),
-            },
+            ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
         );
 
         save_app_config(Some(&path), &config).expect("config saves");
+        let raw = std::fs::read_to_string(&path).expect("config should read");
+        assert!(!raw.contains("secret"));
+        assert!(raw.contains("password_hash"));
         let loaded = load_app_config(Some(&path)).expect("config loads");
 
         let account = loaded.accounts.get("z5").expect("account exists");
-        assert_eq!(account.password.as_deref(), Some("secret"));
+        assert!(account.password_hash.is_some());
         assert_eq!(account.device_name, "Z5_2");
+        assert!(account
+            .clone()
+            .into_receiver_account()
+            .password
+            .as_ref()
+            .expect("password should exist")
+            .verify("secret")
+            .expect("password should verify"));
         let _ = std::fs::remove_file(path);
     }
 
@@ -738,11 +707,7 @@ mod tests {
         let mut config = AppConfig::default();
         config.accounts.insert(
             "z5".to_string(),
-            CameraAccountConfig {
-                username: "z5".to_string(),
-                password: Some("secret".to_string()),
-                device_name: "Z5_2".to_string(),
-            },
+            ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
         );
         save_app_config(Some(&path), &config).expect("config saves");
 
@@ -751,7 +716,12 @@ mod tests {
 
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].username, "z5");
-        assert_eq!(accounts[0].password.as_deref(), Some("secret"));
+        assert!(accounts[0]
+            .password
+            .as_ref()
+            .expect("password should exist")
+            .verify("secret")
+            .expect("password should verify"));
         assert_eq!(accounts[0].device_name, "Z5_2");
         let _ = std::fs::remove_file(path);
     }
@@ -761,11 +731,7 @@ mod tests {
         let mut accounts = BTreeMap::new();
         accounts.insert(
             "z5".to_string(),
-            CameraAccountConfig {
-                username: "z5".to_string(),
-                password: Some("secret".to_string()),
-                device_name: "Z5_2".to_string(),
-            },
+            ReceiverAccountConfig::new("z5", Some("secret"), "Z5_2").expect("account should build"),
         );
         let device = ConnectedDevice {
             remote_addr: "192.168.137.56".to_string(),

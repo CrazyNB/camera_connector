@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+argon2.workspace = true
+password-hash.workspace = true
+rand_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

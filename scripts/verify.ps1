@@ -46,6 +46,9 @@ $sample = Join-Path $pushInput "IMG_1234.CR3"
 
 & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
+$configRaw = Get-Content -Raw -LiteralPath $configPath
+if ($configRaw -like "*secret*") { throw "account config leaked plaintext password" }
+if ($configRaw -notlike "*password_hash*") { throw "account config did not store a password hash" }
 
 $accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
 if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }
