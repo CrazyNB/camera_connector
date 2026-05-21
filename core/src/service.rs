@@ -87,6 +87,13 @@ pub struct ConnectedDeviceView {
     pub display_source: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CameraConnectorDashboard {
+    pub receiver_status: Option<ReceiverRuntimeStatus>,
+    pub devices: Vec<ConnectedDeviceView>,
+    pub assets: AssetGroupPage,
+}
+
 impl CameraConnectorService {
     pub fn new(config_path: Option<PathBuf>) -> Self {
         Self { config_path }
@@ -263,6 +270,31 @@ impl CameraConnectorService {
             })
             .collect::<Vec<_>>();
         Ok(views)
+    }
+
+    pub fn dashboard(
+        &self,
+        state_dir: impl AsRef<Path>,
+        asset_query: AssetGroupQuery,
+        offset: usize,
+        limit: usize,
+        online_devices_only: bool,
+    ) -> Result<CameraConnectorDashboard> {
+        let state_dir = state_dir.as_ref();
+        Ok(CameraConnectorDashboard {
+            receiver_status: self.receiver_status(state_dir)?,
+            devices: self.connected_devices(
+                state_dir,
+                asset_query.username.as_deref(),
+                online_devices_only,
+            )?,
+            assets: self.transfer_asset_group_page_with_query(
+                state_dir,
+                asset_query,
+                offset,
+                limit,
+            )?,
+        })
     }
 }
 

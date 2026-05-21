@@ -267,6 +267,16 @@ if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=
 }
 Write-Output $filteredLogBackedInboxOutput
 
+$dashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --state $pushState --username "verify" --limit 1
+if ($LASTEXITCODE -ne 0) { throw "dashboard smoke failed" }
+if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
+    throw "dashboard did not expose paged asset summary"
+}
+if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
+    throw "dashboard did not expose filtered asset rows"
+}
+Write-Output $dashboardOutput
+
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 

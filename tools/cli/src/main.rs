@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 use camera_connector_core::{
     append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    CameraConnectorRuntime, CameraConnectorService, ImportSource, LocalFileSink, ObjectFormat,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverConfigRequest,
-    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
-    TransferStatus,
+    CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
+    LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, Result, StoredObjectLocation,
+    TransferQuery, TransferRecord, TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -59,6 +59,28 @@ enum Command {
     ReceiverStatus {
         #[arg(long, alias = "path")]
         state: PathBuf,
+    },
+    Dashboard {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long, alias = "path")]
+        state: PathBuf,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        source_name: Option<String>,
+        #[arg(long)]
+        original_path: Option<String>,
+        #[arg(long)]
+        remote_addr: Option<String>,
+        #[arg(long)]
+        format: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long)]
+        online_devices: bool,
     },
     ServeFtp {
         #[arg(long)]
@@ -289,47 +311,40 @@ async fn main() -> Result<()> {
         Some(Command::ReceiverStatus { state }) => {
             let service = CameraConnectorService::new(None);
             match service.receiver_status(state)? {
-                Some(status) => {
-                    println!("phase: {:?}", status.phase);
-                    println!(
-                        "protocol: {}",
-                        status
-                            .protocol
-                            .map(|protocol| protocol.to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    );
-                    println!("auth_mode: {:?}", status.auth_mode);
-                    println!(
-                        "local_addr: {}",
-                        status
-                            .local_addr
-                            .map(|addr| addr.to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    );
-                    println!(
-                        "output: {}",
-                        status
-                            .output_dir
-                            .as_ref()
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    );
-                    println!(
-                        "state: {}",
-                        status
-                            .state_dir
-                            .as_ref()
-                            .map(|path| path.display().to_string())
-                            .unwrap_or_else(|| "-".to_string())
-                    );
-                    println!("accounts: {}", status.account_count);
-                    println!("message: {}", status.message.as_deref().unwrap_or("-"));
-                }
+                Some(status) => print_receiver_status_lines(&status),
                 None => {
                     println!("phase: Unknown");
                     println!("message: receiver status file not found");
                 }
             }
+        }
+        Some(Command::Dashboard {
+            config,
+            state,
+            username,
+            source_name,
+            original_path,
+            remote_addr,
+            format,
+            offset,
+            limit,
+            online_devices,
+        }) => {
+            let service = CameraConnectorService::new(config);
+            let dashboard = service.dashboard(
+                state,
+                AssetGroupQuery {
+                    username,
+                    source_name,
+                    original_path,
+                    remote_addr,
+                    format: format.as_deref().map(parse_object_format).transpose()?,
+                },
+                offset,
+                limit,
+                online_devices,
+            )?;
+            print_dashboard(dashboard);
         }
         Some(Command::ServeFtp {
             config,
@@ -523,6 +538,102 @@ fn print_asset_groups(groups: Vec<ReceivedAssetGroup>) {
     for group in groups {
         println!("{}", asset_group_line(&group));
     }
+}
+
+fn print_dashboard(dashboard: CameraConnectorDashboard) {
+    match dashboard.receiver_status {
+        Some(status) => println!("status\t{}", receiver_status_tab_fields(&status)),
+        None => println!("status\tphase=Unknown\tmessage=receiver status file not found"),
+    }
+    for view in dashboard.devices {
+        let device = view.device;
+        println!(
+            "device\t{}\tonline={}\tconnections={}\tport={}\tusername={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
+            device.remote_addr,
+            device.online,
+            device.active_connections,
+            device
+                .last_remote_port
+                .map(|port| port.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            device.username.as_deref().unwrap_or("-"),
+            device.source_name.as_deref().unwrap_or("-"),
+            view.display_source,
+            device.last_seen_at_ms
+        );
+    }
+    println!(
+        "summary\t{}",
+        asset_group_page_summary_line(&dashboard.assets).trim_start_matches("summary\t")
+    );
+    for group in dashboard.assets.groups {
+        println!("asset\t{}", asset_group_line(&group));
+    }
+}
+
+fn print_receiver_status_lines(status: &ReceiverRuntimeStatus) {
+    println!("phase: {:?}", status.phase);
+    println!(
+        "protocol: {}",
+        status
+            .protocol
+            .map(|protocol| protocol.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!("auth_mode: {:?}", status.auth_mode);
+    println!(
+        "local_addr: {}",
+        status
+            .local_addr
+            .map(|addr| addr.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "output: {}",
+        status
+            .output_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "state: {}",
+        status
+            .state_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!("accounts: {}", status.account_count);
+    println!("message: {}", status.message.as_deref().unwrap_or("-"));
+}
+
+fn receiver_status_tab_fields(status: &ReceiverRuntimeStatus) -> String {
+    format!(
+        "phase={:?}\tprotocol={}\tauth_mode={:?}\tlocal_addr={}\toutput={}\tstate={}\taccounts={}\tmessage={}",
+        status.phase,
+        status
+            .protocol
+            .map(|protocol| protocol.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        status.auth_mode,
+        status
+            .local_addr
+            .map(|addr| addr.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        status
+            .output_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        status
+            .state_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        status.account_count,
+        status.message.as_deref().unwrap_or("-")
+    )
 }
 
 fn asset_group_summary_line(summary: &AssetGroupSummary) -> String {
@@ -900,6 +1011,37 @@ mod tests {
                 format: Some(_),
                 offset: 1,
                 limit: Some(20),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_dashboard_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "dashboard",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "--state",
+            "C:\\CameraConnector\\state",
+            "--username",
+            "z5",
+            "--online-devices",
+            "--offset",
+            "0",
+            "--limit",
+            "25",
+        ])
+        .expect("dashboard command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Dashboard {
+                username: Some(_),
+                online_devices: true,
+                offset: 0,
+                limit: 25,
                 ..
             })
         ));

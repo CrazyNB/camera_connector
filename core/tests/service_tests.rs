@@ -644,6 +644,96 @@ fn service_reads_receiver_runtime_status() {
     let _ = std::fs::remove_dir_all(output_dir);
 }
 
+#[test]
+fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
+    let config_path = unique_temp_path("service-dashboard-config");
+    let state_dir = unique_temp_dir("service-dashboard-state");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    let mut app_config = CameraConnectorConfig::default();
+    app_config
+        .set_account("z5", Some("secret"), "Studio Z5")
+        .expect("account should save");
+    app_config
+        .save(Some(&config_path))
+        .expect("config should save");
+    write_receiver_runtime_status(
+        &state_dir,
+        &ReceiverRuntimeStatus {
+            phase: ReceiverRuntimePhase::Stopped,
+            protocol: Some(PushProtocol::Ftp),
+            auth_mode: ReceiverAuthMode::Accounts,
+            local_addr: None,
+            output_dir: Some(state_dir.clone()),
+            state_dir: Some(state_dir.clone()),
+            account_count: 1,
+            message: None,
+        },
+    )
+    .expect("runtime status should write");
+    record_device_connected(&state_dir, "192.168.137.56", Some(50123), None, None)
+        .expect("device should connect");
+    record_device_authenticated(&state_dir, "192.168.137.56", Some("Old Name"), Some("z5"))
+        .expect("device should authenticate");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:dashboard".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100NIKON/DSC_0099.NEF".to_string(),
+            final_filename: "DSC_0099.NEF".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/DSC_0099.NEF",
+            )),
+            size_bytes: 128,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Old Name".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("transfer should append");
+
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let dashboard = service
+        .dashboard(
+            &state_dir,
+            AssetGroupQuery {
+                username: Some("z5".to_string()),
+                ..AssetGroupQuery::default()
+            },
+            0,
+            10,
+            true,
+        )
+        .expect("dashboard should load");
+
+    assert_eq!(
+        dashboard
+            .receiver_status
+            .expect("status should exist")
+            .phase,
+        ReceiverRuntimePhase::Stopped
+    );
+    assert_eq!(dashboard.devices.len(), 1);
+    assert_eq!(dashboard.devices[0].display_source, "Studio Z5");
+    assert_eq!(dashboard.assets.summary.group_count, 1);
+    assert_eq!(dashboard.assets.groups.len(), 1);
+    assert_eq!(
+        dashboard.assets.groups[0]
+            .primary
+            .virtual_display_path
+            .as_deref(),
+        Some("Studio Z5/DCIM/100NIKON/DSC_0099.NEF")
+    );
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
 fn unique_temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("camera-connector-{name}-{}.json", unique_suffix()))
 }
