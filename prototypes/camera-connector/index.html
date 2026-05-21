@@ -276,6 +276,34 @@
       line-height: 1.45;
     }
 
+    .runtime-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .runtime-cell {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px;
+      min-height: 64px;
+    }
+
+    .runtime-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      margin-bottom: 5px;
+    }
+
+    .runtime-cell strong {
+      display: block;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
     .segmented {
       display: grid;
       grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -596,9 +624,34 @@
             <h2>启动接收服务</h2>
             <small>优先使用 FTP Push</small>
           </div>
-          <span class="status amber">未启动</span>
+          <span class="status green">运行中</span>
         </header>
         <div class="content">
+          <section class="panel">
+            <div class="panel-title">
+              <h3>运行时状态</h3>
+              <span class="status green">Running</span>
+            </div>
+            <div class="runtime-grid">
+              <div class="runtime-cell">
+                <span>Phase</span>
+                <strong>Running</strong>
+              </div>
+              <div class="runtime-cell">
+                <span>Auth mode</span>
+                <strong>Accounts · 1</strong>
+              </div>
+              <div class="runtime-cell">
+                <span>Local address</span>
+                <strong>0.0.0.0:2121</strong>
+              </div>
+              <div class="runtime-cell">
+                <span>Output</span>
+                <strong>Pictures/CameraConnector</strong>
+              </div>
+            </div>
+          </section>
+
           <section class="panel">
             <div class="panel-title">
               <h3>选择接收协议</h3>
@@ -644,7 +697,7 @@
           </section>
 
           <section class="notice" id="copyNotice">
-            在相机网络菜单中选择 FTP 上传，把服务器地址填成本机 IP，端口填 2121，优先使用被动模式。
+            在相机网络菜单中选择 FTP 上传，把服务器地址填成本机 IP，端口填 2121，使用被动模式，并填写已配置的账号密码。
           </section>
         </div>
         <nav class="tabbar">
@@ -899,6 +952,7 @@
               <button class="secondary" style="min-height: 34px;">编辑</button>
             </div>
             <div class="kv"><span>IP 策略</span><strong>仅作为本次连接来源，重连变化后自动更新</strong></div>
+            <div class="kv"><span>运行时</span><strong>phase=Running · auth=Accounts · accounts=1</strong></div>
             <div class="button-row" style="margin-top: 10px;">
               <button class="secondary">刷新</button>
               <button class="secondary">新增账号</button>
@@ -945,7 +999,7 @@
 
     document.getElementById("copyButton").addEventListener("click", () => {
       const notice = document.getElementById("copyNotice");
-      notice.textContent = "已复制 FTP 设置：服务器 192.168.137.1，端口 2121，被动模式，匿名登录。";
+      notice.textContent = "已复制 FTP 设置：服务器 192.168.137.1，端口 2121，被动模式，账号 z5，密码仅在设置时写入。";
     });
   </script>
 </body>
