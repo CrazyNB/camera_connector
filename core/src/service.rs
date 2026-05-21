@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
@@ -45,7 +47,7 @@ pub struct AssetGroupQuery {
     pub format: Option<ObjectFormat>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransferRecordView {
     pub record: TransferRecord,
     pub display_source: Option<String>,
@@ -54,13 +56,13 @@ pub struct TransferRecordView {
     pub final_location_label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetFacetCount {
     pub value: String,
     pub group_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetGroupSummary {
     pub group_count: usize,
     pub asset_count: usize,
@@ -71,7 +73,7 @@ pub struct AssetGroupSummary {
     pub remote_addr_counts: Vec<AssetFacetCount>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetGroupPage {
     pub groups: Vec<ReceivedAssetGroup>,
     pub summary: AssetGroupSummary,
@@ -81,13 +83,13 @@ pub struct AssetGroupPage {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectedDeviceView {
     pub device: ConnectedDevice,
     pub display_source: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
     pub devices: Vec<ConnectedDeviceView>,

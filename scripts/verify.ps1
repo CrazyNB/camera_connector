@@ -277,6 +277,17 @@ if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Ve
 }
 Write-Output $dashboardOutput
 
+$dashboardJsonOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --state $pushState --username "verify" --limit 1 --json
+if ($LASTEXITCODE -ne 0) { throw "dashboard json smoke failed" }
+$dashboardJson = $dashboardJsonOutput -join "`n" | ConvertFrom-Json
+if ($dashboardJson.assets.summary.group_count -ne 2) {
+    throw "dashboard json did not expose asset summary"
+}
+if ($dashboardJson.assets.groups[0].primary.username -ne "verify") {
+    throw "dashboard json did not expose filtered asset username"
+}
+Write-Output $dashboardJsonOutput
+
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 

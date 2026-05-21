@@ -81,6 +81,8 @@ enum Command {
         limit: usize,
         #[arg(long)]
         online_devices: bool,
+        #[arg(long)]
+        json: bool,
     },
     ServeFtp {
         #[arg(long)]
@@ -329,6 +331,7 @@ async fn main() -> Result<()> {
             offset,
             limit,
             online_devices,
+            json,
         }) => {
             let service = CameraConnectorService::new(config);
             let dashboard = service.dashboard(
@@ -344,7 +347,11 @@ async fn main() -> Result<()> {
                 limit,
                 online_devices,
             )?;
-            print_dashboard(dashboard);
+            if json {
+                print_dashboard_json(&dashboard)?;
+            } else {
+                print_dashboard(dashboard);
+            }
         }
         Some(Command::ServeFtp {
             config,
@@ -569,6 +576,16 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
     for group in dashboard.assets.groups {
         println!("asset\t{}", asset_group_line(&group));
     }
+}
+
+fn print_dashboard_json(dashboard: &CameraConnectorDashboard) -> Result<()> {
+    println!("{}", dashboard_json(dashboard)?);
+    Ok(())
+}
+
+fn dashboard_json(dashboard: &CameraConnectorDashboard) -> Result<String> {
+    serde_json::to_string_pretty(dashboard)
+        .map_err(|error| camera_connector_core::ImporterError::internal(error.to_string()))
 }
 
 fn print_receiver_status_lines(status: &ReceiverRuntimeStatus) {
@@ -1028,6 +1045,7 @@ mod tests {
             "--username",
             "z5",
             "--online-devices",
+            "--json",
             "--offset",
             "0",
             "--limit",
@@ -1040,11 +1058,72 @@ mod tests {
             Some(Command::Dashboard {
                 username: Some(_),
                 online_devices: true,
+                json: true,
                 offset: 0,
                 limit: 25,
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn dashboard_json_output_contains_status_devices_and_assets() {
+        let asset = ReceivedAsset::new("ftp:1", "IMG_0001.CR3", 42, ImportSource::FtpPush);
+        let dashboard = CameraConnectorDashboard {
+            receiver_status: Some(ReceiverRuntimeStatus {
+                phase: camera_connector_core::ReceiverRuntimePhase::Stopped,
+                protocol: Some(PushProtocol::Ftp),
+                auth_mode: camera_connector_core::ReceiverAuthMode::Accounts,
+                local_addr: None,
+                output_dir: None,
+                state_dir: None,
+                account_count: 1,
+                message: None,
+            }),
+            devices: vec![camera_connector_core::ConnectedDeviceView {
+                device: camera_connector_core::ConnectedDevice {
+                    remote_addr: "192.168.137.56".to_string(),
+                    source_name: Some("Camera".to_string()),
+                    username: Some("z5".to_string()),
+                    online: true,
+                    last_seen_at_ms: 20,
+                    first_seen_at_ms: 10,
+                    last_disconnected_at_ms: None,
+                    active_connections: 1,
+                    last_remote_port: Some(50123),
+                },
+                display_source: "Camera".to_string(),
+            }],
+            assets: AssetGroupPage {
+                groups: vec![ReceivedAssetGroup {
+                    group_key: "IMG_0001".to_string(),
+                    primary: asset.clone(),
+                    jpeg: None,
+                    raw: Some(asset),
+                    video: None,
+                }],
+                summary: AssetGroupSummary {
+                    group_count: 1,
+                    asset_count: 1,
+                    groups_with_jpeg: 0,
+                    groups_with_raw: 1,
+                    groups_with_video: 0,
+                    source_counts: Vec::new(),
+                    remote_addr_counts: Vec::new(),
+                },
+                offset: 0,
+                limit: 50,
+                total_groups: 1,
+                has_more: false,
+            },
+        };
+
+        let json = dashboard_json(&dashboard).expect("dashboard should serialize");
+
+        assert!(json.contains("\"receiver_status\""));
+        assert!(json.contains("\"devices\""));
+        assert!(json.contains("\"assets\""));
+        assert!(json.contains("\"group_key\": \"IMG_0001\""));
     }
 
     #[test]

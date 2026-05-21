@@ -116,6 +116,12 @@ Read the app dashboard model in one command:
 target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50
 ```
 
+Use JSON output for UI shells or automation:
+
+```powershell
+target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50 --json
+```
+
 The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path and login username remain in the state directory's `transfer-log.jsonl` for filtering. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
