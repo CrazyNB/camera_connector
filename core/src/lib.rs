@@ -2,6 +2,7 @@ pub mod error;
 pub mod model;
 pub mod push;
 pub mod receive;
+pub mod runtime;
 pub mod service;
 
 pub use error::{ImporterError, Result};
@@ -19,6 +20,7 @@ pub use receive::{
     TransferRecord, TransferStatus,
 };
 pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};
+pub use runtime::{CameraConnectorRuntime, ReceiverRuntimePhase, ReceiverRuntimeStatus};
 pub use service::{
     CameraConnectorService, ConnectedDeviceView, ReceiverConfigRequest, TransferQuery,
     TransferRecordView,

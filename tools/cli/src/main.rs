@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, CameraConnectorService, FtpPushServer, ImportSource, LocalFileSink,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result, TransferQuery,
-    TransferRecord, TransferStatus,
+    append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
+    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result,
+    TransferQuery, TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -231,21 +231,27 @@ async fn main() -> Result<()> {
             advertised_host,
             source_name,
         }) => {
-            let config = build_config(ConfigArgs {
-                config_path: config,
+            let service = CameraConnectorService::new(config.clone());
+            let runtime = CameraConnectorRuntime::new(service.clone());
+            let request = ReceiverConfigRequest {
                 protocol: PushProtocol::Ftp,
                 bind_host,
                 port,
-                output,
+                output_dir: output,
                 username,
                 password,
                 advertised_host,
                 source_name,
+            };
+            let receiver_config = service.receiver_config(request.clone())?;
+            let status = runtime.start_receiver(request).await?;
+            let local_addr = status.local_addr.ok_or_else(|| {
+                camera_connector_core::ImporterError::internal("missing local address")
             })?;
-            let server = FtpPushServer::bind(config.clone()).await?;
-            println!("ftp receiver listening on {}", server.local_addr());
-            print_receiver_config(&config);
-            server.run().await?;
+            println!("ftp receiver listening on {local_addr}");
+            print_receiver_config(&receiver_config);
+            tokio::signal::ctrl_c().await?;
+            runtime.stop_receiver().await?;
         }
         Some(Command::Inbox { path, source }) => {
             let source = parse_source(&source)?;

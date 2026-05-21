@@ -66,6 +66,7 @@ P0:
 - Let users configure camera accounts with FTP username, password, and device name.
 - Persist camera account passwords as core-generated hashes; never store or display plaintext passwords after setup.
 - Show current and recently connected devices from receiver metadata so the latest IP is visible as connection state, not account identity.
+- Expose receiver runtime lifecycle from core: stopped, starting, running, stopping, and failed.
 - Record real-camera compatibility results.
 
 P1:
@@ -108,8 +109,9 @@ P2:
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, and device name; receiver authenticates against these accounts, stores password hashes rather than plaintext passwords, and rejects invalid account config |
 | RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
-| RX-014 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
-| RX-015 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
+| RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, local address, output directory, account count, and failure message |
+| RX-015 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
+| RX-016 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -135,16 +137,19 @@ flowchart LR
   Index["Asset Index\nformat + RAW/JPEG grouping"]
   CoreConfig["Core Config\naccounts + credential storage"]
   Service["Core Service\nreceiver + views"]
+  Runtime["Core Runtime\nstart + stop + status"]
   UI["CLI / Mobile / Desktop UI"]
 
   Camera --> Network --> Receiver --> Sink --> Index --> Service --> UI
   Receiver --> Log --> Service
   CoreConfig --> Receiver
   CoreConfig --> Service
+  Service --> Runtime --> Receiver
   UI --> Service
+  UI --> Runtime
 ```
 
-The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views.
+The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
 
 ## 10. Milestones
 
