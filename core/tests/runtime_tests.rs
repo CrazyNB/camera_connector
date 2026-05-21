@@ -1,8 +1,9 @@
 use std::net::TcpListener;
 
 use camera_connector_core::{
-    CameraConnectorConfig, CameraConnectorRuntime, CameraConnectorService, PushProtocol,
-    ReceiverAuthMode, ReceiverConfigRequest, ReceiverRuntimePhase,
+    read_receiver_runtime_status, write_receiver_runtime_status, CameraConnectorConfig,
+    CameraConnectorRuntime, CameraConnectorService, PushProtocol, ReceiverAuthMode,
+    ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus,
 };
 
 #[tokio::test]
@@ -38,11 +39,25 @@ async fn runtime_starts_and_stops_ftp_receiver() {
     );
     assert_eq!(running.output_dir.as_deref(), Some(output_dir.as_path()));
     assert_eq!(runtime.status().phase, ReceiverRuntimePhase::Running);
+    assert_eq!(
+        read_receiver_runtime_status(&output_dir)
+            .expect("runtime status should read")
+            .expect("runtime status should exist")
+            .phase,
+        ReceiverRuntimePhase::Running
+    );
 
     let stopped = runtime.stop_receiver().await.expect("receiver should stop");
 
     assert_eq!(stopped.phase, ReceiverRuntimePhase::Stopped);
     assert!(runtime.status().local_addr.is_none());
+    assert_eq!(
+        read_receiver_runtime_status(&output_dir)
+            .expect("runtime status should read")
+            .expect("runtime status should exist")
+            .phase,
+        ReceiverRuntimePhase::Stopped
+    );
     let _ = std::fs::remove_dir_all(output_dir);
 }
 
@@ -113,8 +128,49 @@ async fn runtime_records_failed_status_when_port_is_unavailable() {
         .as_deref()
         .unwrap_or_default()
         .contains("io error"));
+    assert_eq!(
+        read_receiver_runtime_status(&output_dir)
+            .expect("runtime status should read")
+            .expect("runtime status should exist")
+            .phase,
+        ReceiverRuntimePhase::Failed
+    );
 
     let _ = std::fs::remove_dir_all(output_dir);
+}
+
+#[test]
+fn read_receiver_runtime_status_marks_dead_running_listener_stopped() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral port should bind");
+    let local_addr = listener
+        .local_addr()
+        .expect("listener address should exist");
+    drop(listener);
+
+    write_receiver_runtime_status(
+        temp_dir.path(),
+        &ReceiverRuntimeStatus {
+            phase: ReceiverRuntimePhase::Running,
+            protocol: Some(PushProtocol::Ftp),
+            auth_mode: ReceiverAuthMode::Anonymous,
+            local_addr: Some(local_addr),
+            output_dir: Some(temp_dir.path().to_path_buf()),
+            account_count: 0,
+            message: None,
+        },
+    )
+    .expect("runtime status should write");
+
+    let status = read_receiver_runtime_status(temp_dir.path())
+        .expect("runtime status should read")
+        .expect("runtime status should exist");
+
+    assert_eq!(status.phase, ReceiverRuntimePhase::Stopped);
+    assert_eq!(
+        status.message.as_deref(),
+        Some("receiver process is not listening")
+    );
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {

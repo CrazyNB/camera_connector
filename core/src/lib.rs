@@ -21,6 +21,7 @@ pub use receive::{
 };
 pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};
 pub use runtime::{
+    read_receiver_runtime_status, receiver_runtime_status_path, write_receiver_runtime_status,
     CameraConnectorRuntime, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,
 };
 pub use service::{

@@ -1,6 +1,8 @@
-use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::fs;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -10,6 +12,8 @@ use crate::{
     CameraConnectorService, FtpPushServer, ImporterError, PushProtocol, ReceiverConfigRequest,
     Result,
 };
+
+pub const RECEIVER_STATUS_FILENAME: &str = "receiver-status.json";
 
 #[derive(Debug, Clone)]
 pub struct CameraConnectorRuntime {
@@ -74,6 +78,7 @@ impl CameraConnectorRuntime {
         &self,
         request: ReceiverConfigRequest,
     ) -> Result<ReceiverRuntimeStatus> {
+        let starting_output_dir = request.output_dir.clone();
         {
             let mut inner = self
                 .inner
@@ -92,10 +97,11 @@ impl CameraConnectorRuntime {
                 protocol: Some(request.protocol),
                 auth_mode: ReceiverAuthMode::Anonymous,
                 local_addr: None,
-                output_dir: Some(request.output_dir.clone()),
+                output_dir: Some(starting_output_dir.clone()),
                 account_count: 0,
                 message: None,
             };
+            write_receiver_runtime_status(&starting_output_dir, &inner.status)?;
         }
 
         let config = match self.service.receiver_config(request) {
@@ -116,7 +122,7 @@ impl CameraConnectorRuntime {
                     protocol: Some(protocol),
                     auth_mode: auth_mode(account_count),
                     local_addr: None,
-                    output_dir: Some(output_dir),
+                    output_dir: Some(output_dir.clone()),
                     account_count,
                     message: Some(error.to_string()),
                 });
@@ -139,17 +145,18 @@ impl CameraConnectorRuntime {
             inner.shutdown = None;
             inner.task = None;
             inner.status = match result {
-                Ok(()) => stopped_status(),
+                Ok(()) => stopped_status_for(task_output_dir.clone()),
                 Err(error) => ReceiverRuntimeStatus {
                     phase: ReceiverRuntimePhase::Failed,
                     protocol: Some(protocol),
                     auth_mode: auth_mode(account_count),
                     local_addr: None,
-                    output_dir: Some(task_output_dir),
+                    output_dir: Some(task_output_dir.clone()),
                     account_count,
                     message: Some(error.to_string()),
                 },
             };
+            let _ = write_receiver_runtime_status(&task_output_dir, &inner.status);
         });
 
         let status = ReceiverRuntimeStatus {
@@ -157,7 +164,7 @@ impl CameraConnectorRuntime {
             protocol: Some(protocol),
             auth_mode: auth_mode(account_count),
             local_addr: Some(local_addr),
-            output_dir: Some(output_dir),
+            output_dir: Some(output_dir.clone()),
             account_count,
             message: None,
         };
@@ -168,6 +175,7 @@ impl CameraConnectorRuntime {
         runtime.shutdown = Some(shutdown);
         runtime.task = Some(task);
         runtime.status = status.clone();
+        write_receiver_runtime_status(&output_dir, &status)?;
         Ok(status)
     }
 
@@ -178,12 +186,21 @@ impl CameraConnectorRuntime {
                 .lock()
                 .expect("receiver runtime mutex should not be poisoned");
             if !matches!(inner.status.phase, ReceiverRuntimePhase::Running) {
-                inner.status = stopped_status();
+                let output_dir = inner.status.output_dir.clone();
+                inner.status = output_dir
+                    .map(stopped_status_for)
+                    .unwrap_or_else(stopped_status);
                 inner.shutdown = None;
                 inner.task = None;
+                if let Some(output_dir) = inner.status.output_dir.as_deref() {
+                    write_receiver_runtime_status(output_dir, &inner.status)?;
+                }
                 return Ok(inner.status.clone());
             }
             inner.status.phase = ReceiverRuntimePhase::Stopping;
+            if let Some(output_dir) = inner.status.output_dir.as_deref() {
+                write_receiver_runtime_status(output_dir, &inner.status)?;
+            }
             (inner.shutdown.take(), inner.task.take())
         };
 
@@ -211,11 +228,46 @@ impl CameraConnectorRuntime {
     }
 
     fn set_status(&self, status: ReceiverRuntimeStatus) {
+        if let Some(output_dir) = status.output_dir.as_deref() {
+            let _ = write_receiver_runtime_status(output_dir, &status);
+        }
         self.inner
             .lock()
             .expect("receiver runtime mutex should not be poisoned")
             .status = status;
     }
+}
+
+pub fn receiver_runtime_status_path(output_dir: impl AsRef<Path>) -> PathBuf {
+    output_dir.as_ref().join(RECEIVER_STATUS_FILENAME)
+}
+
+pub fn read_receiver_runtime_status(
+    output_dir: impl AsRef<Path>,
+) -> Result<Option<ReceiverRuntimeStatus>> {
+    let path = receiver_runtime_status_path(output_dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(path)?;
+    let status = serde_json::from_slice(&bytes)
+        .map_err(|error| ImporterError::internal(error.to_string()))?;
+    Ok(Some(observe_receiver_runtime_status(status)))
+}
+
+pub fn write_receiver_runtime_status(
+    output_dir: impl AsRef<Path>,
+    status: &ReceiverRuntimeStatus,
+) -> Result<()> {
+    let output_dir = output_dir.as_ref();
+    fs::create_dir_all(output_dir)?;
+    let path = receiver_runtime_status_path(output_dir);
+    let temp_path = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(status)
+        .map_err(|error| ImporterError::internal(error.to_string()))?;
+    fs::write(&temp_path, bytes)?;
+    fs::rename(temp_path, path)?;
+    Ok(())
 }
 
 fn stopped_status() -> ReceiverRuntimeStatus {
@@ -228,6 +280,45 @@ fn stopped_status() -> ReceiverRuntimeStatus {
         account_count: 0,
         message: None,
     }
+}
+
+fn stopped_status_for(output_dir: PathBuf) -> ReceiverRuntimeStatus {
+    ReceiverRuntimeStatus {
+        phase: ReceiverRuntimePhase::Stopped,
+        protocol: None,
+        auth_mode: ReceiverAuthMode::Anonymous,
+        local_addr: None,
+        output_dir: Some(output_dir),
+        account_count: 0,
+        message: None,
+    }
+}
+
+fn observe_receiver_runtime_status(mut status: ReceiverRuntimeStatus) -> ReceiverRuntimeStatus {
+    if matches!(status.phase, ReceiverRuntimePhase::Running)
+        && !is_receiver_listener_alive(status.local_addr)
+    {
+        status.phase = ReceiverRuntimePhase::Stopped;
+        status.local_addr = None;
+        status.message = Some("receiver process is not listening".to_string());
+    }
+    status
+}
+
+fn is_receiver_listener_alive(local_addr: Option<SocketAddr>) -> bool {
+    let Some(local_addr) = local_addr else {
+        return false;
+    };
+    TcpStream::connect_timeout(&connectable_addr(local_addr), Duration::from_millis(150)).is_ok()
+}
+
+fn connectable_addr(local_addr: SocketAddr) -> SocketAddr {
+    let ip = match local_addr.ip() {
+        IpAddr::V4(addr) if addr.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(addr) if addr.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        addr => addr,
+    };
+    SocketAddr::new(ip, local_addr.port())
 }
 
 fn auth_mode(account_count: usize) -> ReceiverAuthMode {

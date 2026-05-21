@@ -3,6 +3,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use super::{devices::CONNECTED_DEVICES_FILENAME, transfer_log::TRANSFER_LOG_FILENAME};
+use crate::runtime::RECEIVER_STATUS_FILENAME;
 use crate::{group_received_assets, ImportSource, ReceivedAsset, ReceivedAssetGroup, Result};
 
 pub fn scan_inbox(root: impl AsRef<Path>, source: ImportSource) -> Result<Vec<ReceivedAsset>> {
@@ -72,6 +73,7 @@ fn is_receiver_metadata(path: &Path) -> bool {
         .map(|name| {
             name.eq_ignore_ascii_case(TRANSFER_LOG_FILENAME)
                 || name.eq_ignore_ascii_case(CONNECTED_DEVICES_FILENAME)
+                || name.eq_ignore_ascii_case(RECEIVER_STATUS_FILENAME)
         })
         .unwrap_or(false)
 }

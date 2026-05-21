@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
-    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result,
-    TransferQuery, TransferRecord, TransferStatus,
+    append_transfer_record, read_receiver_runtime_status, CameraConnectorRuntime,
+    CameraConnectorService, ImportSource, LocalFileSink, PushProtocol, PushReceiverConfig,
+    ReceivedAsset, ReceiverConfigRequest, Result, TransferQuery, TransferRecord, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -47,6 +47,10 @@ enum Command {
         advertised_host: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
+    },
+    ReceiverStatus {
+        #[arg(long)]
+        path: PathBuf,
     },
     ServeFtp {
         #[arg(long)]
@@ -221,6 +225,40 @@ async fn main() -> Result<()> {
             })?;
             print_receiver_config(&config);
         }
+        Some(Command::ReceiverStatus { path }) => match read_receiver_runtime_status(path)? {
+            Some(status) => {
+                println!("phase: {:?}", status.phase);
+                println!(
+                    "protocol: {}",
+                    status
+                        .protocol
+                        .map(|protocol| protocol.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!("auth_mode: {:?}", status.auth_mode);
+                println!(
+                    "local_addr: {}",
+                    status
+                        .local_addr
+                        .map(|addr| addr.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "output: {}",
+                    status
+                        .output_dir
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!("accounts: {}", status.account_count);
+                println!("message: {}", status.message.as_deref().unwrap_or("-"));
+            }
+            None => {
+                println!("phase: Unknown");
+                println!("message: receiver status file not found");
+            }
+        },
         Some(Command::ServeFtp {
             config,
             bind_host,

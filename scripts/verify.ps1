@@ -148,6 +148,12 @@ try {
 
 $ftpReceived = Get-Item -LiteralPath (Join-Path $ftpSmokeOutput "IMG_5678.NEF")
 if ($ftpReceived.Length -ne 4) { throw "FTP smoke upload length mismatch" }
+$receiverStatusOutput = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $ftpSmokeOutput
+if ($LASTEXITCODE -ne 0) { throw "receiver-status smoke failed" }
+if (($receiverStatusOutput | Where-Object { $_ -like "phase: Stopped*" }).Count -lt 1) {
+    throw "receiver-status did not report stopped phase after smoke shutdown"
+}
+Write-Output $receiverStatusOutput
 $ftpTransferLog = Join-Path $ftpSmokeOutput "transfer-log.jsonl"
 $ftpTransferRecords = @(Get-Content -LiteralPath $ftpTransferLog | ForEach-Object { $_ | ConvertFrom-Json })
 if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -and $_.remote_addr -eq "127.0.0.1" }).Count -ne 1) {
