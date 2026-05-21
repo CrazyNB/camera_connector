@@ -13,7 +13,7 @@ The app runs a local FTP receiver. The camera is configured with:
 - Host: the phone/computer IP address on the current network.
 - Port: default `2121` for development; production may use `21` when platform permissions allow it.
 - Mode: passive FTP.
-- Username/password: configured through camera accounts. Each account has a login username, optional password, display device name, and optional known camera IPs.
+- Username/password: configured through camera accounts. Each account has a login username, optional password, and display device name.
 - Destination: local import folder managed by the app.
 
 The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat output folder as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.

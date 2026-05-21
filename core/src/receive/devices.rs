@@ -102,10 +102,38 @@ pub fn record_device_authenticated(
     let now = current_time_ms();
     let mut devices = read_connected_devices(output_dir)?;
 
+    let previous_for_username = username.and_then(|username| {
+        devices
+            .iter()
+            .filter(|device| {
+                device.username.as_deref() == Some(username) && device.remote_addr != remote_addr
+            })
+            .fold(None, |previous: Option<ConnectedDevice>, device| {
+                Some(match previous {
+                    Some(previous) if previous.first_seen_at_ms <= device.first_seen_at_ms => {
+                        previous
+                    }
+                    _ => device.clone(),
+                })
+            })
+    });
+
+    if let Some(username) = username {
+        devices.retain(|device| {
+            device.remote_addr == remote_addr || device.username.as_deref() != Some(username)
+        });
+    }
+
     if let Some(device) = devices
         .iter_mut()
         .find(|device| device.remote_addr == remote_addr)
     {
+        if let Some(previous) = previous_for_username {
+            device.first_seen_at_ms = device.first_seen_at_ms.min(previous.first_seen_at_ms);
+            if device.source_name.is_none() {
+                device.source_name = previous.source_name;
+            }
+        }
         device.last_seen_at_ms = now;
         if let Some(source_name) = source_name {
             device.source_name = Some(source_name.to_string());

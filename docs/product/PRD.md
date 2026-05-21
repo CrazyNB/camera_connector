@@ -63,8 +63,8 @@ P0:
 - Scan the receiver inbox as the product's import source.
 - Record a transfer log for filtering by transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
-- Let users configure camera accounts with FTP username, password, device name, and optional known IPs.
-- Show current and recently connected devices from receiver metadata so newly seen IPs can be bound to an existing account/device instead of typed from memory.
+- Let users configure camera accounts with FTP username, password, and device name.
+- Show current and recently connected devices from receiver metadata so the latest IP is visible as connection state, not account identity.
 - Record real-camera compatibility results.
 
 P1:
