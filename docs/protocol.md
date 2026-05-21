@@ -62,6 +62,10 @@ Not yet implemented:
 
 ## Storage Rules
 
+- System config, receiver state/logs, and uploaded assets are separate:
+  - Config: account and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
+  - State/log directory: `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key`.
+  - Output/inbox directory: completed camera files and in-progress `.tmp` uploads only.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
 - Use only the final remote filename for local storage.
@@ -74,7 +78,7 @@ Not yet implemented:
 
 ## Transfer Log
 
-The receiver writes `transfer-log.jsonl` in the output folder. Each completed transfer records:
+The receiver writes `transfer-log.jsonl` in the state/log directory. Each completed transfer records:
 
 - `transfer_id`: stable enough to reference a single transfer.
 - `protocol`: FTP, SFTP, or manual validation source.
@@ -98,7 +102,7 @@ Camera accounts are user configuration. They map push-login credentials to a dev
 
 ## Connected Devices
 
-The receiver writes `connected-devices.json` in the output folder. It records current and recently seen FTP control connections and SFTP sessions:
+The receiver writes `connected-devices.json` in the state/log directory. It records current and recently seen FTP control connections and SFTP sessions:
 
 - `remote_addr` and last remote port.
 - authenticated login `username` when the device has logged in.
@@ -112,17 +116,18 @@ When the FTP or SFTP receiver starts, it marks any previously online device reco
 
 ## Receiver Runtime Status
 
-The receiver writes `receiver-status.json` in the output folder. It records:
+The receiver writes `receiver-status.json` in the state/log directory. It records:
 
 - `phase`: stopped, starting, running, stopping, or failed.
 - `protocol`: FTP or SFTP when known.
 - `auth_mode`: anonymous or accounts.
 - `local_addr`: the socket address that accepted camera connections.
 - `output_dir`.
+- `state_dir`.
 - `account_count`.
 - `message`: failure or diagnostic text.
 
-The status file is receiver metadata, not an inbox asset. Inbox scans must ignore it, just like `transfer-log.jsonl` and `connected-devices.json`.
+The status file is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore legacy metadata names defensively.
 
 Status readers should treat a stale `Running` file as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
 

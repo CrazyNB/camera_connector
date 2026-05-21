@@ -25,6 +25,8 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long)]
+        state: Option<PathBuf>,
         #[arg(long, default_value = "manual")]
         source: String,
         #[arg(long)]
@@ -42,6 +44,8 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long)]
         username: Option<String>,
         #[arg(long)]
         advertised_host: Option<String>,
@@ -49,8 +53,8 @@ enum Command {
         source_name: Option<String>,
     },
     ReceiverStatus {
-        #[arg(long)]
-        path: PathBuf,
+        #[arg(long, alias = "path")]
+        state: PathBuf,
     },
     ServeFtp {
         #[arg(long)]
@@ -61,6 +65,8 @@ enum Command {
         port: u16,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long)]
+        state: Option<PathBuf>,
         #[arg(long)]
         username: Option<String>,
         #[arg(long)]
@@ -80,6 +86,8 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
         #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long)]
         username: Option<String>,
         #[arg(long)]
         password: Option<String>,
@@ -97,8 +105,8 @@ enum Command {
     Transfers {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long)]
-        path: PathBuf,
+        #[arg(long, alias = "path")]
+        state: PathBuf,
         #[arg(long)]
         transfer_id: Option<String>,
         #[arg(long)]
@@ -113,8 +121,8 @@ enum Command {
     Devices {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long)]
-        path: PathBuf,
+        #[arg(long, alias = "path")]
+        state: PathBuf,
         #[arg(long)]
         username: Option<String>,
         #[arg(long)]
@@ -151,6 +159,7 @@ struct ConfigArgs {
     bind_host: String,
     port: u16,
     output: PathBuf,
+    state: Option<PathBuf>,
     username: Option<String>,
     password: Option<String>,
     advertised_host: Option<String>,
@@ -168,6 +177,7 @@ async fn main() -> Result<()> {
         Some(Command::ReceiveFile {
             input,
             output,
+            state,
             source,
             source_name,
         }) => {
@@ -197,10 +207,12 @@ async fn main() -> Result<()> {
             let final_path = progress.output_path.ok_or_else(|| {
                 camera_connector_core::ImporterError::internal("missing output path")
             })?;
-            let log_dir = final_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf();
+            let log_dir = state.unwrap_or_else(|| {
+                final_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf()
+            });
             append_transfer_record(
                 &log_dir,
                 &TransferRecord {
@@ -225,6 +237,7 @@ async fn main() -> Result<()> {
             bind_host,
             port,
             output,
+            state,
             username,
             advertised_host,
             source_name,
@@ -236,6 +249,7 @@ async fn main() -> Result<()> {
                 bind_host,
                 port,
                 output,
+                state,
                 username,
                 password: None,
                 advertised_host,
@@ -243,9 +257,9 @@ async fn main() -> Result<()> {
             })?;
             print_receiver_config(&config);
         }
-        Some(Command::ReceiverStatus { path }) => {
+        Some(Command::ReceiverStatus { state }) => {
             let service = CameraConnectorService::new(None);
-            match service.receiver_status(path)? {
+            match service.receiver_status(state)? {
                 Some(status) => {
                     println!("phase: {:?}", status.phase);
                     println!(
@@ -271,6 +285,14 @@ async fn main() -> Result<()> {
                             .map(|path| path.display().to_string())
                             .unwrap_or_else(|| "-".to_string())
                     );
+                    println!(
+                        "state: {}",
+                        status
+                            .state_dir
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
                     println!("accounts: {}", status.account_count);
                     println!("message: {}", status.message.as_deref().unwrap_or("-"));
                 }
@@ -285,6 +307,7 @@ async fn main() -> Result<()> {
             bind_host,
             port,
             output,
+            state,
             username,
             password,
             advertised_host,
@@ -297,6 +320,7 @@ async fn main() -> Result<()> {
                 bind_host,
                 port,
                 output_dir: output,
+                state_dir: state,
                 username,
                 password,
                 advertised_host,
@@ -317,6 +341,7 @@ async fn main() -> Result<()> {
             bind_host,
             port,
             output,
+            state,
             username,
             password,
             advertised_host,
@@ -329,6 +354,7 @@ async fn main() -> Result<()> {
                 bind_host,
                 port,
                 output_dir: output,
+                state_dir: state,
                 username,
                 password,
                 advertised_host,
@@ -380,7 +406,7 @@ async fn main() -> Result<()> {
         }
         Some(Command::Transfers {
             config,
-            path,
+            state,
             transfer_id,
             original_path,
             final_filename,
@@ -389,7 +415,7 @@ async fn main() -> Result<()> {
         }) => {
             let service = CameraConnectorService::new(config);
             for view in service.transfers(
-                path,
+                state,
                 TransferQuery {
                     transfer_id,
                     original_path,
@@ -417,12 +443,12 @@ async fn main() -> Result<()> {
         }
         Some(Command::Devices {
             config,
-            path,
+            state,
             username,
             online,
         }) => {
             let service = CameraConnectorService::new(config);
-            for view in service.connected_devices(path, username.as_deref(), online)? {
+            for view in service.connected_devices(state, username.as_deref(), online)? {
                 let device = view.device;
                 println!(
                     "{}\tonline={}\tconnections={}\tport={}\tusername={}\tsource={}\tdisplay={}\tlast_seen_ms={}",
@@ -451,6 +477,7 @@ fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
         bind_host: args.bind_host,
         port: args.port,
         output_dir: args.output,
+        state_dir: args.state,
         username: args.username,
         password: args.password,
         advertised_host: args.advertised_host,
@@ -469,6 +496,7 @@ fn print_receiver_config(config: &PushReceiverConfig) {
     );
     println!("port: {}", config.port);
     println!("output: {}", config.output_dir.display());
+    println!("state: {}", config.state_dir.display());
     println!("accounts: {}", config.accounts.len());
     for account in &config.accounts {
         println!(

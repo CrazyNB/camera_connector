@@ -18,6 +18,7 @@ pub struct ReceiverConfigRequest {
     pub bind_host: String,
     pub port: u16,
     pub output_dir: PathBuf,
+    pub state_dir: Option<PathBuf>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub advertised_host: Option<String>,
@@ -55,6 +56,10 @@ impl CameraConnectorService {
         CameraConnectorConfig::resolved_path(self.config_path.as_deref())
     }
 
+    pub fn state_dir(&self) -> PathBuf {
+        CameraConnectorConfig::default_state_dir(self.config_path.as_deref())
+    }
+
     pub fn load_config(&self) -> Result<CameraConnectorConfig> {
         CameraConnectorConfig::load(self.config_path.as_deref())
     }
@@ -64,12 +69,14 @@ impl CameraConnectorService {
     }
 
     pub fn receiver_config(&self, request: ReceiverConfigRequest) -> Result<PushReceiverConfig> {
+        let state_dir = request.state_dir.unwrap_or_else(|| self.state_dir());
         let mut config = PushReceiverConfig::new(
             request.protocol,
             request.bind_host,
             request.port,
             request.output_dir,
-        );
+        )
+        .with_state_dir(state_dir);
         config.advertised_host = request.advertised_host;
         config.source_name = request.source_name;
         config.accounts = self.load_config()?.effective_accounts(

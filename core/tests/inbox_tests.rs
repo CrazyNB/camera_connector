@@ -39,6 +39,7 @@ fn scans_inbox_files_and_skips_transfer_log() {
     std::fs::write(temp_dir.path().join("transfer-log.jsonl"), []).unwrap();
     std::fs::write(temp_dir.path().join("connected-devices.json"), []).unwrap();
     std::fs::write(temp_dir.path().join("receiver-status.json"), []).unwrap();
+    std::fs::write(temp_dir.path().join("sftp-host-key"), []).unwrap();
 
     let assets = scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan");
 

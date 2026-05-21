@@ -11,7 +11,9 @@ use tokio::time::{sleep, Duration};
 #[tokio::test]
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let state_dir = tempfile::tempdir().expect("state dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path())
         .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
     let server = FtpPushServer::bind(config)
         .await
@@ -34,7 +36,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
     );
 
     assert_reply(&mut control, "220").await;
-    let connected = read_connected_devices(temp_dir.path()).expect("devices should read");
+    let connected = read_connected_devices(state_dir.path()).expect("devices should read");
     assert_eq!(connected.len(), 1);
     assert_eq!(connected[0].remote_addr, "127.0.0.1");
     assert_eq!(connected[0].source_name.as_deref(), None);
@@ -45,7 +47,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_reply(&mut control, "331").await;
     command(&mut control, "PASS secret").await;
     assert_reply(&mut control, "230").await;
-    let logged_in = read_connected_devices(temp_dir.path()).expect("devices should read");
+    let logged_in = read_connected_devices(state_dir.path()).expect("devices should read");
     assert_eq!(logged_in[0].username.as_deref(), Some("z5"));
     assert_eq!(logged_in[0].source_name.as_deref(), Some("Studio A"));
     command(&mut control, "TYPE I").await;
@@ -88,7 +90,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_eq!(bytes, vec![1, 2, 3, 4, 5]);
     assert!(!temp_dir.path().join("DCIM").exists());
 
-    let records = read_transfer_log(temp_dir.path()).expect("transfer log should read");
+    let records = read_transfer_log(state_dir.path()).expect("transfer log should read");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].remote_addr.as_deref(), Some("127.0.0.1"));
     assert_eq!(records[0].source_name.as_deref(), Some("Studio A"));
@@ -101,9 +103,11 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert_eq!(records[0].size_bytes, 5);
     assert_eq!(records[0].status, TransferStatus::Completed);
 
-    let disconnected = read_connected_devices(temp_dir.path()).expect("devices should read");
+    let disconnected = read_connected_devices(state_dir.path()).expect("devices should read");
     assert_eq!(disconnected.len(), 1);
     assert!(!disconnected[0].online);
+    assert!(!temp_dir.path().join("transfer-log.jsonl").exists());
+    assert!(!temp_dir.path().join("connected-devices.json").exists());
 }
 
 #[tokio::test]

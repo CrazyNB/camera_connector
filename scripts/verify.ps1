@@ -5,8 +5,11 @@ $vsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Comm
 $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $pushInput = Join-Path $root "target\push-input"
 $pushOutput = Join-Path $root "target\push-output"
+$pushState = Join-Path $root "target\push-state"
 $ftpSmokeOutput = Join-Path $root "target\ftp-smoke-output"
+$ftpSmokeState = Join-Path $root "target\ftp-smoke-state"
 $sftpSmokeOutput = Join-Path $root "target\sftp-smoke-output"
+$sftpSmokeState = Join-Path $root "target\sftp-smoke-state"
 $configPath = Join-Path $root "target\push-config.json"
 
 function Invoke-CargoDev {
@@ -32,19 +35,31 @@ if (Test-Path $pushInput) {
 if (Test-Path $pushOutput) {
     Remove-Item -LiteralPath $pushOutput -Recurse -Force
 }
+if (Test-Path $pushState) {
+    Remove-Item -LiteralPath $pushState -Recurse -Force
+}
 if (Test-Path $ftpSmokeOutput) {
     Remove-Item -LiteralPath $ftpSmokeOutput -Recurse -Force
 }
+if (Test-Path $ftpSmokeState) {
+    Remove-Item -LiteralPath $ftpSmokeState -Recurse -Force
+}
 if (Test-Path $sftpSmokeOutput) {
     Remove-Item -LiteralPath $sftpSmokeOutput -Recurse -Force
+}
+if (Test-Path $sftpSmokeState) {
+    Remove-Item -LiteralPath $sftpSmokeState -Recurse -Force
 }
 if (Test-Path $configPath) {
     Remove-Item -LiteralPath $configPath -Force
 }
 New-Item -ItemType Directory -Force -Path $pushInput | Out-Null
 New-Item -ItemType Directory -Force -Path $pushOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $pushState | Out-Null
 New-Item -ItemType Directory -Force -Path $ftpSmokeOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $ftpSmokeState | Out-Null
 New-Item -ItemType Directory -Force -Path $sftpSmokeOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $sftpSmokeState | Out-Null
 
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
@@ -62,16 +77,16 @@ if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*" }).Count -l
 }
 Write-Output $accountList
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol sftp --port 2222 --output $sftpSmokeOutput
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol sftp --port 2222 --output $sftpSmokeOutput --state $sftpSmokeState
 if ($LASTEXITCODE -ne 0) { throw "receiver-config sftp smoke failed" }
 
 $serverOut = Join-Path $root "target\ftp-smoke.out.log"
 $serverErr = Join-Path $root "target\ftp-smoke.err.log"
 $server = Start-Process -FilePath (Join-Path $root "target\debug\camera-connector.exe") `
-    -ArgumentList @("serve-ftp", "--config", $configPath, "--bind-host", "127.0.0.1", "--port", "2221", "--output", $ftpSmokeOutput) `
+    -ArgumentList @("serve-ftp", "--config", $configPath, "--bind-host", "127.0.0.1", "--port", "2221", "--output", $ftpSmokeOutput, "--state", $ftpSmokeState) `
     -WindowStyle Hidden `
     -PassThru `
     -RedirectStandardOutput $serverOut `
@@ -156,13 +171,13 @@ try {
 
 $ftpReceived = Get-Item -LiteralPath (Join-Path $ftpSmokeOutput "IMG_5678.NEF")
 if ($ftpReceived.Length -ne 4) { throw "FTP smoke upload length mismatch" }
-$receiverStatusOutput = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $ftpSmokeOutput
+$receiverStatusOutput = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --state $ftpSmokeState
 if ($LASTEXITCODE -ne 0) { throw "receiver-status smoke failed" }
 if (($receiverStatusOutput | Where-Object { $_ -like "phase: Stopped*" }).Count -lt 1) {
     throw "receiver-status did not report stopped phase after smoke shutdown"
 }
 Write-Output $receiverStatusOutput
-$ftpTransferLog = Join-Path $ftpSmokeOutput "transfer-log.jsonl"
+$ftpTransferLog = Join-Path $ftpSmokeState "transfer-log.jsonl"
 $ftpTransferRecords = @(Get-Content -LiteralPath $ftpTransferLog | ForEach-Object { $_ | ConvertFrom-Json })
 if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -and $_.remote_addr -eq "127.0.0.1" }).Count -ne 1) {
     throw "FTP smoke transfer log did not record account source and remote address"
@@ -171,7 +186,7 @@ if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -a
 $sftpServerOut = Join-Path $root "target\sftp-smoke.out.log"
 $sftpServerErr = Join-Path $root "target\sftp-smoke.err.log"
 $sftpServer = Start-Process -FilePath (Join-Path $root "target\debug\camera-connector.exe") `
-    -ArgumentList @("serve-sftp", "--config", $configPath, "--bind-host", "127.0.0.1", "--port", "2222", "--output", $sftpSmokeOutput) `
+    -ArgumentList @("serve-sftp", "--config", $configPath, "--bind-host", "127.0.0.1", "--port", "2222", "--output", $sftpSmokeOutput, "--state", $sftpSmokeState) `
     -WindowStyle Hidden `
     -PassThru `
     -RedirectStandardOutput $sftpServerOut `
@@ -189,7 +204,7 @@ try {
         throw "SFTP smoke server did not start"
     }
 
-    $sftpRunningStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $sftpSmokeOutput
+    $sftpRunningStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --state $sftpSmokeState
     if ($LASTEXITCODE -ne 0) { throw "sftp receiver-status smoke failed" }
     if (($sftpRunningStatus | Where-Object { $_ -like "phase: Running*" }).Count -lt 1) {
         throw "sftp receiver-status did not report running phase"
@@ -203,29 +218,29 @@ try {
     }
 }
 
-$sftpStoppedStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $sftpSmokeOutput
+$sftpStoppedStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --state $sftpSmokeState
 if ($LASTEXITCODE -ne 0) { throw "sftp stopped receiver-status smoke failed" }
 if (($sftpStoppedStatus | Where-Object { $_ -like "phase: Stopped*" }).Count -lt 1) {
     throw "sftp receiver-status did not report stopped phase after smoke shutdown"
 }
 Write-Output $sftpStoppedStatus
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --path $pushOutput
+& (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --path $ftpSmokeOutput --username "verify"
+& (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $ftpSmokeState --username "verify"
 if ($LASTEXITCODE -ne 0) { throw "devices username filter smoke failed" }
 
-$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --path $pushOutput --source-name "Verify Camera" --original-path IMG_1234
+$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --source-name "Verify Camera" --original-path IMG_1234
 if ($LASTEXITCODE -ne 0) { throw "transfers smoke failed" }
 if (($transfersOutput | Where-Object { $_ -like "*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "transfers display path smoke failed"
@@ -237,7 +252,7 @@ $duplicate = Get-Item -LiteralPath (Join-Path $pushOutput "IMG_1234 (1).CR3")
 if ($received.Length -le 0) { throw "received output is empty" }
 if ($duplicate.Length -le 0) { throw "duplicate output is empty" }
 
-$transferLog = Join-Path $pushOutput "transfer-log.jsonl"
+$transferLog = Join-Path $pushState "transfer-log.jsonl"
 if (!(Test-Path -LiteralPath $transferLog)) { throw "transfer log was not written" }
 $transferRecords = @(Get-Content -LiteralPath $transferLog | ForEach-Object { $_ | ConvertFrom-Json })
 if ($transferRecords.Count -ne 2) { throw "expected 2 transfer log records, found $($transferRecords.Count)" }

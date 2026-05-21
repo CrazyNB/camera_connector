@@ -26,7 +26,7 @@ impl FtpPushServer {
             return Err(ImporterError::UnsupportedProtocol);
         }
         config.validate_accounts()?;
-        mark_all_connected_devices_offline(&config.output_dir)?;
+        mark_all_connected_devices_offline(&config.state_dir)?;
 
         let listener = TcpListener::bind((config.bind_host.as_str(), config.port)).await?;
         Ok(Self {
@@ -107,7 +107,7 @@ async fn handle_control_connection(
     if let Some(remote_addr) = remote_addr.as_deref() {
         let source_name = config.resolved_source_name(Some(remote_addr));
         record_device_connected(
-            &config.output_dir,
+            &config.state_dir,
             remote_addr,
             peer_addr.map(|addr| addr.port()),
             source_name.as_deref(),
@@ -204,7 +204,7 @@ async fn handle_control_connection(
 
     let disconnect_result = remote_addr
         .as_deref()
-        .map(|remote_addr| record_device_disconnected(&config.output_dir, remote_addr))
+        .map(|remote_addr| record_device_disconnected(&config.state_dir, remote_addr))
         .unwrap_or(Ok(()));
 
     match (result, disconnect_result) {
@@ -236,7 +236,7 @@ async fn handle_user(
             state.authenticated_account = Some(account.clone());
             if let Some(remote_addr) = remote_addr {
                 record_device_authenticated(
-                    &config.output_dir,
+                    &config.state_dir,
                     remote_addr,
                     Some(&account.device_name),
                     Some(&account.username),
@@ -285,7 +285,7 @@ async fn handle_pass(
             state.authenticated = true;
             if let Some(remote_addr) = remote_addr {
                 record_device_authenticated(
-                    &config.output_dir,
+                    &config.state_dir,
                     remote_addr,
                     Some(&account.device_name),
                     Some(&account.username),
@@ -411,7 +411,7 @@ async fn handle_stor(
         .map(|account| account.device_name.clone())
         .or_else(|| config.resolved_source_name(remote_addr.as_deref()));
     append_transfer_record(
-        &config.output_dir,
+        &config.state_dir,
         &TransferRecord {
             transfer_id,
             protocol: "ftp".to_string(),

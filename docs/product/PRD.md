@@ -33,7 +33,7 @@ Current priorities:
 2. App shows receiver IP, port, protocol, username, and output folder.
 3. User configures the camera FTP upload profile.
 4. Camera sends files to the receiver.
-5. App atomically publishes completed files into a flat inbox and groups RAW/JPEG pairs.
+5. App atomically publishes completed files into a flat inbox, keeps receiver state/logs outside the upload directory, and groups RAW/JPEG pairs.
 
 ### 4.2 Desktop Batch Receiver
 
@@ -55,6 +55,7 @@ P0:
 - Accept passive FTP `STOR` uploads.
 - Write uploaded files through a temporary file and publish only on success.
 - Flatten uploaded paths to the final filename only; do not mirror camera-side folders locally.
+- Keep system config, receiver state/logs, and uploaded assets in separate locations.
 - Sanitize uploaded filenames.
 - Group RAW/JPEG/video assets by filename stem.
 - Recognize common RAW formats across vendors: NEF/NRW, CR2/CR3, ARW/SRF/SR2, RAF, RW2/RWL, ORF, PEF, and DNG.
@@ -97,10 +98,11 @@ P2:
 | ID | Requirement | Priority | Acceptance |
 | --- | --- | --- | --- |
 | RX-001 | Start local FTP receiver | P0 | Receiver listens on configured host and port |
-| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, configured accounts, password status, output folder |
+| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, configured accounts, password status, output folder, and state/log folder |
 | RX-003 | Accept passive FTP upload | P0 | A client can upload a file through `PASV` + `STOR` |
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Flat safe path handling | P0 | `/DCIM/100CANON/IMG_1001.CR3` lands as `IMG_1001.CR3`; traversal and unsafe filename characters cannot escape output folder |
+| RX-005A | Directory separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload inbox contains camera files and temporary upload files only |
 | RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
 | RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
 | RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
@@ -132,7 +134,7 @@ flowchart LR
   Network["Phone hotspot / LAN\nAP later"]
   Receiver["Push Receiver\nFTP first"]
   Sink["Flat File Sink\n.tmp then publish"]
-  Log["Transfer Log\nid + original path + source tags"]
+  State["State/Logs\nstatus + devices + transfer log + host key"]
   Index["Asset Index\nformat + RAW/JPEG grouping"]
   CoreConfig["Core Config\naccounts + credential storage"]
   Service["Core Service\nreceiver + views"]
@@ -140,7 +142,7 @@ flowchart LR
   UI["CLI / Mobile / Desktop UI"]
 
   Camera --> Network --> Receiver --> Sink --> Index --> Service --> UI
-  Receiver --> Log --> Service
+  Receiver --> State --> Service
   CoreConfig --> Receiver
   CoreConfig --> Service
   Service --> Runtime --> Receiver

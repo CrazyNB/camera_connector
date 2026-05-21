@@ -145,6 +145,13 @@ impl CameraConnectorConfig {
         default_config_path()
     }
 
+    pub fn default_state_dir(config_path: Option<&Path>) -> PathBuf {
+        resolved_config_path(config_path)
+            .parent()
+            .map(|parent| parent.join("state"))
+            .unwrap_or_else(|| PathBuf::from("camera-connector-state"))
+    }
+
     pub fn set_account(
         &mut self,
         username: impl Into<String>,
@@ -302,6 +309,7 @@ pub struct PushReceiverConfig {
     pub bind_host: String,
     pub port: u16,
     pub output_dir: PathBuf,
+    pub state_dir: PathBuf,
     pub username: Option<String>,
     pub password: Option<String>,
     pub advertised_host: Option<String>,
@@ -316,11 +324,13 @@ impl PushReceiverConfig {
         port: u16,
         output_dir: impl AsRef<Path>,
     ) -> Self {
+        let output_dir = output_dir.as_ref().to_path_buf();
         Self {
             protocol,
             bind_host: bind_host.into(),
             port,
-            output_dir: output_dir.as_ref().to_path_buf(),
+            state_dir: output_dir.clone(),
+            output_dir,
             username: None,
             password: None,
             advertised_host: None,
@@ -336,6 +346,11 @@ impl PushReceiverConfig {
     ) -> Self {
         self.username = Some(username.into());
         self.password = Some(password.into());
+        self
+    }
+
+    pub fn with_state_dir(mut self, state_dir: impl AsRef<Path>) -> Self {
+        self.state_dir = state_dir.as_ref().to_path_buf();
         self
     }
 

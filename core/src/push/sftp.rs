@@ -1,9 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use russh::keys::ssh_key::LineEnding;
 use russh::keys::{Algorithm, PrivateKey};
 use russh::server::Server as _;
 use russh::server::{Auth, Msg, Session};
@@ -19,6 +22,8 @@ use crate::{
     TransferStatus,
 };
 
+const SFTP_HOST_KEY_FILENAME: &str = "sftp-host-key";
+
 pub struct SftpPushServer {
     listener: TcpListener,
     ssh_config: Arc<russh::server::Config>,
@@ -31,14 +36,13 @@ impl SftpPushServer {
             return Err(ImporterError::UnsupportedProtocol);
         }
         config.validate_accounts()?;
-        mark_all_connected_devices_offline(&config.output_dir)?;
+        mark_all_connected_devices_offline(&config.state_dir)?;
 
         let listener = TcpListener::bind((config.bind_host.as_str(), config.port)).await?;
         let ssh_config = russh::server::Config {
             auth_rejection_time: Duration::from_millis(200),
             auth_rejection_time_initial: Some(Duration::from_millis(0)),
-            keys: vec![PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
-                .map_err(|error| ImporterError::internal(error.to_string()))?],
+            keys: vec![load_or_create_host_key(&config.state_dir)?],
             ..Default::default()
         };
 
@@ -87,7 +91,7 @@ impl russh::server::Server for SshServer {
             let remote_addr = peer_addr.ip().to_string();
             let source_name = self.config.resolved_source_name(Some(&remote_addr));
             if let Err(error) = record_device_connected(
-                &self.config.output_dir,
+                &self.config.state_dir,
                 &remote_addr,
                 Some(peer_addr.port()),
                 source_name.as_deref(),
@@ -156,7 +160,7 @@ impl russh::server::Handler for SshSession {
             if accepted {
                 if let Some(remote_addr) = self.remote_addr() {
                     if let Err(error) = record_device_authenticated(
-                        &self.config.output_dir,
+                        &self.config.state_dir,
                         &remote_addr,
                         Some(&account.device_name),
                         Some(&account.username),
@@ -183,7 +187,7 @@ impl russh::server::Handler for SshSession {
         if let Some(remote_addr) = self.remote_addr() {
             let source_name = self.source_name();
             if let Err(error) = record_device_authenticated(
-                &self.config.output_dir,
+                &self.config.state_dir,
                 &remote_addr,
                 source_name.as_deref(),
                 Some(user),
@@ -233,7 +237,7 @@ impl russh::server::Handler for SshSession {
 impl Drop for SshSession {
     fn drop(&mut self) {
         if let Some(remote_addr) = self.remote_addr() {
-            if let Err(error) = record_device_disconnected(&self.config.output_dir, remote_addr) {
+            if let Err(error) = record_device_disconnected(&self.config.state_dir, remote_addr) {
                 tracing::warn!(?error, "failed to record SFTP device disconnection");
             }
         }
@@ -339,7 +343,7 @@ impl russh_sftp::server::Handler for SftpSession {
         let progress = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
         let final_path = progress.output_path.clone().ok_or(StatusCode::Failure)?;
         append_transfer_record(
-            &self.config.output_dir,
+            &self.config.state_dir,
             &TransferRecord {
                 transfer_id: upload.transfer_id,
                 protocol: "sftp".to_string(),
@@ -374,4 +378,23 @@ fn current_time_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
+}
+
+pub fn sftp_host_key_path(state_dir: impl AsRef<Path>) -> PathBuf {
+    state_dir.as_ref().join(SFTP_HOST_KEY_FILENAME)
+}
+
+fn load_or_create_host_key(state_dir: &Path) -> Result<PrivateKey> {
+    fs::create_dir_all(state_dir)?;
+    let path = sftp_host_key_path(state_dir);
+    if path.exists() {
+        return PrivateKey::read_openssh_file(&path)
+            .map_err(|error| ImporterError::internal(error.to_string()));
+    }
+
+    let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
+        .map_err(|error| ImporterError::internal(error.to_string()))?;
+    key.write_openssh_file(&path, LineEnding::LF)
+        .map_err(|error| ImporterError::internal(error.to_string()))?;
+    Ok(key)
 }

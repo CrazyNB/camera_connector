@@ -74,6 +74,7 @@ fn is_receiver_metadata(path: &Path) -> bool {
             name.eq_ignore_ascii_case(TRANSFER_LOG_FILENAME)
                 || name.eq_ignore_ascii_case(CONNECTED_DEVICES_FILENAME)
                 || name.eq_ignore_ascii_case(RECEIVER_STATUS_FILENAME)
+                || name.eq_ignore_ascii_case("sftp-host-key")
         })
         .unwrap_or(false)
 }

@@ -10,7 +10,7 @@ The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. T
 flowchart TD
   A["Open app"] --> B["Choose protocol"]
   B --> C["Start receiver"]
-  C --> D["Show host, port, user, output folder"]
+  C --> D["Show host, port, user, output folder, state folder"]
   D --> E["Configure camera FTP/SFTP profile"]
   E --> F["Camera uploads files"]
   F --> G["Receiver publishes completed files"]
@@ -30,6 +30,7 @@ Content:
 - Host/IP and port.
 - Selected camera account, username, and password status.
 - Output folder.
+- State/log folder.
 - Runtime status from receiver metadata, including stale/offline detection after force quit or crash.
 - Start/stop receiver action.
 - Firewall/setup warning when needed.
@@ -83,11 +84,13 @@ Purpose: configure local receiver behavior.
 Content:
 
 - Output folder.
+- State/log folder for transfer log, connected devices, receiver status, and SFTP host key.
 - FTP port.
 - Credentials.
 - Camera accounts: manage FTP/SFTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
 - Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
 - Receiver status metadata: show phase, auth mode, bound address, account count, output folder, and diagnostic message.
+- Directory separation: config, state/logs, and upload inbox are separate.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.

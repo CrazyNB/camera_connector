@@ -24,6 +24,7 @@ fn service_builds_receiver_config_from_saved_accounts() {
             bind_host: "0.0.0.0".to_string(),
             port: 2121,
             output_dir: output_dir.clone(),
+            state_dir: None,
             username: None,
             password: None,
             advertised_host: Some("192.168.137.1".to_string()),
@@ -35,6 +36,10 @@ fn service_builds_receiver_config_from_saved_accounts() {
     assert_eq!(receiver.accounts[0].username, "z5");
     assert_eq!(receiver.accounts[0].device_name, "Z5_2");
     assert_eq!(receiver.advertised_host.as_deref(), Some("192.168.137.1"));
+    assert_eq!(
+        receiver.state_dir,
+        config_path.parent().unwrap().join("state")
+    );
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(output_dir);
@@ -138,6 +143,7 @@ fn service_reads_receiver_runtime_status() {
             auth_mode: ReceiverAuthMode::Accounts,
             local_addr: None,
             output_dir: Some(output_dir.clone()),
+            state_dir: Some(output_dir.clone()),
             account_count: 2,
             message: Some("operator stopped receiver".to_string()),
         },
