@@ -2,7 +2,7 @@
 
 ## 1. Prototype Goal
 
-The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. The first screen should help the user start a receiver and copy settings into the camera FTP profile.
+The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. The first screen should help the user start a receiver and copy settings into the camera FTP or SFTP profile.
 
 ## 2. Primary Flow
 
@@ -11,7 +11,7 @@ flowchart TD
   A["Open app"] --> B["Choose protocol"]
   B --> C["Start receiver"]
   C --> D["Show host, port, user, output folder"]
-  D --> E["Configure camera FTP profile"]
+  D --> E["Configure camera FTP/SFTP profile"]
   E --> F["Camera uploads files"]
   F --> G["Receiver publishes completed files"]
   G --> H["Flat inbox groups RAW/JPEG/video assets"]
@@ -85,7 +85,7 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
-- Camera accounts: manage FTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
+- Camera accounts: manage FTP/SFTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
 - Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
 - Receiver status metadata: show phase, auth mode, bound address, account count, output folder, and diagnostic message.
 - Flat inbox policy.

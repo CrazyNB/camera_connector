@@ -42,7 +42,7 @@ Minimum FTP commands supported by the core receiver:
 
 ## SFTP Push
 
-The core receiver can run an SSH/SFTP endpoint and accept password-authenticated uploads. Real-camera SFTP compatibility still needs field validation.
+The core receiver can run an SSH/SFTP endpoint and accept password-authenticated uploads. The core path is implemented; real-camera SFTP compatibility still needs field validation per vendor and firmware.
 
 Implemented behavior:
 
@@ -51,12 +51,14 @@ Implemented behavior:
 - Same flat local storage sink as FTP.
 - Same asset grouping and duplicate handling.
 - Same transfer log fields as FTP, with `protocol` set to `sftp`.
+- Same connected-device metadata as FTP, including latest IP, login username, account device name, online state, and disconnect state.
 - Same runtime status model as FTP.
+- Streaming large uploads directly to temporary files before atomic publish.
 
 Not yet implemented:
 
 - Public-key authentication.
-- Streaming large uploads directly to temporary files; the current SFTP path is suitable for compatibility validation and will be moved to streaming storage before large-file field use.
+- Real-camera SFTP compatibility matrix entries.
 
 ## Storage Rules
 
@@ -92,21 +94,21 @@ For display, the UI builds a virtual path from metadata:
 
 This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
 
-Camera accounts are user configuration. They map FTP login credentials to a device name. The receiver authenticates `USER`/`PASS` against this table and applies the account device name to new connection and transfer records. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
+Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; SFTP authenticates SSH password login. Both protocols use the same account table and apply the account device name to new connection and transfer records. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 
 ## Connected Devices
 
-The receiver writes `connected-devices.json` in the output folder. It records current and recently seen FTP control connections:
+The receiver writes `connected-devices.json` in the output folder. It records current and recently seen FTP control connections and SFTP sessions:
 
 - `remote_addr` and last remote port.
-- authenticated FTP `username` when the device has logged in.
+- authenticated login `username` when the device has logged in.
 - `online` and active connection count.
 - first seen, last seen, and last disconnected timestamps.
 - source name resolved from the authenticated account when available.
 
 This file powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
 
-When the FTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old control connections still exist, so the device view only returns to online after the camera opens a new connection.
+When the FTP or SFTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old sessions still exist, so the device view only returns to online after the camera opens a new connection.
 
 ## Receiver Runtime Status
 

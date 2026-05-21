@@ -62,18 +62,19 @@ P0:
 - Scan the receiver inbox as the product's import source.
 - Record a transfer log for filtering by transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
-- Let users configure camera accounts with FTP username, password, and device name.
+- Let users configure camera accounts with FTP/SFTP username, password, and device name.
 - Persist camera account passwords as core-generated hashes; never store or display plaintext passwords after setup.
 - Show current and recently connected devices from receiver metadata so the latest IP is visible as connection state, not account identity.
 - Expose receiver runtime lifecycle from core: stopped, starting, running, stopping, and failed.
 - Persist receiver runtime status as receiver metadata and detect stale `Running` status when the listener is no longer reachable.
+- Provide the same account model, flat sink, transfer log, connected-device metadata, runtime status, and temporary-file publish behavior for SFTP core receiver validation.
 - Record real-camera compatibility results.
 
 P1:
 
 - Add authentication polish.
 - Add duplicate detection.
-- Harden SFTP receiver for large-file streaming and real-camera compatibility.
+- Validate SFTP receiver with real cameras and update compatibility coverage.
 
 P2:
 
@@ -106,10 +107,10 @@ P2:
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename/path, bytes, protocol, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
-| RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, and device name; receiver authenticates against these accounts, stores password hashes rather than plaintext passwords, and rejects invalid account config |
-| RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
+| RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; FTP and SFTP receivers authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
+| RX-013 | Connected device view | P0 | FTP and SFTP receivers record current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
-| RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, and runtime status model as FTP |
+| RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, connected-device metadata, runtime status model, and temporary-file publish behavior as FTP |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -155,6 +156,6 @@ The CLI is a thin operational adapter for development, validation, headless/NAS 
 2. Build FTP receiver core and CLI smoke path.
 3. Validate with one real camera in FTP mode.
 4. Update compatibility table and receiver setup guide.
-5. Validate SFTP receiver with real cameras and harden large-file streaming.
+5. Validate SFTP receiver with real cameras and fill the compatibility matrix.
 6. Resume AP-mode exploration only after push import is stable.
 

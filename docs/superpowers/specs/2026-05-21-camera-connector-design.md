@@ -27,7 +27,7 @@ Replace the failed PTP/IP pull route with a push receiver. The camera sends file
 
 ## Deferred
 
-- SFTP large-file streaming hardening and real-camera validation.
+- SFTP real-camera validation and compatibility matrix updates.
 - Real-camera AP-mode validation.
 - Mobile background receiver behavior.
 
