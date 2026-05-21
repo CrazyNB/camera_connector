@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use camera_connector_core::{
-    read_transfer_log, PushProtocol, PushReceiverConfig, ReceiverAccount, SftpPushServer,
+    read_connected_devices, read_transfer_log, PushProtocol, PushReceiverConfig, ReceiverAccount,
+    SftpPushServer,
 };
 use russh::client;
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
+use tokio::time::{sleep, Duration};
 
 struct AcceptAnyServerKey;
 
@@ -46,6 +48,12 @@ async fn sftp_server_accepts_password_upload() {
         .await
         .expect("password auth should complete")
         .success());
+    let connected = read_connected_devices(temp_dir.path()).expect("devices should read");
+    assert_eq!(connected.len(), 1);
+    assert_eq!(connected[0].username.as_deref(), Some("camera"));
+    assert_eq!(connected[0].source_name.as_deref(), Some("Studio Camera"));
+    assert!(connected[0].online);
+
     let channel = session
         .channel_open_session()
         .await
@@ -70,6 +78,15 @@ async fn sftp_server_accepts_password_upload() {
     file.shutdown()
         .await
         .expect("remote file should close cleanly");
+    session
+        .disconnect(russh::Disconnect::ByApplication, "done", "")
+        .await
+        .expect("client should disconnect cleanly");
+
+    let disconnected = wait_for_sftp_device_disconnect(temp_dir.path()).await;
+    assert_eq!(disconnected.len(), 1);
+    assert!(!disconnected[0].online);
+    assert_eq!(disconnected[0].active_connections, 0);
 
     shutdown_tx.send(()).ok();
     task.await
@@ -85,4 +102,21 @@ async fn sftp_server_accepts_password_upload() {
     assert_eq!(records[0].protocol, "sftp");
     assert_eq!(records[0].original_path, "DCIM/100CAM/IMG_1001.NEF");
     assert_eq!(records[0].source_name.as_deref(), Some("Studio Camera"));
+}
+
+async fn wait_for_sftp_device_disconnect(
+    output_dir: &std::path::Path,
+) -> Vec<camera_connector_core::ConnectedDevice> {
+    for _ in 0..20 {
+        let devices = read_connected_devices(output_dir).expect("devices should read");
+        if devices
+            .first()
+            .map(|device| !device.online)
+            .unwrap_or(false)
+        {
+            return devices;
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    read_connected_devices(output_dir).expect("devices should read")
 }

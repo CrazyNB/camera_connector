@@ -13,8 +13,10 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use crate::{
-    append_transfer_record, ImporterError, LocalFileSink, LocalFileUpload, PushProtocol,
-    PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
+    append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
+    record_device_connected, record_device_disconnected, ImporterError, LocalFileSink,
+    LocalFileUpload, PushProtocol, PushReceiverConfig, ReceiverAccount, Result, TransferRecord,
+    TransferStatus,
 };
 
 pub struct SftpPushServer {
@@ -29,6 +31,7 @@ impl SftpPushServer {
             return Err(ImporterError::UnsupportedProtocol);
         }
         config.validate_accounts()?;
+        mark_all_connected_devices_offline(&config.output_dir)?;
 
         let listener = TcpListener::bind((config.bind_host.as_str(), config.port)).await?;
         let ssh_config = russh::server::Config {
@@ -80,6 +83,19 @@ impl russh::server::Server for SshServer {
     type Handler = SshSession;
 
     fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
+        if let Some(peer_addr) = peer_addr {
+            let remote_addr = peer_addr.ip().to_string();
+            let source_name = self.config.resolved_source_name(Some(&remote_addr));
+            if let Err(error) = record_device_connected(
+                &self.config.output_dir,
+                &remote_addr,
+                Some(peer_addr.port()),
+                source_name.as_deref(),
+                None,
+            ) {
+                tracing::warn!(?error, "failed to record SFTP device connection");
+            }
+        }
         SshSession::new(Arc::clone(&self.config), peer_addr)
     }
 }
@@ -138,6 +154,16 @@ impl russh::server::Handler for SshSession {
                 .map(|stored| stored.verify(password).unwrap_or(false))
                 .unwrap_or(true);
             if accepted {
+                if let Some(remote_addr) = self.remote_addr() {
+                    if let Err(error) = record_device_authenticated(
+                        &self.config.output_dir,
+                        &remote_addr,
+                        Some(&account.device_name),
+                        Some(&account.username),
+                    ) {
+                        tracing::warn!(?error, "failed to record SFTP device authentication");
+                    }
+                }
                 self.authenticated_account = Some(account);
                 return Ok(Auth::Accept);
             }
@@ -152,6 +178,17 @@ impl russh::server::Handler for SshSession {
         if let Some(expected) = &self.config.password {
             if password != expected {
                 return Ok(Auth::reject());
+            }
+        }
+        if let Some(remote_addr) = self.remote_addr() {
+            let source_name = self.source_name();
+            if let Err(error) = record_device_authenticated(
+                &self.config.output_dir,
+                &remote_addr,
+                source_name.as_deref(),
+                Some(user),
+            ) {
+                tracing::warn!(?error, "failed to record SFTP device authentication");
             }
         }
         Ok(Auth::Accept)
@@ -190,6 +227,16 @@ impl russh::server::Handler for SshSession {
         );
         russh_sftp::server::run(channel.into_stream(), handler).await;
         Ok(())
+    }
+}
+
+impl Drop for SshSession {
+    fn drop(&mut self) {
+        if let Some(remote_addr) = self.remote_addr() {
+            if let Err(error) = record_device_disconnected(&self.config.output_dir, remote_addr) {
+                tracing::warn!(?error, "failed to record SFTP device disconnection");
+            }
+        }
     }
 }
 
