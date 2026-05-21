@@ -5,8 +5,8 @@ use std::str::FromStr;
 use camera_connector_core::{
     append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverConfigRequest, Result, TransferQuery, TransferRecord, TransferRecordView,
-    TransferStatus,
+    ReceiverConfigRequest, Result, StoredObjectLocation, TransferQuery, TransferRecord,
+    TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -490,10 +490,22 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
         .chain(group.video.iter())
         .map(|asset| asset.size_bytes)
         .sum::<u64>();
+    let primary_location = group.primary.storage_location.as_ref();
 
     format!(
-        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes",
-        group.group_key, group.primary.filename, jpeg, raw, video, total_bytes
+        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tprimary_location_kind={}\tprimary_location={}",
+        group.group_key,
+        group.primary.filename,
+        jpeg,
+        raw,
+        video,
+        total_bytes,
+        primary_location
+            .map(StoredObjectLocation::kind)
+            .unwrap_or("-"),
+        primary_location
+            .map(StoredObjectLocation::display_label)
+            .unwrap_or_else(|| "-".to_string())
     )
 }
 
@@ -778,6 +790,26 @@ mod tests {
 
         assert!(line.contains("location_kind=document_uri"));
         assert!(line.contains("location=content://camera-connector/IMG_0001.DNG"));
+    }
+
+    #[test]
+    fn asset_group_line_prints_primary_storage_location() {
+        let asset = ReceivedAsset::new("ftp:1", "IMG_0001.CR3", 42, ImportSource::FtpPush)
+            .with_storage_location(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_0001.CR3",
+            ));
+        let group = ReceivedAssetGroup {
+            group_key: "IMG_0001".to_string(),
+            primary: asset.clone(),
+            jpeg: None,
+            raw: Some(asset),
+            video: None,
+        };
+
+        let line = asset_group_line(&group);
+
+        assert!(line.contains("primary_location_kind=document_uri"));
+        assert!(line.contains("primary_location=content://camera-connector/IMG_0001.CR3"));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

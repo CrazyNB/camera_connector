@@ -4,7 +4,10 @@ use std::time::UNIX_EPOCH;
 
 use super::{devices::CONNECTED_DEVICES_FILENAME, transfer_log::TRANSFER_LOG_FILENAME};
 use crate::runtime::RECEIVER_STATUS_FILENAME;
-use crate::{group_received_assets, ImportSource, ReceivedAsset, ReceivedAssetGroup, Result};
+use crate::{
+    group_received_assets, ImportSource, ReceivedAsset, ReceivedAssetGroup, Result,
+    StoredObjectLocation,
+};
 
 pub fn scan_inbox(root: impl AsRef<Path>, source: ImportSource) -> Result<Vec<ReceivedAsset>> {
     let root = root.as_ref();
@@ -48,7 +51,8 @@ fn collect_assets(
 
         let relative_path = relative_display_path(root, &path);
         let mut asset =
-            ReceivedAsset::new(relative_path.clone(), relative_path, metadata.len(), source);
+            ReceivedAsset::new(relative_path.clone(), relative_path, metadata.len(), source)
+                .with_storage_location(StoredObjectLocation::local_path(path.clone()));
         asset.received_time_ms = metadata
             .modified()
             .ok()

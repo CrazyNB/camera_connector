@@ -183,6 +183,7 @@ impl CameraConnectorService {
 }
 
 fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
+    let storage_location = record.resolved_final_location();
     let mut asset = ReceivedAsset::new(
         record.transfer_id,
         record.final_filename,
@@ -190,6 +191,7 @@ fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
         import_source_from_protocol(&record.protocol),
     );
     asset.received_time_ms = record.completed_at_ms.or(Some(record.started_at_ms));
+    asset.storage_location = storage_location;
     asset
 }
 

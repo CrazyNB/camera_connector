@@ -136,6 +136,14 @@ fn service_scans_inbox_groups() {
     assert_eq!(groups.len(), 1);
     assert!(groups[0].jpeg.is_some());
     assert!(groups[0].raw.is_some());
+    assert_eq!(
+        groups[0]
+            .jpeg
+            .as_ref()
+            .and_then(|asset| asset.storage_location.as_ref())
+            .map(StoredObjectLocation::kind),
+        Some("local_path")
+    );
 
     let _ = std::fs::remove_dir_all(output_dir);
 }
@@ -201,6 +209,23 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
     assert_eq!(
         groups[0].raw.as_ref().map(|asset| asset.filename.as_str()),
         Some("IMG_2222.NEF")
+    );
+    assert_eq!(
+        groups[0]
+            .jpeg
+            .as_ref()
+            .and_then(|asset| asset.storage_location.as_ref())
+            .map(StoredObjectLocation::kind),
+        Some("document_uri")
+    );
+    assert_eq!(
+        groups[0]
+            .raw
+            .as_ref()
+            .and_then(|asset| asset.storage_location.as_ref())
+            .map(StoredObjectLocation::display_label)
+            .as_deref(),
+        Some("content://media/external/images/media/2222")
     );
     assert_eq!(groups[0].primary.source, ImportSource::FtpPush);
 

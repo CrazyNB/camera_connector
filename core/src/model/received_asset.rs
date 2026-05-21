@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::ObjectFormat;
+use crate::StoredObjectLocation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ImportSource {
@@ -21,6 +22,7 @@ pub struct ReceivedAsset {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub group_key: Option<String>,
+    pub storage_location: Option<StoredObjectLocation>,
 }
 
 impl ReceivedAsset {
@@ -45,7 +47,13 @@ impl ReceivedAsset {
             width: None,
             height: None,
             group_key,
+            storage_location: None,
         }
+    }
+
+    pub fn with_storage_location(mut self, location: StoredObjectLocation) -> Self {
+        self.storage_location = Some(location);
+        self
     }
 }
 
