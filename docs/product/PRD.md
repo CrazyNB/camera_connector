@@ -73,7 +73,7 @@ P1:
 
 - Add authentication polish.
 - Add duplicate detection.
-- Add SFTP receiver.
+- Harden SFTP receiver for large-file streaming and real-camera compatibility.
 
 P2:
 
@@ -109,7 +109,7 @@ P2:
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, and device name; receiver authenticates against these accounts, stores password hashes rather than plaintext passwords, and rejects invalid account config |
 | RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
-| RX-015 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
+| RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, and runtime status model as FTP |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -155,6 +155,6 @@ The CLI is a thin operational adapter for development, validation, headless/NAS 
 2. Build FTP receiver core and CLI smoke path.
 3. Validate with one real camera in FTP mode.
 4. Update compatibility table and receiver setup guide.
-5. Add SFTP receiver using the same flat sink, transfer log, account, and runtime status model.
+5. Validate SFTP receiver with real cameras and harden large-file streaming.
 6. Resume AP-mode exploration only after push import is stable.
 

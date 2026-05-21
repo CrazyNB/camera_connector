@@ -2,7 +2,7 @@
 
 ## Goal
 
-Replace the failed PTP/IP pull route with a push receiver. The camera sends files to us over FTP first, with SFTP following after real-camera validation.
+Replace the failed PTP/IP pull route with a push receiver. The camera sends files to us over FTP first, with SFTP as the second push protocol.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ Replace the failed PTP/IP pull route with a push receiver. The camera sends file
 
 ## Deferred
 
-- SFTP server implementation.
+- SFTP large-file streaming hardening and real-camera validation.
 - Real-camera AP-mode validation.
 - Mobile background receiver behavior.
 

@@ -42,15 +42,21 @@ Minimum FTP commands supported by the core receiver:
 
 ## SFTP Push
 
-Planned after FTP is proven with a real camera.
+The core receiver can run an SSH/SFTP endpoint and accept password-authenticated uploads. Real-camera SFTP compatibility still needs field validation.
 
-Requirements:
+Implemented behavior:
 
-- SSH server endpoint owned by the app or companion service.
-- Configurable username/password or key material.
+- SSH server endpoint owned by the app.
+- Password authentication through the same camera account model used by FTP.
 - Same flat local storage sink as FTP.
 - Same asset grouping and duplicate handling.
-- Same transfer log fields as FTP.
+- Same transfer log fields as FTP, with `protocol` set to `sftp`.
+- Same runtime status model as FTP.
+
+Not yet implemented:
+
+- Public-key authentication.
+- Streaming large uploads directly to temporary files; the current SFTP path is suitable for compatibility validation and will be moved to streaming storage before large-file field use.
 
 ## Storage Rules
 
