@@ -6,6 +6,7 @@ $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
 $pushInput = Join-Path $root "target\push-input"
 $pushOutput = Join-Path $root "target\push-output"
 $ftpSmokeOutput = Join-Path $root "target\ftp-smoke-output"
+$sftpSmokeOutput = Join-Path $root "target\sftp-smoke-output"
 $configPath = Join-Path $root "target\push-config.json"
 
 function Invoke-CargoDev {
@@ -34,12 +35,16 @@ if (Test-Path $pushOutput) {
 if (Test-Path $ftpSmokeOutput) {
     Remove-Item -LiteralPath $ftpSmokeOutput -Recurse -Force
 }
+if (Test-Path $sftpSmokeOutput) {
+    Remove-Item -LiteralPath $sftpSmokeOutput -Recurse -Force
+}
 if (Test-Path $configPath) {
     Remove-Item -LiteralPath $configPath -Force
 }
 New-Item -ItemType Directory -Force -Path $pushInput | Out-Null
 New-Item -ItemType Directory -Force -Path $pushOutput | Out-Null
 New-Item -ItemType Directory -Force -Path $ftpSmokeOutput | Out-Null
+New-Item -ItemType Directory -Force -Path $sftpSmokeOutput | Out-Null
 
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
@@ -59,6 +64,9 @@ Write-Output $accountList
 
 & (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
+
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol sftp --port 2222 --output $sftpSmokeOutput
+if ($LASTEXITCODE -ne 0) { throw "receiver-config sftp smoke failed" }
 
 $serverOut = Join-Path $root "target\ftp-smoke.out.log"
 $serverErr = Join-Path $root "target\ftp-smoke.err.log"
@@ -159,6 +167,48 @@ $ftpTransferRecords = @(Get-Content -LiteralPath $ftpTransferLog | ForEach-Objec
 if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -and $_.remote_addr -eq "127.0.0.1" }).Count -ne 1) {
     throw "FTP smoke transfer log did not record account source and remote address"
 }
+
+$sftpServerOut = Join-Path $root "target\sftp-smoke.out.log"
+$sftpServerErr = Join-Path $root "target\sftp-smoke.err.log"
+$sftpServer = Start-Process -FilePath (Join-Path $root "target\debug\camera-connector.exe") `
+    -ArgumentList @("serve-sftp", "--config", $configPath, "--bind-host", "127.0.0.1", "--port", "2222", "--output", $sftpSmokeOutput) `
+    -WindowStyle Hidden `
+    -PassThru `
+    -RedirectStandardOutput $sftpServerOut `
+    -RedirectStandardError $sftpServerErr
+try {
+    $sftpReady = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Milliseconds 200
+        if (Test-NetConnection -ComputerName 127.0.0.1 -Port 2222 -InformationLevel Quiet) {
+            $sftpReady = $true
+            break
+        }
+    }
+    if (!$sftpReady) {
+        throw "SFTP smoke server did not start"
+    }
+
+    $sftpRunningStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $sftpSmokeOutput
+    if ($LASTEXITCODE -ne 0) { throw "sftp receiver-status smoke failed" }
+    if (($sftpRunningStatus | Where-Object { $_ -like "phase: Running*" }).Count -lt 1) {
+        throw "sftp receiver-status did not report running phase"
+    }
+    if (($sftpRunningStatus | Where-Object { $_ -like "protocol: sftp*" }).Count -lt 1) {
+        throw "sftp receiver-status did not report sftp protocol"
+    }
+} finally {
+    if (!$sftpServer.HasExited) {
+        Stop-Process -Id $sftpServer.Id -Force
+    }
+}
+
+$sftpStoppedStatus = & (Join-Path $root "target\debug\camera-connector.exe") receiver-status --path $sftpSmokeOutput
+if ($LASTEXITCODE -ne 0) { throw "sftp stopped receiver-status smoke failed" }
+if (($sftpStoppedStatus | Where-Object { $_ -like "phase: Stopped*" }).Count -lt 1) {
+    throw "sftp receiver-status did not report stopped phase after smoke shutdown"
+}
+Write-Output $sftpStoppedStatus
 
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }

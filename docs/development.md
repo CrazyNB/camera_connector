@@ -31,11 +31,14 @@ The script runs:
 - Push-mode CLI smoke test:
   - `account`
   - `receiver-config`
+  - `serve-ftp`
+  - `serve-sftp`
+  - `receiver-status`
   - `receive-file`
   - `inbox`
   - `transfers`
 
-Smoke outputs are written under `target/push-output`.
+Smoke outputs are written under `target/push-output`, `target/ftp-smoke-output`, and `target/sftp-smoke-output`.
 
 ## Manual FTP Receiver
 
@@ -52,6 +55,13 @@ Print camera-facing settings without starting the server:
 
 ```powershell
 target\debug\camera-connector.exe receiver-config --protocol ftp --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
+```
+
+For SFTP validation, use the same account model and output folder policy:
+
+```powershell
+target\debug\camera-connector.exe serve-sftp --bind-host 0.0.0.0 --port 2222 --output C:\Users\hxn\Pictures\CameraConnector
+target\debug\camera-connector.exe receiver-config --protocol sftp --port 2222 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
 List configured camera accounts:
