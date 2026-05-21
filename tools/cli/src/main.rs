@@ -96,6 +96,8 @@ enum Command {
         #[arg(long)]
         path: PathBuf,
         #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
         online: bool,
     },
     Account {
@@ -370,12 +372,13 @@ async fn main() -> Result<()> {
         Some(Command::Devices {
             config,
             path,
+            username,
             online,
         }) => {
             let accounts = load_app_config(config.as_deref())?.accounts;
             for device in read_connected_devices(path)?
                 .into_iter()
-                .filter(|device| !online || device.online)
+                .filter(|device| device_matches_filters(device, username.as_deref(), online))
             {
                 let display = device_display_source(&device, &accounts)
                     .unwrap_or_else(|| remote_addr_display_label(&device.remote_addr));
@@ -400,6 +403,13 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn device_matches_filters(device: &ConnectedDevice, username: Option<&str>, online: bool) -> bool {
+    (!online || device.online)
+        && username
+            .map(|expected| device.username.as_deref() == Some(expected))
+            .unwrap_or(true)
 }
 
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
@@ -774,6 +784,32 @@ mod tests {
             Some("Z5_2")
         );
         assert_eq!(remote_addr_display_label(&device.remote_addr), "IP-056");
+    }
+
+    #[test]
+    fn device_filter_matches_username_and_online_state() {
+        let online_device = ConnectedDevice {
+            remote_addr: "192.168.137.56".to_string(),
+            source_name: Some("Z5_2".to_string()),
+            username: Some("z5".to_string()),
+            first_seen_at_ms: 10,
+            last_seen_at_ms: 20,
+            last_disconnected_at_ms: None,
+            last_remote_port: Some(51120),
+            active_connections: 1,
+            online: true,
+        };
+        let offline_device = ConnectedDevice {
+            online: false,
+            active_connections: 0,
+            last_disconnected_at_ms: Some(30),
+            ..online_device.clone()
+        };
+
+        assert!(device_matches_filters(&online_device, Some("z5"), true));
+        assert!(!device_matches_filters(&offline_device, Some("z5"), true));
+        assert!(!device_matches_filters(&online_device, Some("xt5"), false));
+        assert!(device_matches_filters(&offline_device, Some("z5"), false));
     }
 
     #[test]

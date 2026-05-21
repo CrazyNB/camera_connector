@@ -1,6 +1,6 @@
 use camera_connector_core::{
     read_connected_devices, record_device_authenticated, record_device_connected,
-    record_device_disconnected,
+    record_device_disconnected, FtpPushServer, PushProtocol, PushReceiverConfig,
 };
 
 #[test]
@@ -59,4 +59,29 @@ fn authenticated_reconnect_updates_account_to_latest_ip() {
     assert_eq!(devices[0].source_name.as_deref(), Some("Z5_2"));
     assert_eq!(devices[0].active_connections, 1);
     assert!(devices[0].online);
+}
+
+#[tokio::test]
+async fn ftp_server_start_marks_stale_connections_offline() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    record_device_connected(
+        temp_dir.path(),
+        "192.168.137.56",
+        Some(51120),
+        Some("Z5_2"),
+        Some("z5"),
+    )
+    .expect("stale device should be recorded");
+
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path());
+    let _server = FtpPushServer::bind(config)
+        .await
+        .expect("server should bind");
+    let devices = read_connected_devices(temp_dir.path()).expect("devices should read");
+
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].remote_addr, "192.168.137.56");
+    assert_eq!(devices[0].active_connections, 0);
+    assert!(!devices[0].online);
+    assert!(devices[0].last_disconnected_at_ms.is_some());
 }

@@ -91,6 +91,21 @@ pub fn record_device_disconnected(
     write_connected_devices(output_dir, &devices)
 }
 
+pub fn mark_all_connected_devices_offline(output_dir: impl AsRef<Path>) -> Result<()> {
+    let output_dir = output_dir.as_ref();
+    let now = current_time_ms();
+    let mut devices = read_connected_devices(output_dir)?;
+
+    for device in devices.iter_mut().filter(|device| device.online) {
+        device.active_connections = 0;
+        device.online = false;
+        device.last_seen_at_ms = now;
+        device.last_disconnected_at_ms = Some(now);
+    }
+
+    write_connected_devices(output_dir, &devices)
+}
+
 pub fn record_device_authenticated(
     output_dir: impl AsRef<Path>,
     remote_addr: impl AsRef<str>,

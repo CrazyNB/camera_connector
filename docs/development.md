@@ -62,6 +62,7 @@ List current and recently connected devices from the receiver output folder:
 
 ```powershell
 target\debug\camera-connector.exe devices --path C:\Users\hxn\Pictures\CameraConnector
+target\debug\camera-connector.exe devices --path C:\Users\hxn\Pictures\CameraConnector --username z5 --online
 ```
 
 The `devices` output reads current receiver metadata. After the camera logs in as `z5`, the current IP is shown as a connection property of that account. IP addresses are not persisted in account config; if the camera reconnects with a different IP, the latest connection record updates naturally.

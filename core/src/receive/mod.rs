@@ -5,8 +5,9 @@ mod sink;
 mod transfer_log;
 
 pub use devices::{
-    connected_devices_path, read_connected_devices, record_device_authenticated,
-    record_device_connected, record_device_disconnected, ConnectedDevice,
+    connected_devices_path, mark_all_connected_devices_offline, read_connected_devices,
+    record_device_authenticated, record_device_connected, record_device_disconnected,
+    ConnectedDevice,
 };
 pub use inbox::{scan_inbox, scan_inbox_groups};
 pub use progress::{ReceiveProgress, ReceiveState};

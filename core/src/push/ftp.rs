@@ -7,9 +7,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    append_transfer_record, record_device_authenticated, record_device_connected,
-    record_device_disconnected, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig,
-    ReceiverAccount, Result, TransferRecord, TransferStatus,
+    append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
+    record_device_connected, record_device_disconnected, ImporterError, LocalFileSink,
+    PushProtocol, PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
@@ -25,6 +25,7 @@ impl FtpPushServer {
             return Err(ImporterError::UnsupportedProtocol);
         }
         config.validate_accounts()?;
+        mark_all_connected_devices_offline(&config.output_dir)?;
 
         let listener = TcpListener::bind((config.bind_host.as_str(), config.port)).await?;
         Ok(Self {

@@ -111,6 +111,8 @@ The receiver writes `connected-devices.json` in the output folder. It records cu
 
 This file powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
 
+When the FTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old control connections still exist, so the device view only returns to online after the camera opens a new connection.
+
 ## Real Camera Verification
 
 For each camera, record:
