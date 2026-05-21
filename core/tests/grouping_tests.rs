@@ -74,3 +74,16 @@ fn groups_brand_raw_files_with_matching_jpeg() {
     assert!(groups[0].jpeg.is_some());
     assert!(groups[0].raw.is_some());
 }
+
+#[test]
+fn groups_sort_by_latest_received_time_when_capture_time_is_missing() {
+    let mut older = ReceivedAsset::new("ftp-old", "IMG_0001.CR3", 10, ImportSource::FtpPush);
+    older.received_time_ms = Some(100);
+    let mut newer = ReceivedAsset::new("ftp-new", "IMG_0002.CR3", 10, ImportSource::FtpPush);
+    newer.received_time_ms = Some(200);
+
+    let groups = group_received_assets(vec![older, newer]);
+
+    assert_eq!(groups[0].group_key, "IMG_0002");
+    assert_eq!(groups[1].group_key, "IMG_0001");
+}

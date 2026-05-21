@@ -55,14 +55,40 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
         .collect();
 
     groups.sort_by(|left, right| {
-        right
-            .primary
-            .capture_time_ms
-            .cmp(&left.primary.capture_time_ms)
+        group_sort_time(right)
+            .cmp(&group_sort_time(left))
             .then_with(|| left.group_key.cmp(&right.group_key))
     });
 
     groups
+}
+
+fn group_sort_time(group: &ReceivedAssetGroup) -> Option<i64> {
+    group_members(group)
+        .into_iter()
+        .filter_map(|asset| asset.capture_time_ms.or(asset.received_time_ms))
+        .max()
+}
+
+fn group_members(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {
+    let mut members = Vec::new();
+    push_unique_member(&mut members, &group.primary);
+    if let Some(asset) = group.jpeg.as_ref() {
+        push_unique_member(&mut members, asset);
+    }
+    if let Some(asset) = group.raw.as_ref() {
+        push_unique_member(&mut members, asset);
+    }
+    if let Some(asset) = group.video.as_ref() {
+        push_unique_member(&mut members, asset);
+    }
+    members
+}
+
+fn push_unique_member<'a>(members: &mut Vec<&'a ReceivedAsset>, asset: &'a ReceivedAsset) {
+    if !members.iter().any(|member| member.id == asset.id) {
+        members.push(asset);
+    }
 }
 
 fn format_rank(format: ObjectFormat) -> u8 {
