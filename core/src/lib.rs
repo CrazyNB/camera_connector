@@ -19,7 +19,9 @@ pub use receive::{
     record_device_connected, record_device_disconnected, transfer_log_path, ConnectedDevice,
     TransferRecord, TransferStatus,
 };
-pub use receive::{scan_inbox, scan_inbox_groups, LocalFileSink, ReceiveProgress, ReceiveState};
+pub use receive::{
+    scan_inbox, scan_inbox_groups, LocalFileSink, LocalFileUpload, ReceiveProgress, ReceiveState,
+};
 pub use runtime::{
     read_receiver_runtime_status, receiver_runtime_status_path, write_receiver_runtime_status,
     CameraConnectorRuntime, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,

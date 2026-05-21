@@ -13,8 +13,8 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 use crate::{
-    append_transfer_record, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig,
-    ReceiverAccount, Result, TransferRecord, TransferStatus,
+    append_transfer_record, ImporterError, LocalFileSink, LocalFileUpload, PushProtocol,
+    PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 
 pub struct SftpPushServer {
@@ -194,9 +194,10 @@ impl russh::server::Handler for SshSession {
 }
 
 struct PendingUpload {
+    transfer_id: String,
     original_path: String,
     started_at_ms: i64,
-    bytes: Vec<u8>,
+    upload: LocalFileUpload,
 }
 
 struct SftpSession {
@@ -251,12 +252,18 @@ impl russh_sftp::server::Handler for SftpSession {
 
         self.next_handle += 1;
         let handle = format!("upload-{}", self.next_handle);
+        let started_at_ms = current_time_ms();
+        let transfer_id = format!("sftp:{started_at_ms}:{filename}");
+        let upload = LocalFileSink::new(&self.config.output_dir)
+            .begin_write(&transfer_id, &filename)
+            .map_err(|_| StatusCode::Failure)?;
         self.uploads.insert(
             handle.clone(),
             PendingUpload {
+                transfer_id,
                 original_path: filename,
-                started_at_ms: current_time_ms(),
-                bytes: Vec::new(),
+                started_at_ms,
+                upload,
             },
         );
         Ok(Handle { id, handle })
@@ -273,29 +280,21 @@ impl russh_sftp::server::Handler for SftpSession {
             .uploads
             .get_mut(&handle)
             .ok_or(StatusCode::NoSuchFile)?;
-        let offset = offset as usize;
-        if upload.bytes.len() < offset {
-            upload.bytes.resize(offset, 0);
-        }
-        let end = offset + data.len();
-        if upload.bytes.len() < end {
-            upload.bytes.resize(end, 0);
-        }
-        upload.bytes[offset..end].copy_from_slice(&data);
+        upload
+            .upload
+            .write_at(offset, &data)
+            .map_err(|_| StatusCode::Failure)?;
         Ok(ok_status(id))
     }
 
     async fn close(&mut self, id: u32, handle: String) -> std::result::Result<Status, Self::Error> {
         let upload = self.uploads.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
-        let transfer_id = format!("sftp:{}:{}", upload.started_at_ms, upload.original_path);
-        let progress = LocalFileSink::new(&self.config.output_dir)
-            .write_complete(&transfer_id, &upload.original_path, &upload.bytes)
-            .map_err(|_| StatusCode::Failure)?;
+        let progress = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
         let final_path = progress.output_path.clone().ok_or(StatusCode::Failure)?;
         append_transfer_record(
             &self.config.output_dir,
             &TransferRecord {
-                transfer_id,
+                transfer_id: upload.transfer_id,
                 protocol: "sftp".to_string(),
                 status: TransferStatus::Completed,
                 original_path: upload.original_path,

@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::{ImporterError, ReceiveProgress, Result};
@@ -21,6 +22,16 @@ impl LocalFileSink {
         relative_path: &str,
         bytes: &[u8],
     ) -> Result<ReceiveProgress> {
+        let mut upload = self.begin_write(transfer_id, relative_path)?;
+        upload.write_all(bytes)?;
+        upload.finish()
+    }
+
+    pub fn begin_write(
+        &self,
+        transfer_id: impl Into<String>,
+        relative_path: &str,
+    ) -> Result<LocalFileUpload> {
         let safe_path = safe_relative_path(relative_path)?;
         let final_path = available_path(self.output_dir.join(&safe_path));
         let parent = final_path
@@ -33,15 +44,16 @@ impl LocalFileSink {
             fs::remove_file(&temp_path)?;
         }
 
-        fs::write(&temp_path, bytes)?;
-        fs::rename(&temp_path, &final_path)?;
+        let file = File::create(&temp_path)?;
 
-        Ok(ReceiveProgress::completed(
-            transfer_id,
-            relative_display_path(&self.output_dir, &final_path),
-            bytes.len() as u64,
+        Ok(LocalFileUpload {
+            transfer_id: transfer_id.into(),
+            output_dir: self.output_dir.clone(),
             final_path,
-        ))
+            temp_path,
+            file,
+            bytes_written: 0,
+        })
     }
 
     pub fn create_dir_all(&self, relative_path: &str) -> Result<PathBuf> {
@@ -51,8 +63,60 @@ impl LocalFileSink {
     }
 }
 
+pub struct LocalFileUpload {
+    transfer_id: String,
+    output_dir: PathBuf,
+    final_path: PathBuf,
+    temp_path: PathBuf,
+    file: File,
+    bytes_written: u64,
+}
+
+impl LocalFileUpload {
+    pub fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<()> {
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.write_all(bytes)?;
+        self.bytes_written = self.bytes_written.max(offset + bytes.len() as u64);
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<ReceiveProgress> {
+        self.file.flush()?;
+        let LocalFileUpload {
+            transfer_id,
+            output_dir,
+            final_path,
+            temp_path,
+            file,
+            bytes_written,
+        } = self;
+        drop(file);
+        fs::rename(&temp_path, &final_path)?;
+
+        Ok(ReceiveProgress::completed(
+            transfer_id,
+            relative_display_path(&output_dir, &final_path),
+            bytes_written,
+            final_path,
+        ))
+    }
+}
+
+impl Write for LocalFileUpload {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let offset = self.file.stream_position()?;
+        let written = self.file.write(buf)?;
+        self.bytes_written = self.bytes_written.max(offset + written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
 fn available_path(path: PathBuf) -> PathBuf {
-    if !path.exists() {
+    if !path.exists() && !temp_path_for(&path).exists() {
         return path;
     }
 
@@ -69,7 +133,7 @@ fn available_path(path: PathBuf) -> PathBuf {
             None => format!("{stem} ({index})"),
         };
         let candidate = parent.join(filename);
-        if !candidate.exists() {
+        if !candidate.exists() && !temp_path_for(&candidate).exists() {
             return candidate;
         }
     }

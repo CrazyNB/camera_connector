@@ -19,6 +19,34 @@ fn writes_temp_file_then_publishes_final_file() {
 }
 
 #[test]
+fn streams_to_temp_file_before_publishing_final_file() {
+    use std::io::Write;
+
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let sink = LocalFileSink::new(temp_dir.path());
+
+    let mut upload = sink
+        .begin_write("sftp-42", "DCIM/100CAM/IMG_0001.NEF")
+        .expect("upload should begin");
+    upload.write_all(&[1, 2]).expect("first chunk should write");
+    upload
+        .write_all(&[3, 4])
+        .expect("second chunk should write");
+
+    let final_path = temp_dir.path().join("IMG_0001.NEF");
+    let temp_path = temp_dir.path().join("IMG_0001.NEF.tmp");
+    assert!(!final_path.exists());
+    assert!(temp_path.exists());
+
+    let progress = upload.finish().expect("upload should publish");
+
+    assert_eq!(progress.state, ReceiveState::Completed);
+    assert_eq!(progress.bytes_written, 4);
+    assert_eq!(std::fs::read(final_path).unwrap(), vec![1, 2, 3, 4]);
+    assert!(!temp_path.exists());
+}
+
+#[test]
 fn sanitizes_windows_unsafe_filename_characters() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let sink = LocalFileSink::new(temp_dir.path());

@@ -11,7 +11,7 @@ pub use devices::{
 };
 pub use inbox::{scan_inbox, scan_inbox_groups};
 pub use progress::{ReceiveProgress, ReceiveState};
-pub use sink::LocalFileSink;
+pub use sink::{LocalFileSink, LocalFileUpload};
 pub use transfer_log::{
     append_transfer_record, read_transfer_log, transfer_log_path, TransferRecord, TransferStatus,
 };
