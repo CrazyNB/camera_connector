@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -5,13 +6,21 @@ use std::time::Duration;
 
 use russh::keys::{Algorithm, PrivateKey};
 use russh::server::Server as _;
+use russh::server::{Auth, Msg, Session};
+use russh::{Channel, ChannelId};
+use russh_sftp::protocol::{FileAttributes, Handle, OpenFlags, Status, StatusCode, Version};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
-use crate::{ImporterError, PushProtocol, PushReceiverConfig, Result};
+use crate::{
+    append_transfer_record, ImporterError, LocalFileSink, PushProtocol, PushReceiverConfig,
+    ReceiverAccount, Result, TransferRecord, TransferStatus,
+};
 
 pub struct SftpPushServer {
     listener: TcpListener,
     ssh_config: Arc<russh::server::Config>,
+    receiver_config: Arc<PushReceiverConfig>,
 }
 
 impl SftpPushServer {
@@ -33,6 +42,7 @@ impl SftpPushServer {
         Ok(Self {
             listener,
             ssh_config: Arc::new(ssh_config),
+            receiver_config: Arc::new(config),
         })
     }
 
@@ -44,7 +54,9 @@ impl SftpPushServer {
 
     pub async fn run_until(self, shutdown: impl Future<Output = ()>) -> Result<()> {
         tokio::pin!(shutdown);
-        let mut server = SshServer;
+        let mut server = SshServer {
+            config: Arc::clone(&self.receiver_config),
+        };
         let running = server.run_on_socket(self.ssh_config, &self.listener);
         let handle = running.handle();
         tokio::pin!(running);
@@ -60,18 +72,260 @@ impl SftpPushServer {
 }
 
 #[derive(Clone)]
-struct SshServer;
+struct SshServer {
+    config: Arc<PushReceiverConfig>,
+}
 
 impl russh::server::Server for SshServer {
     type Handler = SshSession;
 
-    fn new_client(&mut self, _: Option<SocketAddr>) -> Self::Handler {
-        SshSession
+    fn new_client(&mut self, peer_addr: Option<SocketAddr>) -> Self::Handler {
+        SshSession::new(Arc::clone(&self.config), peer_addr)
     }
 }
 
-struct SshSession;
+struct SshSession {
+    config: Arc<PushReceiverConfig>,
+    peer_addr: Option<SocketAddr>,
+    authenticated_account: Option<ReceiverAccount>,
+    clients: Arc<Mutex<HashMap<ChannelId, Channel<Msg>>>>,
+}
+
+impl SshSession {
+    fn new(config: Arc<PushReceiverConfig>, peer_addr: Option<SocketAddr>) -> Self {
+        Self {
+            config,
+            peer_addr,
+            authenticated_account: None,
+            clients: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn take_channel(&self, channel_id: ChannelId) -> Option<Channel<Msg>> {
+        self.clients.lock().await.remove(&channel_id)
+    }
+
+    fn remote_addr(&self) -> Option<String> {
+        self.peer_addr.map(|addr| addr.ip().to_string())
+    }
+
+    fn source_name(&self) -> Option<String> {
+        self.authenticated_account
+            .as_ref()
+            .map(|account| account.device_name.clone())
+            .or_else(|| {
+                self.config
+                    .resolved_source_name(self.remote_addr().as_deref())
+            })
+    }
+}
 
 impl russh::server::Handler for SshSession {
     type Error = russh::Error;
+
+    async fn auth_password(
+        &mut self,
+        user: &str,
+        password: &str,
+    ) -> std::result::Result<Auth, Self::Error> {
+        if !self.config.accounts.is_empty() {
+            let Some(account) = self.config.account_for_username(user).cloned() else {
+                return Ok(Auth::reject());
+            };
+            let accepted = account
+                .password
+                .as_ref()
+                .map(|stored| stored.verify(password).unwrap_or(false))
+                .unwrap_or(true);
+            if accepted {
+                self.authenticated_account = Some(account);
+                return Ok(Auth::Accept);
+            }
+            return Ok(Auth::reject());
+        }
+
+        if let Some(expected) = &self.config.username {
+            if user != expected {
+                return Ok(Auth::reject());
+            }
+        }
+        if let Some(expected) = &self.config.password {
+            if password != expected {
+                return Ok(Auth::reject());
+            }
+        }
+        Ok(Auth::Accept)
+    }
+
+    async fn channel_open_session(
+        &mut self,
+        channel: Channel<Msg>,
+        _: &mut Session,
+    ) -> std::result::Result<bool, Self::Error> {
+        self.clients.lock().await.insert(channel.id(), channel);
+        Ok(true)
+    }
+
+    async fn subsystem_request(
+        &mut self,
+        channel_id: ChannelId,
+        name: &str,
+        session: &mut Session,
+    ) -> std::result::Result<(), Self::Error> {
+        let Some(channel) = self.take_channel(channel_id).await else {
+            session.channel_failure(channel_id)?;
+            return Ok(());
+        };
+
+        if name != "sftp" {
+            session.channel_failure(channel_id)?;
+            return Ok(());
+        }
+
+        session.channel_success(channel_id)?;
+        let handler = SftpSession::new(
+            Arc::clone(&self.config),
+            self.remote_addr(),
+            self.source_name(),
+        );
+        russh_sftp::server::run(channel.into_stream(), handler).await;
+        Ok(())
+    }
+}
+
+struct PendingUpload {
+    original_path: String,
+    started_at_ms: i64,
+    bytes: Vec<u8>,
+}
+
+struct SftpSession {
+    config: Arc<PushReceiverConfig>,
+    remote_addr: Option<String>,
+    source_name: Option<String>,
+    next_handle: u64,
+    uploads: HashMap<String, PendingUpload>,
+}
+
+impl SftpSession {
+    fn new(
+        config: Arc<PushReceiverConfig>,
+        remote_addr: Option<String>,
+        source_name: Option<String>,
+    ) -> Self {
+        Self {
+            config,
+            remote_addr,
+            source_name,
+            next_handle: 0,
+            uploads: HashMap::new(),
+        }
+    }
+}
+
+impl russh_sftp::server::Handler for SftpSession {
+    type Error = StatusCode;
+
+    fn unimplemented(&self) -> Self::Error {
+        StatusCode::OpUnsupported
+    }
+
+    async fn init(
+        &mut self,
+        _: u32,
+        _: HashMap<String, String>,
+    ) -> std::result::Result<Version, Self::Error> {
+        Ok(Version::new())
+    }
+
+    async fn open(
+        &mut self,
+        id: u32,
+        filename: String,
+        pflags: OpenFlags,
+        _: FileAttributes,
+    ) -> std::result::Result<Handle, Self::Error> {
+        if !pflags.contains(OpenFlags::WRITE) && !pflags.contains(OpenFlags::CREATE) {
+            return Err(StatusCode::PermissionDenied);
+        }
+
+        self.next_handle += 1;
+        let handle = format!("upload-{}", self.next_handle);
+        self.uploads.insert(
+            handle.clone(),
+            PendingUpload {
+                original_path: filename,
+                started_at_ms: current_time_ms(),
+                bytes: Vec::new(),
+            },
+        );
+        Ok(Handle { id, handle })
+    }
+
+    async fn write(
+        &mut self,
+        id: u32,
+        handle: String,
+        offset: u64,
+        data: Vec<u8>,
+    ) -> std::result::Result<Status, Self::Error> {
+        let upload = self
+            .uploads
+            .get_mut(&handle)
+            .ok_or(StatusCode::NoSuchFile)?;
+        let offset = offset as usize;
+        if upload.bytes.len() < offset {
+            upload.bytes.resize(offset, 0);
+        }
+        let end = offset + data.len();
+        if upload.bytes.len() < end {
+            upload.bytes.resize(end, 0);
+        }
+        upload.bytes[offset..end].copy_from_slice(&data);
+        Ok(ok_status(id))
+    }
+
+    async fn close(&mut self, id: u32, handle: String) -> std::result::Result<Status, Self::Error> {
+        let upload = self.uploads.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
+        let transfer_id = format!("sftp:{}:{}", upload.started_at_ms, upload.original_path);
+        let progress = LocalFileSink::new(&self.config.output_dir)
+            .write_complete(&transfer_id, &upload.original_path, &upload.bytes)
+            .map_err(|_| StatusCode::Failure)?;
+        let final_path = progress.output_path.clone().ok_or(StatusCode::Failure)?;
+        append_transfer_record(
+            &self.config.output_dir,
+            &TransferRecord {
+                transfer_id,
+                protocol: "sftp".to_string(),
+                status: TransferStatus::Completed,
+                original_path: upload.original_path,
+                final_filename: progress.filename,
+                final_path,
+                size_bytes: progress.bytes_written,
+                remote_addr: self.remote_addr.clone(),
+                source_name: self.source_name.clone(),
+                started_at_ms: upload.started_at_ms,
+                completed_at_ms: Some(current_time_ms()),
+                error: None,
+            },
+        )
+        .map_err(|_| StatusCode::Failure)?;
+        Ok(ok_status(id))
+    }
+}
+
+fn ok_status(id: u32) -> Status {
+    Status {
+        id,
+        status_code: StatusCode::Ok,
+        error_message: "Ok".to_string(),
+        language_tag: "en-US".to_string(),
+    }
+}
+
+fn current_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }
