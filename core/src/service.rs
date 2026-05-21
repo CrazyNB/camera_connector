@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    read_connected_devices, read_receiver_runtime_status, read_transfer_log, scan_inbox_groups,
-    CameraConnectorConfig, ConnectedDevice, ImportSource, PushProtocol, PushReceiverConfig,
-    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, Result, TransferRecord,
+    group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
+    scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, PushProtocol,
+    PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    ReceiverRuntimeStatus, Result, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,18 @@ impl CameraConnectorService {
         scan_inbox_groups(output_dir, source)
     }
 
+    pub fn transfer_asset_groups(
+        &self,
+        state_dir: impl AsRef<Path>,
+    ) -> Result<Vec<ReceivedAssetGroup>> {
+        let assets = read_transfer_log(state_dir)?
+            .into_iter()
+            .filter(|record| record.status == TransferStatus::Completed)
+            .map(asset_from_transfer_record)
+            .collect::<Vec<_>>();
+        Ok(group_received_assets(assets))
+    }
+
     pub fn receiver_status(
         &self,
         output_dir: impl AsRef<Path>,
@@ -166,6 +179,25 @@ impl CameraConnectorService {
             })
             .collect::<Vec<_>>();
         Ok(views)
+    }
+}
+
+fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
+    let mut asset = ReceivedAsset::new(
+        record.transfer_id,
+        record.final_filename,
+        record.size_bytes,
+        import_source_from_protocol(&record.protocol),
+    );
+    asset.received_time_ms = record.completed_at_ms.or(Some(record.started_at_ms));
+    asset
+}
+
+fn import_source_from_protocol(protocol: &str) -> ImportSource {
+    match protocol.to_ascii_lowercase().as_str() {
+        "ftp" => ImportSource::FtpPush,
+        "sftp" => ImportSource::SftpPush,
+        _ => ImportSource::ManualDrop,
     }
 }
 

@@ -4,8 +4,9 @@ use std::str::FromStr;
 
 use camera_connector_core::{
     append_transfer_record, CameraConnectorRuntime, CameraConnectorService, ImportSource,
-    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceiverConfigRequest, Result,
-    TransferQuery, TransferRecord, TransferRecordView, TransferStatus,
+    LocalFileSink, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
+    ReceiverConfigRequest, Result, TransferQuery, TransferRecord, TransferRecordView,
+    TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -101,6 +102,8 @@ enum Command {
         path: PathBuf,
         #[arg(long, default_value = "ftp")]
         source: String,
+        #[arg(long)]
+        from_transfers: bool,
     },
     Transfers {
         #[arg(long)]
@@ -371,39 +374,19 @@ async fn main() -> Result<()> {
             tokio::signal::ctrl_c().await?;
             runtime.stop_receiver().await?;
         }
-        Some(Command::Inbox { path, source }) => {
+        Some(Command::Inbox {
+            path,
+            source,
+            from_transfers,
+        }) => {
             let source = parse_source(&source)?;
             let service = CameraConnectorService::new(None);
-            let groups = service.inbox_groups(path, source)?;
-            for group in groups {
-                let jpeg = group
-                    .jpeg
-                    .as_ref()
-                    .map(|asset| asset.filename.as_str())
-                    .unwrap_or("-");
-                let raw = group
-                    .raw
-                    .as_ref()
-                    .map(|asset| asset.filename.as_str())
-                    .unwrap_or("-");
-                let video = group
-                    .video
-                    .as_ref()
-                    .map(|asset| asset.filename.as_str())
-                    .unwrap_or("-");
-                let total_bytes = group
-                    .jpeg
-                    .iter()
-                    .chain(group.raw.iter())
-                    .chain(group.video.iter())
-                    .map(|asset| asset.size_bytes)
-                    .sum::<u64>();
-
-                println!(
-                    "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes",
-                    group.group_key, group.primary.filename, jpeg, raw, video, total_bytes
-                );
-            }
+            let groups = if from_transfers {
+                service.transfer_asset_groups(path)?
+            } else {
+                service.inbox_groups(path, source)?
+            };
+            print_asset_groups(groups);
         }
         Some(Command::Transfers {
             config,
@@ -475,6 +458,42 @@ fn transfer_view_line(view: &TransferRecordView) -> String {
         view.virtual_display_path,
         view.final_location_kind.as_deref().unwrap_or("-"),
         view.final_location_label.as_deref().unwrap_or("-")
+    )
+}
+
+fn print_asset_groups(groups: Vec<ReceivedAssetGroup>) {
+    for group in groups {
+        println!("{}", asset_group_line(&group));
+    }
+}
+
+fn asset_group_line(group: &ReceivedAssetGroup) -> String {
+    let jpeg = group
+        .jpeg
+        .as_ref()
+        .map(|asset| asset.filename.as_str())
+        .unwrap_or("-");
+    let raw = group
+        .raw
+        .as_ref()
+        .map(|asset| asset.filename.as_str())
+        .unwrap_or("-");
+    let video = group
+        .video
+        .as_ref()
+        .map(|asset| asset.filename.as_str())
+        .unwrap_or("-");
+    let total_bytes = group
+        .jpeg
+        .iter()
+        .chain(group.raw.iter())
+        .chain(group.video.iter())
+        .map(|asset| asset.size_bytes)
+        .sum::<u64>();
+
+    format!(
+        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes",
+        group.group_key, group.primary.filename, jpeg, raw, video, total_bytes
     )
 }
 
@@ -707,6 +726,26 @@ mod tests {
         .expect("serve-sftp command should parse");
 
         assert!(matches!(cli.command, Some(Command::ServeSftp { .. })));
+    }
+
+    #[test]
+    fn parses_inbox_from_transfers_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "inbox",
+            "--path",
+            "C:\\CameraConnector\\state",
+            "--from-transfers",
+        ])
+        .expect("inbox from transfers command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Inbox {
+                from_transfers: true,
+                ..
+            })
+        ));
     }
 
     #[test]

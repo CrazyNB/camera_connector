@@ -141,6 +141,73 @@ fn service_scans_inbox_groups() {
 }
 
 #[test]
+fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
+    let state_dir = unique_temp_dir("service-transfer-groups");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:jpg".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_2222.JPG".to_string(),
+            final_filename: "IMG_2222.JPG".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_2222.JPG",
+            )),
+            size_bytes: 100,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("jpg transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "sftp:raw".to_string(),
+            protocol: "sftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/IMG_2222.NEF".to_string(),
+            final_filename: "IMG_2222.NEF".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::media_uri(
+                "content://media/external/images/media/2222",
+            )),
+            size_bytes: 200,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: None,
+        },
+    )
+    .expect("raw transfer should append");
+
+    let service = CameraConnectorService::new(None);
+    let groups = service
+        .transfer_asset_groups(&state_dir)
+        .expect("transfer groups should load");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_key, "IMG_2222");
+    assert_eq!(
+        groups[0].jpeg.as_ref().map(|asset| asset.filename.as_str()),
+        Some("IMG_2222.JPG")
+    );
+    assert_eq!(
+        groups[0].raw.as_ref().map(|asset| asset.filename.as_str()),
+        Some("IMG_2222.NEF")
+    );
+    assert_eq!(groups[0].primary.source, ImportSource::FtpPush);
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_reads_receiver_runtime_status() {
     let output_dir = unique_temp_dir("service-runtime-status");
     std::fs::create_dir_all(&output_dir).expect("output dir should create");
