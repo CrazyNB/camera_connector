@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -60,6 +61,23 @@ impl ReceiverAccount {
     pub fn with_remote_addr(mut self, remote_addr: impl Into<String>) -> Self {
         self.remote_addrs.push(remote_addr.into());
         self
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.username.trim().is_empty() {
+            return Err(ImporterError::internal("account username cannot be empty"));
+        }
+        if self.device_name.trim().is_empty() {
+            return Err(ImporterError::internal(
+                "account device name cannot be empty",
+            ));
+        }
+        for remote_addr in &self.remote_addrs {
+            IpAddr::from_str(remote_addr.trim()).map_err(|_| {
+                ImporterError::internal(format!("invalid account IP address '{remote_addr}'"))
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -143,5 +161,29 @@ impl PushReceiverConfig {
                 .iter()
                 .any(|configured| configured == remote_addr)
         })
+    }
+
+    pub fn validate_accounts(&self) -> Result<()> {
+        let mut ip_owners = std::collections::BTreeMap::<String, String>::new();
+        for account in &self.accounts {
+            account.validate()?;
+            for remote_addr in &account.remote_addrs {
+                let normalized = IpAddr::from_str(remote_addr.trim())
+                    .map_err(|_| {
+                        ImporterError::internal(format!(
+                            "invalid account IP address '{remote_addr}'"
+                        ))
+                    })?
+                    .to_string();
+                if let Some(existing) =
+                    ip_owners.insert(normalized.clone(), account.username.clone())
+                {
+                    return Err(ImporterError::internal(format!(
+                        "IP address '{normalized}' is already bound to account '{existing}'"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }

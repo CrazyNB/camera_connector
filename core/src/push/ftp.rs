@@ -24,6 +24,7 @@ impl FtpPushServer {
         if config.protocol != PushProtocol::Ftp {
             return Err(ImporterError::UnsupportedProtocol);
         }
+        config.validate_accounts()?;
 
         let listener = TcpListener::bind((config.bind_host.as_str(), config.port)).await?;
         Ok(Self {

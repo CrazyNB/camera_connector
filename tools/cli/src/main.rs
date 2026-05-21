@@ -704,6 +704,7 @@ fn validate_account_config(mut account: CameraAccountConfig) -> Result<CameraAcc
     account.username = normalized_required("username", &account.username)?;
     account.device_name = normalized_required("device name", &account.device_name)?;
     account.remote_addrs = normalize_ips(&account.remote_addrs)?;
+    account.clone().into_receiver_account().validate()?;
     Ok(account)
 }
 
