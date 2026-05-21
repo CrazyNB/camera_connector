@@ -16,8 +16,7 @@ Current priorities:
 
 1. FTP push mode.
 2. SFTP push mode.
-3. FTPS push mode.
-4. AP mode remains the original camera-hotspot meaning, but is paused.
+3. AP mode remains the original camera-hotspot meaning, but is paused.
 
 ## 3. Users
 
@@ -75,7 +74,6 @@ P1:
 - Add authentication polish.
 - Add duplicate detection.
 - Add SFTP receiver.
-- Add FTPS receiver.
 
 P2:
 
@@ -112,7 +110,6 @@ P2:
 | RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
 | RX-015 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
-| RX-016 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -130,7 +127,7 @@ P2:
 
 ```mermaid
 flowchart LR
-  Camera["Camera\nFTP/SFTP/FTPS upload profile"]
+  Camera["Camera\nFTP/SFTP upload profile"]
   Network["Phone hotspot / LAN\nAP later"]
   Receiver["Push Receiver\nFTP first"]
   Sink["Flat File Sink\n.tmp then publish"]
@@ -158,6 +155,6 @@ The CLI is a thin operational adapter for development, validation, headless/NAS 
 2. Build FTP receiver core and CLI smoke path.
 3. Validate with one real camera in FTP mode.
 4. Update compatibility table and receiver setup guide.
-5. Add SFTP or FTPS based on what the real camera supports best.
+5. Add SFTP receiver using the same flat sink, transfer log, account, and runtime status model.
 6. Resume AP-mode exploration only after push import is stable.
 

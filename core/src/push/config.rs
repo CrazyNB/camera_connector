@@ -13,7 +13,6 @@ use crate::{ImporterError, Result};
 pub enum PushProtocol {
     Ftp,
     Sftp,
-    Ftps,
 }
 
 impl FromStr for PushProtocol {
@@ -23,7 +22,6 @@ impl FromStr for PushProtocol {
         match value.to_ascii_lowercase().as_str() {
             "ftp" => Ok(Self::Ftp),
             "sftp" => Ok(Self::Sftp),
-            "ftps" => Ok(Self::Ftps),
             _ => Err(ImporterError::UnsupportedProtocol),
         }
     }
@@ -34,7 +32,6 @@ impl std::fmt::Display for PushProtocol {
         match self {
             Self::Ftp => formatter.write_str("ftp"),
             Self::Sftp => formatter.write_str("sftp"),
-            Self::Ftps => formatter.write_str("ftps"),
         }
     }
 }

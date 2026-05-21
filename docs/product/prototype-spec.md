@@ -26,7 +26,7 @@ Purpose: start and monitor the local receiver.
 
 Content:
 
-- Protocol segmented control: FTP, SFTP, FTPS.
+- Protocol segmented control: FTP and SFTP.
 - Host/IP and port.
 - Selected camera account, username, and password status.
 - Output folder.

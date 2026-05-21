@@ -6,7 +6,6 @@ use super::ObjectFormat;
 pub enum ImportSource {
     FtpPush,
     SftpPush,
-    FtpsPush,
     ManualDrop,
 }
 

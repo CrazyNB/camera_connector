@@ -2,13 +2,13 @@
 
 Record every real-camera push test here. Unknown is acceptable until a real smoke test replaces it.
 
-| Vendor | Model | Firmware | Network Mode | FTP Push | SFTP Push | FTPS Push | Passive FTP | RAW | JPEG | Video | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Unknown | Pass | Pass | Pass | Pass | FTP receiver `192.168.137.1:2121`; anonymous login; flat inbox validated with RAW+JPEG batch and MOV upload |
-| Canon | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
-| Sony | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
-| Fujifilm | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
-| Panasonic | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Vendor | Model | Firmware | Network Mode | FTP Push | SFTP Push | Passive FTP | RAW | JPEG | Video | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Pass | Pass | Pass | Pass | FTP receiver `192.168.137.1:2121`; anonymous login; flat inbox validated with RAW+JPEG batch and MOV upload |
+| Canon | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Sony | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Fujifilm | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
+| Panasonic | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 
 ## Test Record Template
 

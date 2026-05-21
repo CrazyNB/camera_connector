@@ -446,7 +446,6 @@ fn parse_source(value: &str) -> Result<ImportSource> {
     match value.to_ascii_lowercase().as_str() {
         "ftp" | "ftp-push" => Ok(ImportSource::FtpPush),
         "sftp" | "sftp-push" => Ok(ImportSource::SftpPush),
-        "ftps" | "ftps-push" => Ok(ImportSource::FtpsPush),
         "manual" | "manual-drop" => Ok(ImportSource::ManualDrop),
         _ => Err(camera_connector_core::ImporterError::UnsupportedProtocol),
     }
@@ -504,7 +503,6 @@ fn source_protocol_label(source: ImportSource) -> &'static str {
     match source {
         ImportSource::FtpPush => "ftp",
         ImportSource::SftpPush => "sftp",
-        ImportSource::FtpsPush => "ftps",
         ImportSource::ManualDrop => "manual",
     }
 }
@@ -602,6 +600,13 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn parse_source_rejects_ftps() {
+        let result = parse_source("ftps");
+
+        assert!(result.is_err());
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

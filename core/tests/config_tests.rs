@@ -1,4 +1,12 @@
 use camera_connector_core::{FtpPushServer, PushProtocol, PushReceiverConfig, ReceiverAccount};
+use std::str::FromStr;
+
+#[test]
+fn push_protocol_rejects_ftps() {
+    let result = PushProtocol::from_str("ftps");
+
+    assert!(result.is_err());
+}
 
 #[tokio::test]
 async fn ftp_server_rejects_blank_account_username() {

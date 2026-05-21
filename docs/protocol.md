@@ -3,7 +3,7 @@
 Current technical route:
 
 1. High priority: camera pushes files to a receiver owned by this app.
-2. Protocol order: FTP first, then SFTP, then FTPS.
+2. Protocol order: FTP first, then SFTP.
 3. AP mode keeps its original meaning, but is paused for now: the camera creates its own Wi-Fi AP and the phone/computer joins it. We are not implementing that path in the current slice.
 
 ## FTP Push
@@ -52,17 +52,6 @@ Requirements:
 - Same asset grouping and duplicate handling.
 - Same transfer log fields as FTP.
 
-## FTPS Push
-
-Planned after FTP is proven and once camera TLS behavior is validated.
-
-Requirements:
-
-- Explicit FTPS preferred if the camera supports it.
-- Certificate and trust flow must be simple enough for camera configuration.
-- Same flat storage sink as FTP.
-- Same transfer log fields as FTP.
-
 ## Storage Rules
 
 - Never trust uploaded paths.
@@ -80,7 +69,7 @@ Requirements:
 The receiver writes `transfer-log.jsonl` in the output folder. Each completed transfer records:
 
 - `transfer_id`: stable enough to reference a single transfer.
-- `protocol`: FTP, SFTP, FTPS, or manual validation source.
+- `protocol`: FTP, SFTP, or manual validation source.
 - `original_path`: remote path sent by the camera, such as `DCIM/100CANON/IMG_1001.CR3`.
 - `final_filename` and `final_path`: flattened local result.
 - `size_bytes`.
@@ -118,7 +107,7 @@ When the FTP receiver starts, it marks any previously online device records as o
 The receiver writes `receiver-status.json` in the output folder. It records:
 
 - `phase`: stopped, starting, running, stopping, or failed.
-- `protocol`: FTP, SFTP, or FTPS when known.
+- `protocol`: FTP or SFTP when known.
 - `auth_mode`: anonymous or accounts.
 - `local_addr`: the socket address that accepted camera connections.
 - `output_dir`.
@@ -135,7 +124,7 @@ For each camera, record:
 
 - Camera model and firmware.
 - Network mode: phone hotspot, LAN, or camera AP.
-- Protocol: FTP, SFTP, or FTPS.
+- Protocol: FTP or SFTP.
 - Passive mode support.
 - Successful `STOR` upload.
 - RAW/JPEG/video behavior.
