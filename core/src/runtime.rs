@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::{
-    CameraConnectorService, FtpPushServer, ImporterError, PushProtocol, ReceiverConfigRequest,
+    CameraConnectorService, ImporterError, PushProtocol, PushReceiverServer, ReceiverConfigRequest,
     Result,
 };
 
@@ -114,7 +114,7 @@ impl CameraConnectorRuntime {
         let protocol = config.protocol;
         let output_dir = config.output_dir.clone();
         let account_count = config.accounts.len();
-        let server = match FtpPushServer::bind(config).await {
+        let server = match PushReceiverServer::bind(config).await {
             Ok(server) => server,
             Err(error) => {
                 self.set_status(ReceiverRuntimeStatus {

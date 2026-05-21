@@ -10,8 +10,8 @@ pub use model::{
     group_received_assets, ImportSource, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
 };
 pub use push::{
-    CameraConnectorConfig, FtpPushServer, PushProtocol, PushReceiverConfig, ReceiverAccount,
-    ReceiverAccountConfig, ReceiverPassword,
+    CameraConnectorConfig, FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer,
+    ReceiverAccount, ReceiverAccountConfig, ReceiverPassword,
 };
 pub use receive::{
     append_transfer_record, connected_devices_path, mark_all_connected_devices_offline,
