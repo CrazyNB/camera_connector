@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use camera_connector_core::{
-    append_transfer_record, AssetFacetCount, AssetGroupQuery, AssetGroupSummary,
+    append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorRuntime, CameraConnectorService, ImportSource, LocalFileSink, ObjectFormat,
     PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverConfigRequest,
     Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
@@ -115,6 +115,10 @@ enum Command {
         remote_addr: Option<String>,
         #[arg(long)]
         format: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long)]
+        limit: Option<usize>,
     },
     Transfers {
         #[arg(long)]
@@ -394,6 +398,8 @@ async fn main() -> Result<()> {
             original_path,
             remote_addr,
             format,
+            offset,
+            limit,
         }) => {
             let source = parse_source(&source)?;
             let service = CameraConnectorService::new(None);
@@ -403,12 +409,22 @@ async fn main() -> Result<()> {
                 remote_addr,
                 format: format.as_deref().map(parse_object_format).transpose()?,
             };
-            if summary && from_transfers {
-                let summary = service.transfer_asset_summary_with_query(&path, query.clone())?;
-                println!("{}", asset_group_summary_line(&summary));
-            }
             let groups = if from_transfers {
-                service.transfer_asset_groups_with_query(path, query)?
+                if let Some(limit) = limit {
+                    let page =
+                        service.transfer_asset_group_page_with_query(path, query, offset, limit)?;
+                    if summary {
+                        println!("{}", asset_group_page_summary_line(&page));
+                    }
+                    page.groups
+                } else {
+                    if summary {
+                        let summary =
+                            service.transfer_asset_summary_with_query(&path, query.clone())?;
+                        println!("{}", asset_group_summary_line(&summary));
+                    }
+                    service.transfer_asset_groups_with_query(path, query)?
+                }
             } else {
                 service.inbox_groups(path, source)?
             };
@@ -503,6 +519,17 @@ fn asset_group_summary_line(summary: &AssetGroupSummary) -> String {
         summary.groups_with_video,
         facet_counts_label(&summary.source_counts),
         facet_counts_label(&summary.remote_addr_counts)
+    )
+}
+
+fn asset_group_page_summary_line(page: &AssetGroupPage) -> String {
+    format!(
+        "{}\toffset={}\tlimit={}\ttotal_groups={}\thas_more={}",
+        asset_group_summary_line(&page.summary),
+        page.offset,
+        page.limit,
+        page.total_groups,
+        page.has_more
     )
 }
 
@@ -833,6 +860,10 @@ mod tests {
             "192.168.137.56",
             "--format",
             "nef",
+            "--offset",
+            "1",
+            "--limit",
+            "20",
         ])
         .expect("inbox from transfers command should parse");
 
@@ -845,6 +876,8 @@ mod tests {
                 original_path: Some(_),
                 remote_addr: Some(_),
                 format: Some(_),
+                offset: 1,
+                limit: Some(20),
                 ..
             })
         ));
@@ -935,6 +968,34 @@ mod tests {
         assert!(line.contains("raw_groups=1"));
         assert!(line.contains("sources=Z5_2:2"));
         assert!(line.contains("remotes=192.168.137.56:2"));
+    }
+
+    #[test]
+    fn asset_group_page_summary_line_prints_paging_state() {
+        let page = AssetGroupPage {
+            groups: Vec::new(),
+            summary: AssetGroupSummary {
+                group_count: 3,
+                asset_count: 4,
+                groups_with_jpeg: 1,
+                groups_with_raw: 2,
+                groups_with_video: 1,
+                source_counts: Vec::new(),
+                remote_addr_counts: Vec::new(),
+            },
+            offset: 1,
+            limit: 1,
+            total_groups: 3,
+            has_more: true,
+        };
+
+        let line = asset_group_page_summary_line(&page);
+
+        assert!(line.contains("groups=3"));
+        assert!(line.contains("offset=1"));
+        assert!(line.contains("limit=1"));
+        assert!(line.contains("total_groups=3"));
+        assert!(line.contains("has_more=true"));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

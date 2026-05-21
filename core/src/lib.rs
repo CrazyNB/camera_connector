@@ -28,6 +28,6 @@ pub use runtime::{
     CameraConnectorRuntime, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,
 };
 pub use service::{
-    AssetFacetCount, AssetGroupQuery, AssetGroupSummary, CameraConnectorService,
+    AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary, CameraConnectorService,
     ConnectedDeviceView, ReceiverConfigRequest, TransferQuery, TransferRecordView,
 };

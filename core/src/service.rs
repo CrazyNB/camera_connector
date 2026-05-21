@@ -70,6 +70,16 @@ pub struct AssetGroupSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetGroupPage {
+    pub groups: Vec<ReceivedAssetGroup>,
+    pub summary: AssetGroupSummary,
+    pub offset: usize,
+    pub limit: usize,
+    pub total_groups: usize,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectedDeviceView {
     pub device: ConnectedDevice,
     pub display_source: String,
@@ -172,6 +182,31 @@ impl CameraConnectorService {
     ) -> Result<AssetGroupSummary> {
         self.transfer_asset_groups_with_query(state_dir, query)
             .map(|groups| summarize_asset_groups(&groups))
+    }
+
+    pub fn transfer_asset_group_page_with_query(
+        &self,
+        state_dir: impl AsRef<Path>,
+        query: AssetGroupQuery,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        let groups = self.transfer_asset_groups_with_query(state_dir, query)?;
+        let total_groups = groups.len();
+        let summary = summarize_asset_groups(&groups);
+        let page_groups = groups
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        Ok(AssetGroupPage {
+            groups: page_groups,
+            summary,
+            offset,
+            limit,
+            total_groups,
+            has_more: offset.saturating_add(limit) < total_groups,
+        })
     }
 
     pub fn receiver_status(

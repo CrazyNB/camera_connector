@@ -476,6 +476,58 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
 }
 
 #[test]
+fn service_paginates_log_backed_asset_groups_after_filtering_and_sorting() {
+    let state_dir = unique_temp_dir("service-transfer-group-page");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    for index in 0..3 {
+        append_transfer_record(
+            &state_dir,
+            &TransferRecord {
+                transfer_id: format!("ftp:{index}"),
+                protocol: "ftp".to_string(),
+                status: TransferStatus::Completed,
+                original_path: format!("IMG_200{index}.CR3"),
+                final_filename: format!("IMG_200{index}.CR3"),
+                final_path: None,
+                final_location: Some(StoredObjectLocation::document_uri(format!(
+                    "content://camera-connector/IMG_200{index}.CR3"
+                ))),
+                size_bytes: 10,
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Z5_2".to_string()),
+                started_at_ms: 100 + index,
+                completed_at_ms: Some(100 + index),
+                error: None,
+            },
+        )
+        .expect("transfer should append");
+    }
+
+    let service = CameraConnectorService::new(None);
+    let page = service
+        .transfer_asset_group_page_with_query(
+            &state_dir,
+            AssetGroupQuery {
+                source_name: Some("Z5_2".to_string()),
+                ..AssetGroupQuery::default()
+            },
+            1,
+            1,
+        )
+        .expect("page should load");
+
+    assert_eq!(page.offset, 1);
+    assert_eq!(page.limit, 1);
+    assert_eq!(page.total_groups, 3);
+    assert!(page.has_more);
+    assert_eq!(page.summary.group_count, 3);
+    assert_eq!(page.groups.len(), 1);
+    assert_eq!(page.groups[0].group_key, "IMG_2001");
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_reads_receiver_runtime_status() {
     let output_dir = unique_temp_dir("service-runtime-status");
     std::fs::create_dir_all(&output_dir).expect("output dir should create");
