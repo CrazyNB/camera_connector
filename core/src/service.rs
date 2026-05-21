@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    read_connected_devices, read_transfer_log, scan_inbox_groups, CameraConnectorConfig,
-    ConnectedDevice, ImportSource, PushProtocol, PushReceiverConfig, ReceivedAssetGroup,
-    ReceiverAccountConfig, Result, TransferRecord,
+    read_connected_devices, read_receiver_runtime_status, read_transfer_log, scan_inbox_groups,
+    CameraConnectorConfig, ConnectedDevice, ImportSource, PushProtocol, PushReceiverConfig,
+    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, Result, TransferRecord,
 };
 
 #[derive(Debug, Clone)]
@@ -105,6 +105,13 @@ impl CameraConnectorService {
         source: ImportSource,
     ) -> Result<Vec<ReceivedAssetGroup>> {
         scan_inbox_groups(output_dir, source)
+    }
+
+    pub fn receiver_status(
+        &self,
+        output_dir: impl AsRef<Path>,
+    ) -> Result<Option<ReceiverRuntimeStatus>> {
+        read_receiver_runtime_status(output_dir)
     }
 
     pub fn transfers(

@@ -1,7 +1,8 @@
 use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
-    CameraConnectorConfig, CameraConnectorService, ImportSource, PushProtocol,
-    ReceiverConfigRequest, TransferQuery, TransferRecord, TransferStatus,
+    write_receiver_runtime_status, CameraConnectorConfig, CameraConnectorService, ImportSource,
+    PushProtocol, ReceiverAuthMode, ReceiverConfigRequest, ReceiverRuntimePhase,
+    ReceiverRuntimeStatus, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -121,6 +122,37 @@ fn service_scans_inbox_groups() {
     assert_eq!(groups.len(), 1);
     assert!(groups[0].jpeg.is_some());
     assert!(groups[0].raw.is_some());
+
+    let _ = std::fs::remove_dir_all(output_dir);
+}
+
+#[test]
+fn service_reads_receiver_runtime_status() {
+    let output_dir = unique_temp_dir("service-runtime-status");
+    std::fs::create_dir_all(&output_dir).expect("output dir should create");
+    write_receiver_runtime_status(
+        &output_dir,
+        &ReceiverRuntimeStatus {
+            phase: ReceiverRuntimePhase::Stopped,
+            protocol: Some(PushProtocol::Ftp),
+            auth_mode: ReceiverAuthMode::Accounts,
+            local_addr: None,
+            output_dir: Some(output_dir.clone()),
+            account_count: 2,
+            message: Some("operator stopped receiver".to_string()),
+        },
+    )
+    .expect("runtime status should write");
+
+    let service = CameraConnectorService::new(None);
+    let status = service
+        .receiver_status(&output_dir)
+        .expect("runtime status should load")
+        .expect("runtime status should exist");
+
+    assert_eq!(status.phase, ReceiverRuntimePhase::Stopped);
+    assert_eq!(status.auth_mode, ReceiverAuthMode::Accounts);
+    assert_eq!(status.account_count, 2);
 
     let _ = std::fs::remove_dir_all(output_dir);
 }
