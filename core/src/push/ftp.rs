@@ -410,6 +410,16 @@ async fn handle_stor(
         .as_ref()
         .map(|account| account.device_name.clone())
         .or_else(|| config.resolved_source_name(remote_addr.as_deref()));
+    let username = state
+        .authenticated_account
+        .as_ref()
+        .map(|account| account.username.clone())
+        .or_else(|| {
+            state
+                .authenticated
+                .then(|| state.pending_user.clone())
+                .flatten()
+        });
     append_transfer_record(
         &config.state_dir,
         &TransferRecord {
@@ -421,6 +431,7 @@ async fn handle_stor(
             final_path: Some(final_path),
             final_location: progress.output_location,
             size_bytes: progress.bytes_written,
+            username,
             remote_addr,
             source_name,
             started_at_ms,

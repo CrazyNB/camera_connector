@@ -94,22 +94,22 @@ target\debug\camera-connector.exe inbox --path C:\Users\hxn\Pictures\CameraConne
 List transfer records and filter by source name, original camera path, final filename, remote IP, or transfer id:
 
 ```powershell
-target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --source-name "Z5_2" --original-path DCIM
+target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --source-name "Z5_2" --original-path DCIM
 ```
 
 For mobile-style views that cannot scan a real output folder, build groups from the transfer log:
 
 ```powershell
-target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --source-name "Z5_2" --original-path DCIM --format nef
+target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
 ```
 
 Use `--offset` and `--limit` with `--from-transfers` for large imports or UI "load more" views:
 
 ```powershell
-target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --offset 0 --limit 50
+target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
 ```
 
-The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path remains in the state directory's `transfer-log.jsonl` for filtering. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
+The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path and login username remain in the state directory's `transfer-log.jsonl` for filtering. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 

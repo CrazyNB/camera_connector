@@ -63,6 +63,7 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
                 output_dir.join("DSC_0001.NEF"),
             )),
             size_bytes: 42,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 10,
@@ -91,6 +92,78 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
         .ends_with("DSC_0001.NEF"));
 
     let _ = std::fs::remove_dir_all(output_dir);
+}
+
+#[test]
+fn service_resolves_transfer_display_source_from_current_account_name() {
+    let config_path = unique_temp_path("service-transfer-account-config");
+    let state_dir = unique_temp_dir("service-transfer-account-state");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    let mut app_config = CameraConnectorConfig::default();
+    app_config
+        .set_account("z5", Some("secret"), "Renamed Z5")
+        .expect("account should save");
+    app_config
+        .save(Some(&config_path))
+        .expect("config should save");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:account".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100NIKON/DSC_0002.NEF".to_string(),
+            final_filename: "DSC_0002.NEF".to_string(),
+            final_path: Some(state_dir.join("DSC_0002.NEF")),
+            final_location: Some(StoredObjectLocation::local_path(
+                state_dir.join("DSC_0002.NEF"),
+            )),
+            size_bytes: 64,
+            remote_addr: Some("192.168.137.56".to_string()),
+            username: Some("z5".to_string()),
+            source_name: Some("Old Z5 Name".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("transfer record should append");
+
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let transfers = service
+        .transfers(
+            &state_dir,
+            TransferQuery {
+                username: Some("z5".to_string()),
+                ..TransferQuery::default()
+            },
+        )
+        .expect("transfers should load");
+    let groups = service
+        .transfer_asset_groups_with_query(
+            &state_dir,
+            AssetGroupQuery {
+                username: Some("z5".to_string()),
+                ..AssetGroupQuery::default()
+            },
+        )
+        .expect("groups should load");
+
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].display_source.as_deref(), Some("Renamed Z5"));
+    assert_eq!(
+        transfers[0].virtual_display_path,
+        "Renamed Z5/DCIM/100NIKON/DSC_0002.NEF"
+    );
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].primary.username.as_deref(), Some("z5"));
+    assert_eq!(
+        groups[0].primary.virtual_display_path.as_deref(),
+        Some("Renamed Z5/DCIM/100NIKON/DSC_0002.NEF")
+    );
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
 }
 
 #[test]
@@ -166,6 +239,7 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
                 "content://camera-connector/IMG_2222.JPG",
             )),
             size_bytes: 100,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 10,
@@ -187,6 +261,7 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
                 "content://media/external/images/media/2222",
             )),
             size_bytes: 200,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 11,
@@ -258,6 +333,7 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
                 "content://camera-connector/IMG_3000.JPG",
             )),
             size_bytes: 100,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 10,
@@ -279,6 +355,7 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
                 "content://camera-connector/IMG_3000.NEF",
             )),
             size_bytes: 200,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 11,
@@ -300,6 +377,7 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
                 "content://camera-connector/IMG_4000.JPG",
             )),
             size_bytes: 150,
+            username: None,
             remote_addr: Some("192.168.137.44".to_string()),
             source_name: Some("X-T5".to_string()),
             started_at_ms: 12,
@@ -318,6 +396,7 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
                 original_path: Some("dcim/100".to_string()),
                 remote_addr: Some("192.168.137.56".to_string()),
                 format: Some(ObjectFormat::Nef),
+                ..AssetGroupQuery::default()
             },
         )
         .expect("filtered groups should load");
@@ -347,6 +426,7 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
                 "content://camera-connector/IMG_5000.JPG",
             )),
             size_bytes: 100,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 10,
@@ -368,6 +448,7 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
                 "content://camera-connector/IMG_5000.NEF",
             )),
             size_bytes: 200,
+            username: None,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 11,
@@ -389,6 +470,7 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
                 "content://media/external/video/media/1",
             )),
             size_bytes: 300,
+            username: None,
             remote_addr: Some("192.168.137.44".to_string()),
             source_name: Some("X-T5".to_string()),
             started_at_ms: 12,
@@ -434,6 +516,7 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
                 "content://camera-connector/IMG_1000.CR3",
             )),
             size_bytes: 10,
+            username: None,
             remote_addr: None,
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 100,
@@ -455,6 +538,7 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
                 "content://camera-connector/IMG_1001.CR3",
             )),
             size_bytes: 10,
+            username: None,
             remote_addr: None,
             source_name: Some("Z5_2".to_string()),
             started_at_ms: 200,
@@ -493,6 +577,7 @@ fn service_paginates_log_backed_asset_groups_after_filtering_and_sorting() {
                     "content://camera-connector/IMG_200{index}.CR3"
                 ))),
                 size_bytes: 10,
+                username: None,
                 remote_addr: Some("192.168.137.56".to_string()),
                 source_name: Some("Z5_2".to_string()),
                 started_at_ms: 100 + index,

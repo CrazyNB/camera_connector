@@ -92,20 +92,21 @@ The receiver writes `transfer-log.jsonl` in the state/log directory. Each comple
 - `final_location`: platform save target, such as `local_path`, `media_uri`, `document_uri`, or `photo_asset`.
 - `final_path`: desktop local path when available; mobile records may omit it.
 - `size_bytes`.
+- `username`: authenticated push-login username when available.
 - `remote_addr`: camera IP when available.
 - `source_name`: optional user-set camera/source label.
 - `started_at_ms` and `completed_at_ms`.
 
-The product uses this log for tag-style grouping and filters. Source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
+The product uses this log for tag-style grouping and filters. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 For display, the UI builds a virtual path from metadata:
 
-- With a camera account device name: `Z5_2/BB/DSC_2552.NEF`.
+- With a camera account device name resolved from username: `Z5_2/BB/DSC_2552.NEF`.
 - Without a source name: `IP-056/BB/DSC_2552.NEF`, using the last IPv4 octet from `192.168.137.56`.
 
 This virtual path is not a filesystem path. It is a compact grouping label; the saved object remains flat in the chosen storage backend, and the full `remote_addr` remains available in the log.
 
-Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; SFTP authenticates SSH password login. Both protocols use the same account table and apply the account device name to new connection and transfer records. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
+Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; SFTP authenticates SSH password login. Both protocols use the same account table and write the login username to new connection and transfer records. Display views resolve the username through the current account table first, then fall back to the recorded source name. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 
 ## Connected Devices
 

@@ -93,6 +93,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
     let records = read_transfer_log(state_dir.path()).expect("transfer log should read");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].remote_addr.as_deref(), Some("127.0.0.1"));
+    assert_eq!(records[0].username.as_deref(), Some("z5"));
     assert_eq!(records[0].source_name.as_deref(), Some("Studio A"));
     assert_eq!(records[0].original_path, "DCIM/100CANON/IMG_4321.CR3");
     assert_eq!(

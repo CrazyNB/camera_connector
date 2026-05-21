@@ -27,7 +27,11 @@ pub struct TransferRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_location: Option<StoredObjectLocation>,
     pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<String>,
     pub started_at_ms: i64,
     pub completed_at_ms: Option<i64>,

@@ -225,10 +225,10 @@ if (($sftpStoppedStatus | Where-Object { $_ -like "phase: Stopped*" }).Count -lt
 }
 Write-Output $sftpStoppedStatus
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
@@ -245,7 +245,7 @@ if (($logBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.
 if (($logBackedInboxOutput | Where-Object { $_ -like "*primary_location_kind=local_path*" }).Count -lt 1) {
     throw "log-backed inbox did not expose primary storage location"
 }
-if (($logBackedInboxOutput | Where-Object { $_ -like "*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
+if (($logBackedInboxOutput | Where-Object { $_ -like "*username=verify*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "log-backed inbox did not expose transfer metadata"
 }
 Write-Output $logBackedInboxOutput
@@ -260,9 +260,9 @@ if (($pagedLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_
 }
 Write-Output $pagedLogBackedInboxOutput
 
-$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --source-name "Verify Camera" --original-path IMG_1234 --format cr3
+$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --path $pushState --from-transfers --username "verify" --source-name "Verify Camera" --original-path IMG_1234 --format cr3
 if ($LASTEXITCODE -ne 0) { throw "filtered log-backed inbox smoke failed" }
-if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*source=Verify Camera*" }).Count -lt 1) {
+if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
     throw "filtered log-backed inbox did not include expected group"
 }
 Write-Output $filteredLogBackedInboxOutput
@@ -273,9 +273,9 @@ if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $ftpSmokeState --username "verify"
 if ($LASTEXITCODE -ne 0) { throw "devices username filter smoke failed" }
 
-$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --source-name "Verify Camera" --original-path IMG_1234
+$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --username "verify" --source-name "Verify Camera" --original-path IMG_1234
 if ($LASTEXITCODE -ne 0) { throw "transfers smoke failed" }
-if (($transfersOutput | Where-Object { $_ -like "*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
+if (($transfersOutput | Where-Object { $_ -like "*username=verify*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "transfers display path smoke failed"
 }
 Write-Output $transfersOutput
@@ -289,8 +289,8 @@ $transferLog = Join-Path $pushState "transfer-log.jsonl"
 if (!(Test-Path -LiteralPath $transferLog)) { throw "transfer log was not written" }
 $transferRecords = @(Get-Content -LiteralPath $transferLog | ForEach-Object { $_ | ConvertFrom-Json })
 if ($transferRecords.Count -ne 2) { throw "expected 2 transfer log records, found $($transferRecords.Count)" }
-if (($transferRecords | Where-Object { $_.source_name -eq "Verify Camera" }).Count -ne 2) {
-    throw "transfer log source_name was not recorded"
+if (($transferRecords | Where-Object { $_.username -eq "verify" -and $_.source_name -eq "Verify Camera" }).Count -ne 2) {
+    throw "transfer log username/source_name was not recorded"
 }
 
 Write-Output "verify.ps1 completed successfully"

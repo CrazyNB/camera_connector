@@ -31,12 +31,14 @@ pub struct TransferQuery {
     pub transfer_id: Option<String>,
     pub original_path: Option<String>,
     pub final_filename: Option<String>,
+    pub username: Option<String>,
     pub source_name: Option<String>,
     pub remote_addr: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AssetGroupQuery {
+    pub username: Option<String>,
     pub source_name: Option<String>,
     pub original_path: Option<String>,
     pub remote_addr: Option<String>,
@@ -164,10 +166,11 @@ impl CameraConnectorService {
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
     ) -> Result<Vec<ReceivedAssetGroup>> {
+        let accounts = self.load_config()?.accounts;
         let assets = read_transfer_log(state_dir)?
             .into_iter()
             .filter(|record| record.status == TransferStatus::Completed)
-            .map(asset_from_transfer_record)
+            .map(|record| asset_from_transfer_record(record, &accounts))
             .collect::<Vec<_>>();
         Ok(group_received_assets(assets)
             .into_iter()
@@ -221,11 +224,12 @@ impl CameraConnectorService {
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
     ) -> Result<Vec<TransferRecordView>> {
+        let accounts = self.load_config()?.accounts;
         let views = read_transfer_log(output_dir)?
             .into_iter()
-            .filter(|record| transfer_matches(record, &query))
+            .filter(|record| transfer_matches(record, &query, &accounts))
             .map(|record| {
-                let display_source = record_display_source(&record);
+                let display_source = record_display_source(&record, &accounts);
                 let virtual_display_path = record.virtual_display_path(display_source.as_deref());
                 TransferRecordView {
                     final_location_kind: record.final_location_kind().map(ToOwned::to_owned),
@@ -322,10 +326,15 @@ fn push_unique_asset<'a>(assets: &mut Vec<&'a ReceivedAsset>, asset: &'a Receive
 
 fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {
     query
-        .source_name
+        .username
         .as_ref()
-        .map(|expected| asset.display_source.as_ref() == Some(expected))
+        .map(|expected| asset.username.as_ref() == Some(expected))
         .unwrap_or(true)
+        && query
+            .source_name
+            .as_ref()
+            .map(|expected| asset.display_source.as_ref() == Some(expected))
+            .unwrap_or(true)
         && query
             .remote_addr
             .as_ref()
@@ -349,9 +358,12 @@ fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {
             .unwrap_or(true)
 }
 
-fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
+fn asset_from_transfer_record(
+    record: TransferRecord,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> ReceivedAsset {
     let storage_location = record.resolved_final_location();
-    let display_source = record_display_source(&record);
+    let display_source = record_display_source(&record, accounts);
     let virtual_display_path = record.virtual_display_path(display_source.as_deref());
     let mut asset = ReceivedAsset::new(
         record.transfer_id.clone(),
@@ -362,6 +374,7 @@ fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
     asset.received_time_ms = record.completed_at_ms.or(Some(record.started_at_ms));
     asset.storage_location = storage_location;
     asset.original_path = Some(record.original_path);
+    asset.username = record.username;
     asset.display_source = display_source;
     asset.remote_addr = record.remote_addr;
     asset.virtual_display_path = Some(virtual_display_path);
@@ -376,12 +389,21 @@ fn import_source_from_protocol(protocol: &str) -> ImportSource {
     }
 }
 
-fn transfer_matches(record: &TransferRecord, query: &TransferQuery) -> bool {
+fn transfer_matches(
+    record: &TransferRecord,
+    query: &TransferQuery,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> bool {
     query
-        .source_name
+        .username
         .as_ref()
-        .map(|expected| record_display_source(record).as_ref() == Some(expected))
+        .map(|expected| record.username.as_ref() == Some(expected))
         .unwrap_or(true)
+        && query
+            .source_name
+            .as_ref()
+            .map(|expected| record_display_source(record, accounts).as_ref() == Some(expected))
+            .unwrap_or(true)
         && query
             .remote_addr
             .as_ref()
@@ -414,8 +436,16 @@ fn transfer_matches(record: &TransferRecord, query: &TransferQuery) -> bool {
             .unwrap_or(true)
 }
 
-fn record_display_source(record: &TransferRecord) -> Option<String> {
-    record.source_name.clone()
+fn record_display_source(
+    record: &TransferRecord,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> Option<String> {
+    record
+        .username
+        .as_deref()
+        .and_then(|username| accounts.get(username))
+        .map(|account| account.device_name.clone())
+        .or_else(|| record.source_name.clone())
 }
 
 fn device_matches(device: &ConnectedDevice, username: Option<&str>, online: bool) -> bool {

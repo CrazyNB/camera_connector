@@ -32,6 +32,8 @@ enum Command {
         #[arg(long, default_value = "manual")]
         source: String,
         #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
         source_name: Option<String>,
     },
     ReceiverConfig {
@@ -100,6 +102,8 @@ enum Command {
     },
     Inbox {
         #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
         path: PathBuf,
         #[arg(long, default_value = "ftp")]
         source: String,
@@ -107,6 +111,8 @@ enum Command {
         from_transfers: bool,
         #[arg(long)]
         summary: bool,
+        #[arg(long)]
+        username: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
         #[arg(long)]
@@ -131,6 +137,8 @@ enum Command {
         original_path: Option<String>,
         #[arg(long)]
         final_filename: Option<String>,
+        #[arg(long)]
+        username: Option<String>,
         #[arg(long)]
         source_name: Option<String>,
         #[arg(long)]
@@ -197,6 +205,7 @@ async fn main() -> Result<()> {
             output,
             state,
             source,
+            username,
             source_name,
         }) => {
             let source = parse_source(&source)?;
@@ -242,6 +251,7 @@ async fn main() -> Result<()> {
                     final_path: Some(final_path),
                     final_location: progress.output_location,
                     size_bytes: progress.bytes_written,
+                    username,
                     remote_addr: None,
                     source_name,
                     started_at_ms,
@@ -390,10 +400,12 @@ async fn main() -> Result<()> {
             runtime.stop_receiver().await?;
         }
         Some(Command::Inbox {
+            config,
             path,
             source,
             from_transfers,
             summary,
+            username,
             source_name,
             original_path,
             remote_addr,
@@ -402,8 +414,9 @@ async fn main() -> Result<()> {
             limit,
         }) => {
             let source = parse_source(&source)?;
-            let service = CameraConnectorService::new(None);
+            let service = CameraConnectorService::new(config);
             let query = AssetGroupQuery {
+                username,
                 source_name,
                 original_path,
                 remote_addr,
@@ -436,6 +449,7 @@ async fn main() -> Result<()> {
             transfer_id,
             original_path,
             final_filename,
+            username,
             source_name,
             remote_addr,
         }) => {
@@ -446,6 +460,7 @@ async fn main() -> Result<()> {
                     transfer_id,
                     original_path,
                     final_filename,
+                    username,
                     source_name,
                     remote_addr,
                 },
@@ -489,12 +504,13 @@ async fn main() -> Result<()> {
 fn transfer_view_line(view: &TransferRecordView) -> String {
     let record = &view.record;
     format!(
-        "{}\t{:?}\t{}\t{}\t{}\tremote={}\tsource={}\tdisplay={}\tlocation_kind={}\tlocation={}",
+        "{}\t{:?}\t{}\t{}\t{}\tusername={}\tremote={}\tsource={}\tdisplay={}\tlocation_kind={}\tlocation={}",
         record.transfer_id,
         record.status,
         record.final_filename,
         record.original_path,
         record.size_bytes,
+        record.username.as_deref().unwrap_or("-"),
         record.remote_addr.as_deref().unwrap_or("-"),
         view.display_source.as_deref().unwrap_or("-"),
         view.virtual_display_path,
@@ -570,13 +586,14 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
     let primary_location = group.primary.storage_location.as_ref();
 
     format!(
-        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tsource={}\tremote={}\toriginal={}\tdisplay={}\tprimary_location_kind={}\tprimary_location={}",
+        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tdisplay={}\tprimary_location_kind={}\tprimary_location={}",
         group.group_key,
         group.primary.filename,
         jpeg,
         raw,
         video,
         total_bytes,
+        group.primary.username.as_deref().unwrap_or("-"),
         group.primary.display_source.as_deref().unwrap_or("-"),
         group.primary.remote_addr.as_deref().unwrap_or("-"),
         group.primary.original_path.as_deref().unwrap_or("-"),
@@ -848,10 +865,14 @@ mod tests {
         let cli = Cli::try_parse_from([
             "camera-connector",
             "inbox",
+            "--config",
+            "C:\\CameraConnector\\config.json",
             "--path",
             "C:\\CameraConnector\\state",
             "--from-transfers",
             "--summary",
+            "--username",
+            "z5",
             "--source-name",
             "Z5_2",
             "--original-path",
@@ -872,6 +893,7 @@ mod tests {
             Some(Command::Inbox {
                 from_transfers: true,
                 summary: true,
+                username: Some(_),
                 source_name: Some(_),
                 original_path: Some(_),
                 remote_addr: Some(_),
@@ -897,6 +919,7 @@ mod tests {
                     "content://camera-connector/IMG_0001.DNG",
                 )),
                 size_bytes: 42,
+                username: None,
                 remote_addr: Some("192.168.137.56".to_string()),
                 source_name: Some("Camera".to_string()),
                 started_at_ms: 10,
@@ -911,6 +934,7 @@ mod tests {
 
         let line = transfer_view_line(&view);
 
+        assert!(line.contains("username=-"));
         assert!(line.contains("location_kind=document_uri"));
         assert!(line.contains("location=content://camera-connector/IMG_0001.DNG"));
     }
@@ -923,6 +947,7 @@ mod tests {
             ));
         let mut asset = asset;
         asset.display_source = Some("Z5_2".to_string());
+        asset.username = Some("z5".to_string());
         asset.remote_addr = Some("192.168.137.56".to_string());
         asset.original_path = Some("DCIM/IMG_0001.CR3".to_string());
         asset.virtual_display_path = Some("Z5_2/DCIM/IMG_0001.CR3".to_string());
@@ -938,6 +963,7 @@ mod tests {
 
         assert!(line.contains("primary_location_kind=document_uri"));
         assert!(line.contains("primary_location=content://camera-connector/IMG_0001.CR3"));
+        assert!(line.contains("username=z5"));
         assert!(line.contains("source=Z5_2"));
         assert!(line.contains("remote=192.168.137.56"));
         assert!(line.contains("original=DCIM/IMG_0001.CR3"));

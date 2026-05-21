@@ -88,7 +88,7 @@ Content:
 - FTP port.
 - Credentials.
 - Camera accounts: manage FTP/SFTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
-- Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
+- Connected devices and transfer views: show online/recent device IPs and login usernames; IP is a latest-connection property, while username is the stable account identity for grouping and filters.
 - Receiver status metadata: show phase, auth mode, bound address, account count, save location, and diagnostic message.
 - Storage separation: config, state/logs, and upload inbox are separate.
 - Cross-platform storage note: desktop uses a filesystem folder, Android can use MediaStore/SAF, and iOS can use Files/Photos/app sandbox.

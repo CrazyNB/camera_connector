@@ -108,6 +108,7 @@ struct SshSession {
     config: Arc<PushReceiverConfig>,
     peer_addr: Option<SocketAddr>,
     authenticated_account: Option<ReceiverAccount>,
+    authenticated_username: Option<String>,
     clients: Arc<Mutex<HashMap<ChannelId, Channel<Msg>>>>,
 }
 
@@ -117,6 +118,7 @@ impl SshSession {
             config,
             peer_addr,
             authenticated_account: None,
+            authenticated_username: None,
             clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -168,6 +170,7 @@ impl russh::server::Handler for SshSession {
                         tracing::warn!(?error, "failed to record SFTP device authentication");
                     }
                 }
+                self.authenticated_username = Some(account.username.clone());
                 self.authenticated_account = Some(account);
                 return Ok(Auth::Accept);
             }
@@ -195,6 +198,7 @@ impl russh::server::Handler for SshSession {
                 tracing::warn!(?error, "failed to record SFTP device authentication");
             }
         }
+        self.authenticated_username = Some(user.to_string());
         Ok(Auth::Accept)
     }
 
@@ -228,6 +232,7 @@ impl russh::server::Handler for SshSession {
             Arc::clone(&self.config),
             self.remote_addr(),
             self.source_name(),
+            self.authenticated_username.clone(),
         );
         russh_sftp::server::run(channel.into_stream(), handler).await;
         Ok(())
@@ -255,6 +260,7 @@ struct SftpSession {
     config: Arc<PushReceiverConfig>,
     remote_addr: Option<String>,
     source_name: Option<String>,
+    username: Option<String>,
     next_handle: u64,
     uploads: HashMap<String, PendingUpload>,
 }
@@ -264,11 +270,13 @@ impl SftpSession {
         config: Arc<PushReceiverConfig>,
         remote_addr: Option<String>,
         source_name: Option<String>,
+        username: Option<String>,
     ) -> Self {
         Self {
             config,
             remote_addr,
             source_name,
+            username,
             next_handle: 0,
             uploads: HashMap::new(),
         }
@@ -352,6 +360,7 @@ impl russh_sftp::server::Handler for SftpSession {
                 final_path: progress.output_path,
                 final_location: progress.output_location,
                 size_bytes: progress.bytes_written,
+                username: self.username.clone(),
                 remote_addr: self.remote_addr.clone(),
                 source_name: self.source_name.clone(),
                 started_at_ms: upload.started_at_ms,

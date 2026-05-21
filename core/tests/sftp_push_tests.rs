@@ -122,6 +122,7 @@ async fn sftp_server_accepts_password_upload() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].protocol, "sftp");
     assert_eq!(records[0].original_path, "DCIM/100CAM/IMG_1001.NEF");
+    assert_eq!(records[0].username.as_deref(), Some("camera"));
     assert_eq!(records[0].source_name.as_deref(), Some("Studio Camera"));
     assert!(!temp_dir.path().join("transfer-log.jsonl").exists());
     assert!(!temp_dir.path().join("connected-devices.json").exists());
