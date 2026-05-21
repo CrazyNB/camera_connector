@@ -28,7 +28,7 @@ Content:
 
 - Protocol segmented control: FTP, SFTP, FTPS.
 - Host/IP and port.
-- Username and password status.
+- Selected camera account, username, and password status.
 - Output folder.
 - Start/stop receiver action.
 - Firewall/setup warning when needed.
@@ -86,6 +86,7 @@ Content:
 - Credentials.
 - Camera accounts: manage FTP username, password status, device name, and bound IPs.
 - Connected devices: show online/recent device IPs and login usernames, then let the user bind a discovered IP to an existing account/device.
+- Conflict state: show that one IP can belong to only one account.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.
