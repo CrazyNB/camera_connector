@@ -105,8 +105,8 @@ P2:
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename/path, bytes, protocol, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
-| RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, device name, and bound IPs; receiver authenticates against these accounts and rejects invalid or conflicting account config |
-| RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; user can bind a discovered IP to an account/device without copying the IP when the choice is unambiguous |
+| RX-012 | Camera account configuration | P0 | User can list, set, and remove FTP accounts with username, password, and device name; receiver authenticates against these accounts and rejects invalid account config |
+| RX-013 | Connected device view | P0 | Receiver records current/recent device IPs, login username, and online state; IP is shown as the latest connection property of that account |
 | RX-014 | SFTP route | P1 | Same storage sink can receive SFTP uploads |
 | RX-015 | FTPS route | P1 | Same storage sink can receive FTPS uploads |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |

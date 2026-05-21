@@ -1,4 +1,3 @@
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -41,7 +40,6 @@ pub struct ReceiverAccount {
     pub username: String,
     pub password: Option<String>,
     pub device_name: String,
-    pub remote_addrs: Vec<String>,
 }
 
 impl ReceiverAccount {
@@ -54,13 +52,7 @@ impl ReceiverAccount {
             username: username.into(),
             password: password.map(Into::into),
             device_name: device_name.into(),
-            remote_addrs: Vec::new(),
         }
-    }
-
-    pub fn with_remote_addr(mut self, remote_addr: impl Into<String>) -> Self {
-        self.remote_addrs.push(remote_addr.into());
-        self
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -71,11 +63,6 @@ impl ReceiverAccount {
             return Err(ImporterError::internal(
                 "account device name cannot be empty",
             ));
-        }
-        for remote_addr in &self.remote_addrs {
-            IpAddr::from_str(remote_addr.trim()).map_err(|_| {
-                ImporterError::internal(format!("invalid account IP address '{remote_addr}'"))
-            })?;
         }
         Ok(())
     }
@@ -139,12 +126,7 @@ impl PushReceiverConfig {
         self
     }
 
-    pub fn resolved_source_name(&self, remote_addr: Option<&str>) -> Option<String> {
-        if let Some(remote_addr) = remote_addr {
-            if let Some(account) = self.account_for_remote_addr(remote_addr) {
-                return Some(account.device_name.clone());
-            }
-        }
+    pub fn resolved_source_name(&self, _remote_addr: Option<&str>) -> Option<String> {
         self.source_name.clone()
     }
 
@@ -154,35 +136,9 @@ impl PushReceiverConfig {
             .find(|account| account.username == username)
     }
 
-    pub fn account_for_remote_addr(&self, remote_addr: &str) -> Option<&ReceiverAccount> {
-        self.accounts.iter().find(|account| {
-            account
-                .remote_addrs
-                .iter()
-                .any(|configured| configured == remote_addr)
-        })
-    }
-
     pub fn validate_accounts(&self) -> Result<()> {
-        let mut ip_owners = std::collections::BTreeMap::<String, String>::new();
         for account in &self.accounts {
             account.validate()?;
-            for remote_addr in &account.remote_addrs {
-                let normalized = IpAddr::from_str(remote_addr.trim())
-                    .map_err(|_| {
-                        ImporterError::internal(format!(
-                            "invalid account IP address '{remote_addr}'"
-                        ))
-                    })?
-                    .to_string();
-                if let Some(existing) =
-                    ip_owners.insert(normalized.clone(), account.username.clone())
-                {
-                    return Err(ImporterError::internal(format!(
-                        "IP address '{normalized}' is already bound to account '{existing}'"
-                    )));
-                }
-            }
         }
         Ok(())
     }

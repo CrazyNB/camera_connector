@@ -44,12 +44,12 @@ New-Item -ItemType Directory -Force -Path $ftpSmokeOutput | Out-Null
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
 
-& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera" --ip "192.168.137.56"
+& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
 
 $accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
 if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }
-if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*192.168.137.56*" }).Count -lt 1) {
+if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*" }).Count -lt 1) {
     throw "account list did not include Verify Camera"
 }
 Write-Output $accountList
@@ -149,13 +149,6 @@ $ftpTransferLog = Join-Path $ftpSmokeOutput "transfer-log.jsonl"
 $ftpTransferRecords = @(Get-Content -LiteralPath $ftpTransferLog | ForEach-Object { $_ | ConvertFrom-Json })
 if (@($ftpTransferRecords | Where-Object { $_.source_name -eq "Verify Camera" -and $_.remote_addr -eq "127.0.0.1" }).Count -ne 1) {
     throw "FTP smoke transfer log did not record account source and remote address"
-}
-
-& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath bind-device --username "verify" --devices-path $ftpSmokeOutput --ip "127.0.0.1"
-if ($LASTEXITCODE -ne 0) { throw "account bind-device smoke failed" }
-$accountListAfterBind = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
-if (($accountListAfterBind | Where-Object { $_ -like "*verify*127.0.0.1*" }).Count -lt 1) {
-    throw "account bind-device did not persist FTP smoke IP"
 }
 
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --source ftp --source-name "Verify Camera"

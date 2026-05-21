@@ -42,7 +42,7 @@ Smoke outputs are written under `target/push-output`.
 Start the development FTP receiver:
 
 ```powershell
-target\debug\camera-connector.exe account set --username z5 --password secret --device-name Z5_2 --ip 192.168.137.56
+target\debug\camera-connector.exe account set --username z5 --password secret --device-name Z5_2
 target\debug\camera-connector.exe serve-ftp --bind-host 0.0.0.0 --port 2121 --output C:\Users\hxn\Pictures\CameraConnector
 ```
 
@@ -64,17 +64,7 @@ List current and recently connected devices from the receiver output folder:
 target\debug\camera-connector.exe devices --path C:\Users\hxn\Pictures\CameraConnector
 ```
 
-The `devices` output reads the same account config, so `192.168.137.56` will display as `Z5_2` after the IP is bound to the `z5` account. A newly discovered IP can be attached later:
-
-```powershell
-target\debug\camera-connector.exe account bind-ip --username z5 --ip 192.168.137.44
-```
-
-If exactly one relevant device is visible in the receiver metadata, bind it without copying the IP:
-
-```powershell
-target\debug\camera-connector.exe account bind-device --username z5 --devices-path C:\Users\hxn\Pictures\CameraConnector --online
-```
+The `devices` output reads current receiver metadata. After the camera logs in as `z5`, the current IP is shown as a connection property of that account. IP addresses are not persisted in account config; if the camera reconnects with a different IP, the latest connection record updates naturally.
 
 Validate local ingest without a camera:
 

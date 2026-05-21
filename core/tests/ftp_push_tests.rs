@@ -11,9 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_account(
-            ReceiverAccount::new("z5", Some("secret"), "Studio A").with_remote_addr("127.0.0.1"),
-        );
+        .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -38,7 +36,7 @@ async fn ftp_server_accepts_passive_stor_upload() {
     let connected = read_connected_devices(temp_dir.path()).expect("devices should read");
     assert_eq!(connected.len(), 1);
     assert_eq!(connected[0].remote_addr, "127.0.0.1");
-    assert_eq!(connected[0].source_name.as_deref(), Some("Studio A"));
+    assert_eq!(connected[0].source_name.as_deref(), None);
     assert_eq!(connected[0].username.as_deref(), None);
     assert!(connected[0].online);
 

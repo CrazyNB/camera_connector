@@ -84,9 +84,8 @@ Content:
 - Output folder.
 - FTP port.
 - Credentials.
-- Camera accounts: manage FTP username, password status, device name, and bound IPs.
-- Connected devices: show online/recent device IPs and login usernames, then let the user bind a discovered IP to an existing account/device.
-- Conflict state: show that one IP can belong to only one account.
+- Camera accounts: manage FTP username, password status, and device name.
+- Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.

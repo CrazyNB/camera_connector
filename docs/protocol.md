@@ -97,7 +97,7 @@ For display, the UI builds a virtual path from metadata:
 
 This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
 
-Camera accounts are user configuration. They map FTP login credentials to a device name, and can optionally bind one or more camera IP addresses to the same account. The receiver authenticates `USER`/`PASS` against this table, applies the account device name to new transfer records, and lets the device view bind a newly discovered IP to an existing account.
+Camera accounts are user configuration. They map FTP login credentials to a device name. The receiver authenticates `USER`/`PASS` against this table and applies the account device name to new connection and transfer records. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 
 ## Connected Devices
 
@@ -107,9 +107,9 @@ The receiver writes `connected-devices.json` in the output folder. It records cu
 - authenticated FTP `username` when the device has logged in.
 - `online` and active connection count.
 - first seen, last seen, and last disconnected timestamps.
-- source name resolved from the authenticated account or account IP binding when available.
+- source name resolved from the authenticated account when available.
 
-This file powers the "connected devices" view and the "bind this IP to an account/device" flow. It is receiver metadata, not an inbox asset.
+This file powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
 
 ## Real Camera Verification
 
