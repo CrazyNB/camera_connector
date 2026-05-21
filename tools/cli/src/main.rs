@@ -493,13 +493,17 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
     let primary_location = group.primary.storage_location.as_ref();
 
     format!(
-        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tprimary_location_kind={}\tprimary_location={}",
+        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tsource={}\tremote={}\toriginal={}\tdisplay={}\tprimary_location_kind={}\tprimary_location={}",
         group.group_key,
         group.primary.filename,
         jpeg,
         raw,
         video,
         total_bytes,
+        group.primary.display_source.as_deref().unwrap_or("-"),
+        group.primary.remote_addr.as_deref().unwrap_or("-"),
+        group.primary.original_path.as_deref().unwrap_or("-"),
+        group.primary.virtual_display_path.as_deref().unwrap_or("-"),
         primary_location
             .map(StoredObjectLocation::kind)
             .unwrap_or("-"),
@@ -798,6 +802,11 @@ mod tests {
             .with_storage_location(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_0001.CR3",
             ));
+        let mut asset = asset;
+        asset.display_source = Some("Z5_2".to_string());
+        asset.remote_addr = Some("192.168.137.56".to_string());
+        asset.original_path = Some("DCIM/IMG_0001.CR3".to_string());
+        asset.virtual_display_path = Some("Z5_2/DCIM/IMG_0001.CR3".to_string());
         let group = ReceivedAssetGroup {
             group_key: "IMG_0001".to_string(),
             primary: asset.clone(),
@@ -810,6 +819,10 @@ mod tests {
 
         assert!(line.contains("primary_location_kind=document_uri"));
         assert!(line.contains("primary_location=content://camera-connector/IMG_0001.CR3"));
+        assert!(line.contains("source=Z5_2"));
+        assert!(line.contains("remote=192.168.137.56"));
+        assert!(line.contains("original=DCIM/IMG_0001.CR3"));
+        assert!(line.contains("display=Z5_2/DCIM/IMG_0001.CR3"));
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {

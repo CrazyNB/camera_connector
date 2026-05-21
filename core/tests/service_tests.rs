@@ -206,6 +206,14 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
         groups[0].jpeg.as_ref().map(|asset| asset.filename.as_str()),
         Some("IMG_2222.JPG")
     );
+    let jpeg = groups[0].jpeg.as_ref().expect("jpeg should exist");
+    assert_eq!(jpeg.original_path.as_deref(), Some("DCIM/100/IMG_2222.JPG"));
+    assert_eq!(jpeg.display_source.as_deref(), Some("Z5_2"));
+    assert_eq!(jpeg.remote_addr.as_deref(), Some("192.168.137.56"));
+    assert_eq!(
+        jpeg.virtual_display_path.as_deref(),
+        Some("Z5_2/DCIM/100/IMG_2222.JPG")
+    );
     assert_eq!(
         groups[0].raw.as_ref().map(|asset| asset.filename.as_str()),
         Some("IMG_2222.NEF")

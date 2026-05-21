@@ -242,6 +242,9 @@ if (($logBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.
 if (($logBackedInboxOutput | Where-Object { $_ -like "*primary_location_kind=local_path*" }).Count -lt 1) {
     throw "log-backed inbox did not expose primary storage location"
 }
+if (($logBackedInboxOutput | Where-Object { $_ -like "*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
+    throw "log-backed inbox did not expose transfer metadata"
+}
 Write-Output $logBackedInboxOutput
 
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $pushState

@@ -23,6 +23,10 @@ pub struct ReceivedAsset {
     pub height: Option<u32>,
     pub group_key: Option<String>,
     pub storage_location: Option<StoredObjectLocation>,
+    pub original_path: Option<String>,
+    pub display_source: Option<String>,
+    pub remote_addr: Option<String>,
+    pub virtual_display_path: Option<String>,
 }
 
 impl ReceivedAsset {
@@ -48,6 +52,10 @@ impl ReceivedAsset {
             height: None,
             group_key,
             storage_location: None,
+            original_path: None,
+            display_source: None,
+            remote_addr: None,
+            virtual_display_path: None,
         }
     }
 

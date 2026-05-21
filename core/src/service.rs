@@ -184,14 +184,20 @@ impl CameraConnectorService {
 
 fn asset_from_transfer_record(record: TransferRecord) -> ReceivedAsset {
     let storage_location = record.resolved_final_location();
+    let display_source = record_display_source(&record);
+    let virtual_display_path = record.virtual_display_path(display_source.as_deref());
     let mut asset = ReceivedAsset::new(
-        record.transfer_id,
-        record.final_filename,
+        record.transfer_id.clone(),
+        record.final_filename.clone(),
         record.size_bytes,
         import_source_from_protocol(&record.protocol),
     );
     asset.received_time_ms = record.completed_at_ms.or(Some(record.started_at_ms));
     asset.storage_location = storage_location;
+    asset.original_path = Some(record.original_path);
+    asset.display_source = display_source;
+    asset.remote_addr = record.remote_addr;
+    asset.virtual_display_path = Some(virtual_display_path);
     asset
 }
 
