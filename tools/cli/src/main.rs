@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
                 "received {}\t{:?}\t{} bytes",
                 asset.filename, asset.format, asset.size_bytes
             );
-            let final_path = progress.output_path.ok_or_else(|| {
+            let final_path = progress.output_path.clone().ok_or_else(|| {
                 camera_connector_core::ImporterError::internal("missing output path")
             })?;
             let log_dir = state.unwrap_or_else(|| {
@@ -221,7 +221,8 @@ async fn main() -> Result<()> {
                     status: TransferStatus::Completed,
                     original_path: filename.to_string(),
                     final_filename: asset.filename,
-                    final_path,
+                    final_path: Some(final_path),
+                    final_location: progress.output_location,
                     size_bytes: progress.bytes_written,
                     remote_addr: None,
                     source_name,

@@ -341,7 +341,6 @@ impl russh_sftp::server::Handler for SftpSession {
     async fn close(&mut self, id: u32, handle: String) -> std::result::Result<Status, Self::Error> {
         let upload = self.uploads.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
         let progress = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
-        let final_path = progress.output_path.clone().ok_or(StatusCode::Failure)?;
         append_transfer_record(
             &self.config.state_dir,
             &TransferRecord {
@@ -350,7 +349,8 @@ impl russh_sftp::server::Handler for SftpSession {
                 status: TransferStatus::Completed,
                 original_path: upload.original_path,
                 final_filename: progress.filename,
-                final_path,
+                final_path: progress.output_path,
+                final_location: progress.output_location,
                 size_bytes: progress.bytes_written,
                 remote_addr: self.remote_addr.clone(),
                 source_name: self.source_name.clone(),

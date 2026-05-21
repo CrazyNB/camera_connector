@@ -10,7 +10,7 @@ The prototype now presents a push-mode receiver, not a PTP/IP gallery browser. T
 flowchart TD
   A["Open app"] --> B["Choose protocol"]
   B --> C["Start receiver"]
-  C --> D["Show host, port, user, output folder, state folder"]
+  C --> D["Show host, port, user, save location, state location"]
   D --> E["Configure camera FTP/SFTP profile"]
   E --> F["Camera uploads files"]
   F --> G["Receiver publishes completed files"]
@@ -29,7 +29,7 @@ Content:
 - Protocol segmented control: FTP and SFTP.
 - Host/IP and port.
 - Selected camera account, username, and password status.
-- Output folder.
+- Import save location. Desktop shows a folder; mobile shows the selected media/document destination.
 - State/log folder.
 - Runtime status from receiver metadata, including stale/offline detection after force quit or crash.
 - Start/stop receiver action.
@@ -83,14 +83,15 @@ Purpose: configure local receiver behavior.
 
 Content:
 
-- Output folder.
+- Import save location.
 - State/log folder for transfer log, connected devices, receiver status, and SFTP host key.
 - FTP port.
 - Credentials.
 - Camera accounts: manage FTP/SFTP username, password status, and device name; passwords are write-only during setup and displayed only as configured/not required.
 - Connected devices: show online/recent device IPs and login usernames; IP is a latest-connection property, not account identity.
-- Receiver status metadata: show phase, auth mode, bound address, account count, output folder, and diagnostic message.
-- Directory separation: config, state/logs, and upload inbox are separate.
+- Receiver status metadata: show phase, auth mode, bound address, account count, save location, and diagnostic message.
+- Storage separation: config, state/logs, and upload inbox are separate.
+- Cross-platform storage note: desktop uses a filesystem folder, Android can use MediaStore/SAF, and iOS can use Files/Photos/app sandbox.
 - Flat inbox policy.
 - Duplicate policy.
 - Compatibility log export.

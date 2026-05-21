@@ -14,9 +14,9 @@ The app runs a local FTP receiver. The camera is configured with:
 - Port: default `2121` for development; production may use `21` when platform permissions allow it.
 - Mode: passive FTP.
 - Username/password: configured through camera accounts. Each account has a login username, optional password, and display device name. Password handling is owned by the core account model; persisted config stores an Argon2id password hash, not the plaintext camera password.
-- Destination: local import folder managed by the app.
+- Destination: app-managed import location. Desktop builds use a local folder; mobile builds may use a media-library, document-provider, or app-sandbox location instead of a stable filesystem path.
 
-The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat output folder as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.
+The camera may still send `CWD`, `MKD`, or `STOR` paths such as `/DCIM/100CANON/IMG_1001.CR3`. The receiver accepts those paths for protocol compatibility, but it does not mirror them locally. Completed files are published into one flat import location as `IMG_1001.CR3`; the original remote path is kept in the transfer log for filtering and diagnostics.
 
 Minimum FTP commands supported by the core receiver:
 
@@ -48,7 +48,7 @@ Implemented behavior:
 
 - SSH server endpoint owned by the app.
 - Password authentication through the same camera account model used by FTP.
-- Same flat local storage sink as FTP.
+- Same flat storage backend contract as FTP.
 - Same asset grouping and duplicate handling.
 - Same transfer log fields as FTP, with `protocol` set to `sftp`.
 - Same connected-device metadata as FTP, including latest IP, login username, account device name, online state, and disconnect state.
@@ -65,7 +65,12 @@ Not yet implemented:
 - System config, receiver state/logs, and uploaded assets are separate:
   - Config: account and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
   - State/log directory: `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key`.
-  - Output/inbox directory: completed camera files and in-progress `.tmp` uploads only.
+  - Output/inbox location: completed camera files and in-progress `.tmp` uploads only.
+- The core records final save targets as `StoredObjectLocation`, not only as local filesystem paths:
+  - Desktop: `local_path`.
+  - Android: `media_uri` or `document_uri` through MediaStore/SAF.
+  - iOS: `document_uri` or `photo_asset` through Files/Photos APIs.
+- Receiver implementations write through a `ReceiveStorage` backend. The current desktop backend is `LocalFileSink`; mobile shells should provide platform storage adapters while preserving the same temp-write then publish contract.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
 - Use only the final remote filename for local storage.
@@ -83,7 +88,9 @@ The receiver writes `transfer-log.jsonl` in the state/log directory. Each comple
 - `transfer_id`: stable enough to reference a single transfer.
 - `protocol`: FTP, SFTP, or manual validation source.
 - `original_path`: remote path sent by the camera, such as `DCIM/100CANON/IMG_1001.CR3`.
-- `final_filename` and `final_path`: flattened local result.
+- `final_filename`: flattened result name.
+- `final_location`: platform save target, such as `local_path`, `media_uri`, `document_uri`, or `photo_asset`.
+- `final_path`: desktop local path when available; mobile records may omit it.
 - `size_bytes`.
 - `remote_addr`: camera IP when available.
 - `source_name`: optional user-set camera/source label.
@@ -96,7 +103,7 @@ For display, the UI builds a virtual path from metadata:
 - With a camera account device name: `Z5_2/BB/DSC_2552.NEF`.
 - Without a source name: `IP-056/BB/DSC_2552.NEF`, using the last IPv4 octet from `192.168.137.56`.
 
-This virtual path is not a filesystem path. It is a compact grouping label; the local file remains flat, and the full `remote_addr` remains available in the log.
+This virtual path is not a filesystem path. It is a compact grouping label; the saved object remains flat in the chosen storage backend, and the full `remote_addr` remains available in the log.
 
 Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; SFTP authenticates SSH password login. Both protocols use the same account table and apply the account device name to new connection and transfer records. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 

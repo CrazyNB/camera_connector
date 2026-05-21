@@ -1,4 +1,6 @@
-use camera_connector_core::{LocalFileSink, ReceiveState};
+use camera_connector_core::{
+    LocalFileSink, ReceiveState, ReceiveStorage, ReceiveUpload, StoredObjectLocation,
+};
 
 #[test]
 fn writes_temp_file_then_publishes_final_file() {
@@ -14,6 +16,10 @@ fn writes_temp_file_then_publishes_final_file() {
 
     assert_eq!(progress.state, ReceiveState::Completed);
     assert_eq!(progress.bytes_written, 4);
+    assert_eq!(
+        progress.output_location,
+        Some(StoredObjectLocation::local_path(final_path.clone()))
+    );
     assert!(final_path.exists());
     assert!(!temp_path.exists());
 }
@@ -107,4 +113,33 @@ fn duplicate_uploads_are_published_with_numbered_filenames() {
         vec![2, 3]
     );
     assert_eq!(duplicate.filename, "DSC_2467 (1).NEF");
+}
+
+#[test]
+fn local_file_sink_implements_storage_backend_contract() {
+    fn receive_with_backend<S: ReceiveStorage>(
+        storage: &S,
+        transfer_id: &str,
+        relative_path: &str,
+        bytes: &[u8],
+    ) -> camera_connector_core::Result<camera_connector_core::ReceiveProgress> {
+        let mut upload = storage.begin_write(transfer_id, relative_path)?;
+        std::io::Write::write_all(&mut upload, bytes)?;
+        upload.finish()
+    }
+
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let sink = LocalFileSink::new(temp_dir.path());
+
+    let progress = receive_with_backend(&sink, "ftp-3", "DCIM/IMG_3000.RAF", &[9, 8, 7])
+        .expect("generic storage backend should receive file");
+
+    assert_eq!(progress.filename, "IMG_3000.RAF");
+    assert_eq!(progress.bytes_written, 3);
+    assert_eq!(
+        progress.output_location,
+        Some(StoredObjectLocation::local_path(
+            temp_dir.path().join("IMG_3000.RAF")
+        ))
+    );
 }

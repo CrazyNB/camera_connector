@@ -17,10 +17,11 @@ pub use receive::{
     append_transfer_record, connected_devices_path, mark_all_connected_devices_offline,
     read_connected_devices, read_transfer_log, record_device_authenticated,
     record_device_connected, record_device_disconnected, transfer_log_path, ConnectedDevice,
-    TransferRecord, TransferStatus,
+    StoredObjectLocation, TransferRecord, TransferStatus,
 };
 pub use receive::{
     scan_inbox, scan_inbox_groups, LocalFileSink, LocalFileUpload, ReceiveProgress, ReceiveState,
+    ReceiveStorage, ReceiveUpload,
 };
 pub use runtime::{
     read_receiver_runtime_status, receiver_runtime_status_path, write_receiver_runtime_status,

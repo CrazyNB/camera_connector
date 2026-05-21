@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::StoredObjectLocation;
 use crate::Result;
 
 pub(crate) const TRANSFER_LOG_FILENAME: &str = "transfer-log.jsonl";
@@ -21,7 +22,10 @@ pub struct TransferRecord {
     pub status: TransferStatus,
     pub original_path: String,
     pub final_filename: String,
-    pub final_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_location: Option<StoredObjectLocation>,
     pub size_bytes: u64,
     pub remote_addr: Option<String>,
     pub source_name: Option<String>,

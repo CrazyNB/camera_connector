@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::StoredObjectLocation;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiveState {
     Waiting,
@@ -17,6 +19,7 @@ pub struct ReceiveProgress {
     pub total_bytes: Option<u64>,
     pub state: ReceiveState,
     pub output_path: Option<PathBuf>,
+    pub output_location: Option<StoredObjectLocation>,
 }
 
 impl ReceiveProgress {
@@ -32,7 +35,8 @@ impl ReceiveProgress {
             bytes_written,
             total_bytes: Some(bytes_written),
             state: ReceiveState::Completed,
-            output_path: Some(output_path),
+            output_path: Some(output_path.clone()),
+            output_location: Some(StoredObjectLocation::local_path(output_path)),
         }
     }
 }

@@ -30,16 +30,16 @@ Current priorities:
 ### 4.1 Phone Hotspot Or LAN FTP Push
 
 1. User starts the receiver on phone/computer.
-2. App shows receiver IP, port, protocol, username, and output folder.
+2. App shows receiver IP, port, protocol, username, and import save location.
 3. User configures the camera FTP upload profile.
 4. Camera sends files to the receiver.
-5. App atomically publishes completed files into a flat inbox, keeps receiver state/logs outside the upload directory, and groups RAW/JPEG pairs.
+5. App atomically publishes completed files into a flat inbox, keeps receiver state/logs outside the upload location, and groups RAW/JPEG pairs.
 
 ### 4.2 Desktop Batch Receiver
 
 1. User starts FTP receiver on Windows/macOS/Linux.
 2. Camera sends selected files or a batch.
-3. Receiver writes all completed files into one configured flat folder, regardless of the camera's remote upload path setting.
+3. Receiver writes all completed files into one configured flat save location, regardless of the camera's remote upload path setting.
 4. App records transfer id, original camera path, final filename, remote address, and optional user-set source name for filtering and virtual display paths.
 
 ### 4.3 AP Mode
@@ -56,6 +56,7 @@ P0:
 - Write uploaded files through a temporary file and publish only on success.
 - Flatten uploaded paths to the final filename only; do not mirror camera-side folders locally.
 - Keep system config, receiver state/logs, and uploaded assets in separate locations.
+- Represent saved objects as platform storage locations, not only desktop filesystem paths.
 - Sanitize uploaded filenames.
 - Group RAW/JPEG/video assets by filename stem.
 - Recognize common RAW formats across vendors: NEF/NRW, CR2/CR3, ARW/SRF/SR2, RAF, RW2/RWL, ORF, PEF, and DNG.
@@ -98,21 +99,22 @@ P2:
 | ID | Requirement | Priority | Acceptance |
 | --- | --- | --- | --- |
 | RX-001 | Start local FTP receiver | P0 | Receiver listens on configured host and port |
-| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, configured accounts, password status, output folder, and state/log folder |
+| RX-002 | Show receiver settings | P0 | CLI/UI shows protocol, host, port, configured accounts, password status, import save location, and state/log location |
 | RX-003 | Accept passive FTP upload | P0 | A client can upload a file through `PASV` + `STOR` |
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Flat safe path handling | P0 | `/DCIM/100CANON/IMG_1001.CR3` lands as `IMG_1001.CR3`; traversal and unsafe filename characters cannot escape output folder |
-| RX-005A | Directory separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload inbox contains camera files and temporary upload files only |
+| RX-005A | Storage separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload inbox contains camera files and temporary upload files only |
 | RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
 | RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
 | RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
-| RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename/path, bytes, protocol, remote address, and optional source name |
+| RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename, platform final location, bytes, protocol, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, source name, remote address, transfer id, and original path; display path uses source name or `IP-###` plus original path without creating local subfolders |
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; FTP and SFTP receivers authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
 | RX-013 | Connected device view | P0 | FTP and SFTP receivers record current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
 | RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, connected-device metadata, runtime status model, and temporary-file publish behavior as FTP |
+| RX-016 | Cross-platform storage backend | P1 | Core write flow uses a storage backend contract; desktop uses local paths, while Android/iOS can save through media/document/photo APIs without leaking platform URIs into receiver protocol logic |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -133,7 +135,7 @@ flowchart LR
   Camera["Camera\nFTP/SFTP upload profile"]
   Network["Phone hotspot / LAN\nAP later"]
   Receiver["Push Receiver\nFTP first"]
-  Sink["Flat File Sink\n.tmp then publish"]
+  Sink["Storage Backend\n.tmp then publish"]
   State["State/Logs\nstatus + devices + transfer log + host key"]
   Index["Asset Index\nformat + RAW/JPEG grouping"]
   CoreConfig["Core Config\naccounts + credential storage"]
@@ -150,7 +152,7 @@ flowchart LR
   UI --> Runtime
 ```
 
-The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
+The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, storage-location model, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
 
 ## 10. Milestones
 

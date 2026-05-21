@@ -2,7 +2,7 @@ use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, CameraConnectorConfig, CameraConnectorService, ImportSource,
     PushProtocol, ReceiverAuthMode, ReceiverConfigRequest, ReceiverRuntimePhase,
-    ReceiverRuntimeStatus, TransferQuery, TransferRecord, TransferStatus,
+    ReceiverRuntimeStatus, StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -57,7 +57,10 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100NIKON/DSC_0001.NEF".to_string(),
             final_filename: "DSC_0001.NEF".to_string(),
-            final_path: output_dir.join("DSC_0001.NEF"),
+            final_path: Some(output_dir.join("DSC_0001.NEF")),
+            final_location: Some(StoredObjectLocation::local_path(
+                output_dir.join("DSC_0001.NEF"),
+            )),
             size_bytes: 42,
             remote_addr: Some("192.168.137.56".to_string()),
             source_name: Some("Z5_2".to_string()),

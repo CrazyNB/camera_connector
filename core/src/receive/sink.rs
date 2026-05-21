@@ -4,9 +4,42 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::{ImporterError, ReceiveProgress, Result};
 
+pub trait ReceiveStorage {
+    type Upload: ReceiveUpload;
+
+    fn begin_write(
+        &self,
+        transfer_id: impl Into<String>,
+        relative_path: &str,
+    ) -> Result<Self::Upload>;
+
+    fn create_dir_all(&self, relative_path: &str) -> Result<()>;
+}
+
+pub trait ReceiveUpload: Write {
+    fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<()>;
+    fn finish(self) -> Result<ReceiveProgress>;
+}
+
 #[derive(Debug, Clone)]
 pub struct LocalFileSink {
     output_dir: PathBuf,
+}
+
+impl ReceiveStorage for LocalFileSink {
+    type Upload = LocalFileUpload;
+
+    fn begin_write(
+        &self,
+        transfer_id: impl Into<String>,
+        relative_path: &str,
+    ) -> Result<Self::Upload> {
+        LocalFileSink::begin_write(self, transfer_id, relative_path)
+    }
+
+    fn create_dir_all(&self, relative_path: &str) -> Result<()> {
+        LocalFileSink::create_dir_all(self, relative_path).map(|_| ())
+    }
 }
 
 impl LocalFileSink {
@@ -99,6 +132,16 @@ impl LocalFileUpload {
             bytes_written,
             final_path,
         ))
+    }
+}
+
+impl ReceiveUpload for LocalFileUpload {
+    fn write_at(&mut self, offset: u64, bytes: &[u8]) -> Result<()> {
+        LocalFileUpload::write_at(self, offset, bytes)
+    }
+
+    fn finish(self) -> Result<ReceiveProgress> {
+        LocalFileUpload::finish(self)
     }
 }
 
