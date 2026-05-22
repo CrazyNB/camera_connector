@@ -155,6 +155,8 @@ The native gateway now routes start/stop through `ReceiverForegroundService`, so
 
 `NativeCoreGateway` polls the native dashboard every 2 seconds while it is open. This keeps receiver status, connected accounts, transfer failures, and newly imported assets moving into Compose without coupling the UI to service internals.
 
+Android 13+ notification permission is treated as a receiver start prerequisite. `AndroidPermissionGateway` checks `POST_NOTIFICATIONS`, `MainActivity` owns the permission launcher, and the Overview screen disables Start until notifications are available.
+
 ## 6. Storage Strategy
 
 MVP strategy:

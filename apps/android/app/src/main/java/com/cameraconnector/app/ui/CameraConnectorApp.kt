@@ -32,11 +32,15 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 
 @Composable
 fun CameraConnectorApp(
     coreGateway: CoreGateway,
     storageGateway: AndroidStorageGateway,
+    notificationPermissionRequired: Boolean,
+    notificationPermissionGranted: Flow<Boolean>,
+    onRequestNotificationPermission: () -> Unit,
 ) {
     val dashboard by coreGateway.observeDashboard().collectAsState(
         initial = DashboardState(
@@ -52,6 +56,7 @@ fun CameraConnectorApp(
             transfers = emptyList(),
         ),
     )
+    val notificationsGranted by notificationPermissionGranted.collectAsState(initial = true)
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(MainTab.Overview) }
 
@@ -74,6 +79,9 @@ fun CameraConnectorApp(
                 when (tab) {
                     MainTab.Overview -> OverviewScreen(
                         dashboard = dashboard,
+                        notificationPermissionRequired = notificationPermissionRequired,
+                        notificationPermissionGranted = notificationsGranted,
+                        onRequestNotificationPermission = onRequestNotificationPermission,
                         onStart = { scope.launch { coreGateway.startReceiver() } },
                         onStop = { scope.launch { coreGateway.stopReceiver() } },
                         modifier = Modifier.padding(padding),
@@ -103,6 +111,9 @@ private enum class MainTab(val label: String, val icon: String) {
 @Composable
 private fun OverviewScreen(
     dashboard: DashboardState,
+    notificationPermissionRequired: Boolean,
+    notificationPermissionGranted: Boolean,
+    onRequestNotificationPermission: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
@@ -125,11 +136,30 @@ private fun OverviewScreen(
                     Text(if (dashboard.receiver.running) "Running" else "Stopped")
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onStart, enabled = !dashboard.receiver.running) {
+                        Button(
+                            onClick = onStart,
+                            enabled = !dashboard.receiver.running && notificationPermissionGranted,
+                        ) {
                             Text("Start")
                         }
                         Button(onClick = onStop, enabled = dashboard.receiver.running) {
                             Text("Stop")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (notificationPermissionRequired && !notificationPermissionGranted) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Notifications", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Allow notifications before starting the receiver.")
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = onRequestNotificationPermission) {
+                            Text("Allow notifications")
                         }
                     }
                 }
