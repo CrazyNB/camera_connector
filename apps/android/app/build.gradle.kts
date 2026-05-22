@@ -3,9 +3,20 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val useNativeCore = providers.gradleProperty("cameraConnector.useNativeCore")
+    .map { it.toBoolean() }
+    .orElse(false)
+val nativeCoreFallbackToPreview = providers.gradleProperty("cameraConnector.nativeCoreFallbackToPreview")
+    .map { it.toBoolean() }
+    .orElse(true)
+
 android {
     namespace = "com.cameraconnector.app"
     compileSdk = 36
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     defaultConfig {
         applicationId = "com.cameraconnector.app"
@@ -15,6 +26,9 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("boolean", "USE_NATIVE_CORE", useNativeCore.get().toString())
+        buildConfigField("boolean", "NATIVE_CORE_FALLBACK_TO_PREVIEW", nativeCoreFallbackToPreview.get().toString())
     }
 }
 

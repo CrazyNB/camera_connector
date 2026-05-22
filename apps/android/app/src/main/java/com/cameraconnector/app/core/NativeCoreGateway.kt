@@ -10,27 +10,27 @@ import org.json.JSONObject
 class NativeCoreGateway(
     private val nativeCore: NativeMobileCore,
     private val stateDir: String?,
-) : CoreGateway {
+) : CoreGateway, AutoCloseable {
     private val dashboard = MutableStateFlow(emptyDashboard())
+
+    init {
+        dashboard.value = loadDashboard()
+    }
 
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
 
     suspend fun refresh() {
         dashboard.value = withContext(Dispatchers.IO) {
-            mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = 50))
+            loadDashboard()
         }
     }
 
     override suspend fun startReceiver() {
-        dashboard.value = dashboard.value.copy(
-            receiver = dashboard.value.receiver.copy(running = true),
-        )
+        refresh()
     }
 
     override suspend fun stopReceiver() {
-        dashboard.value = dashboard.value.copy(
-            receiver = dashboard.value.receiver.copy(running = false),
-        )
+        refresh()
     }
 
     override suspend fun saveReceiverSettings(settings: ReceiverSettings) {
@@ -46,6 +46,13 @@ class NativeCoreGateway(
         }
         refresh()
     }
+
+    override fun close() {
+        nativeCore.close()
+    }
+
+    private fun loadDashboard(): DashboardState =
+        mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = 50))
 
     private fun mapDashboard(value: JSONObject): DashboardState {
         val receiverStatus = value.optJSONObject("receiver_status")

@@ -110,7 +110,8 @@ The Android source now has the Kotlin side of that bridge:
 
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
-- `PreviewCoreGateway` remains the default app entry until Android ABI `.so` files are packaged into the APK.
+- `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`.
+- `PreviewCoreGateway` remains the default app entry until foreground-service receiver binding is complete.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
@@ -138,7 +139,13 @@ scripts/verify_android_build.ps1
 
 That script builds the native arm64 library, assembles the debug APK, and checks that the APK contains `lib/arm64-v8a/libcamera_connector_ffi.so`.
 
-The remaining bridge work is wiring `NativeCoreGateway` as a selectable runtime app gateway after device-side smoke testing confirms the native library loads cleanly.
+Native gateway builds can be produced without editing source code:
+
+```text
+gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
+```
+
+The remaining bridge work is making `ReceiverForegroundService` own native receiver start/stop, then using the native gateway build for device-side smoke testing once the service can report real receiver state.
 
 ## 6. Storage Strategy
 

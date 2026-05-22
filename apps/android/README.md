@@ -18,9 +18,10 @@ The Android source now has a native gateway boundary:
 
 - `NativeMobileCore` owns the native handle and JSON envelope parsing.
 - `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
+- `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
 - Rust exports matching JNI symbols from `core-ffi`.
 
-`PreviewCoreGateway` remains the default entry point until Android ABI `.so` files are built from `core-ffi` and linked into the APK.
+`PreviewCoreGateway` remains the default entry point while receiver service binding is still being implemented. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.
 
 ## Local Build Prerequisites
 
@@ -38,6 +39,13 @@ Run the Android build check from the repository root. It builds the Rust native 
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
+```
+
+To generate a debug APK that boots through the native gateway:
+
+```powershell
+cd apps\android
+%LOCALAPPDATA%\CameraConnectorToolchains\gradle-9.5.1\bin\gradle.bat :app:assembleDebug --no-daemon -PcameraConnector.useNativeCore=true
 ```
 
 To rebuild only the Rust native library and copy it into the APK source tree:
