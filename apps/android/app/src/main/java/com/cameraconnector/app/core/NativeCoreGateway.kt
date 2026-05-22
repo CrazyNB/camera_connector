@@ -1,6 +1,8 @@
 package com.cameraconnector.app.core
 
+import com.cameraconnector.app.service.ReceiverServiceController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,6 +12,7 @@ import org.json.JSONObject
 class NativeCoreGateway(
     private val nativeCore: NativeMobileCore,
     private val stateDir: String?,
+    private val receiverServiceController: ReceiverServiceController,
 ) : CoreGateway, AutoCloseable {
     private val dashboard = MutableStateFlow(emptyDashboard())
 
@@ -26,17 +29,13 @@ class NativeCoreGateway(
     }
 
     override suspend fun startReceiver() {
-        withContext(Dispatchers.IO) {
-            nativeCore.startReceiver()
-        }
-        refresh()
+        receiverServiceController.startReceiver()
+        refreshAfterServiceCommand()
     }
 
     override suspend fun stopReceiver() {
-        withContext(Dispatchers.IO) {
-            nativeCore.stopReceiver()
-        }
-        refresh()
+        receiverServiceController.stopReceiver()
+        refreshAfterServiceCommand()
     }
 
     override suspend fun saveReceiverSettings(settings: ReceiverSettings) {
@@ -59,6 +58,11 @@ class NativeCoreGateway(
 
     private fun loadDashboard(): DashboardState =
         mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = 50))
+
+    private suspend fun refreshAfterServiceCommand() {
+        delay(250)
+        refresh()
+    }
 
     private fun mapDashboard(value: JSONObject): DashboardState {
         val receiverStatus = value.optJSONObject("receiver_status")

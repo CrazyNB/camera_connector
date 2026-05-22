@@ -8,26 +8,82 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.cameraconnector.app.core.NativeMobileCore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class ReceiverForegroundService : Service() {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var nativeCore: NativeMobileCore? = null
+
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("Camera Connector")
-            .setContentText("Receiver is ready for camera uploads")
-            .setOngoing(true)
-            .build()
+        return when (intent?.action) {
+            ACTION_STOP -> {
+                serviceScope.launch {
+                    stopNativeReceiver()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf(startId)
+                }
+                START_NOT_STICKY
+            }
 
-        startForeground(NOTIFICATION_ID, notification)
-        return START_STICKY
+            else -> {
+                startForeground(NOTIFICATION_ID, notification("Starting receiver"))
+                val configPath = intent?.getStringExtra(EXTRA_CONFIG_PATH)
+                serviceScope.launch {
+                    startNativeReceiver(configPath)
+                }
+                START_STICKY
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        stopNativeReceiver()
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun startNativeReceiver(configPath: String?) {
+        runCatching {
+            if (nativeCore != null) {
+                startForeground(NOTIFICATION_ID, notification("Receiver is already running"))
+                return
+            }
+            val core = nativeCore ?: NativeMobileCore(configPath).also { nativeCore = it }
+            val status = core.startReceiver()
+            val localAddr = status.optString("local_addr").ifBlank { "ready" }
+            startForeground(NOTIFICATION_ID, notification("Receiver running at $localAddr"))
+        }.onFailure { error ->
+            startForeground(NOTIFICATION_ID, notification("Receiver failed: ${error.message}"))
+        }
+    }
+
+    private fun stopNativeReceiver() {
+        runCatching {
+            nativeCore?.stopReceiver()
+        }
+        nativeCore?.close()
+        nativeCore = null
+    }
+
+    private fun notification(message: String) =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("Camera Connector")
+            .setContentText(message)
+            .setOngoing(true)
+            .build()
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -44,7 +100,24 @@ class ReceiverForegroundService : Service() {
     }
 
     companion object {
+        const val ACTION_START = "com.cameraconnector.app.receiver.START"
+        const val ACTION_STOP = "com.cameraconnector.app.receiver.STOP"
+
         private const val CHANNEL_ID = "camera_connector_receiver"
         private const val NOTIFICATION_ID = 1201
+        private const val EXTRA_CONFIG_PATH = "config_path"
+        private const val EXTRA_STATE_DIR = "state_dir"
+
+        fun startIntent(context: Context, configPath: String, stateDir: String): Intent =
+            Intent(context, ReceiverForegroundService::class.java)
+                .setAction(ACTION_START)
+                .putExtra(EXTRA_CONFIG_PATH, configPath)
+                .putExtra(EXTRA_STATE_DIR, stateDir)
+
+        fun stopIntent(context: Context, configPath: String, stateDir: String): Intent =
+            Intent(context, ReceiverForegroundService::class.java)
+                .setAction(ACTION_STOP)
+                .putExtra(EXTRA_CONFIG_PATH, configPath)
+                .putExtra(EXTRA_STATE_DIR, stateDir)
     }
 }

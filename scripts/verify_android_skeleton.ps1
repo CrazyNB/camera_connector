@@ -35,6 +35,7 @@ Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGat
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt"
+Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverServiceController.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt"
 Assert-File "apps\android\README.md"
 
@@ -49,12 +50,18 @@ Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "ReceiverForegro
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt" "CoreGatewayFactory\.create"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "BuildConfig\.USE_NATIVE_CORE"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "NativeCoreGateway"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "ReceiverServiceController"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" 'System\.loadLibrary\("camera_connector_ffi"\)'
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "NativeEnvelope"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "startReceiverJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "stopReceiverJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "class NativeCoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "CoreGateway"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "receiverServiceController\.startReceiver"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "receiverServiceController\.stopReceiver"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "ACTION_START"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "ACTION_STOP"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "NativeMobileCore"
 Assert-Contains "docs\product\android-app-architecture.md" "Kotlin \+ Jetpack Compose"
 Assert-Contains "docs\product\android-app-architecture.md" "Rust core"
 

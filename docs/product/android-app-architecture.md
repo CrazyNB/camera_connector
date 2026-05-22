@@ -113,7 +113,9 @@ The Android source now has the Kotlin side of that bridge:
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
 - `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`.
-- `PreviewCoreGateway` remains the default app entry until foreground-service receiver binding is complete.
+- `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
+- `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
+- `PreviewCoreGateway` remains the default app entry until native service smoke testing is complete.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
@@ -149,7 +151,7 @@ Native gateway builds can be produced without editing source code:
 gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 ```
 
-The native gateway can now call core start/stop directly. The remaining bridge work is moving those calls behind `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status.
+The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. The remaining bridge work is status polling, permission gating, and native gateway device smoke testing.
 
 ## 6. Storage Strategy
 

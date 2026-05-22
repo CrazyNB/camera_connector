@@ -19,9 +19,10 @@ The Android source now has a native gateway boundary:
 - `NativeMobileCore` owns the native handle and JSON envelope parsing.
 - `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
+- `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
 
-`PreviewCoreGateway` remains the default entry point while receiver service binding is still being implemented. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.
+`PreviewCoreGateway` remains the default entry point while native service smoke testing is still in progress. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.
 
 ## Local Build Prerequisites
 
