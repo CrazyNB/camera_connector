@@ -120,6 +120,7 @@ The Android source now has the Kotlin side of that bridge:
 - Receiver setup also flows through the gateway: Compose can save protocol, bind host, FTP port, and SFTP port while leaving Android output storage on the current app-private inbox until SAF or MediaStore selection is wired.
 - Transfer diagnostics are mapped from the native dashboard into Compose: transfer counts remain visible and recent failed transfers show the core-provided virtual display path plus error text.
 - Account connection diagnostics are also mapped: Overview can show active connection count, latest remote endpoint, last seen time, and last disconnected time without treating IP address as account identity.
+- Receiver runtime diagnostics are mapped as well: Overview shows phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 

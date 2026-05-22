@@ -21,10 +21,14 @@ data class DashboardState(
 
 data class ReceiverState(
     val running: Boolean,
+    val phase: String,
     val protocol: String,
+    val authMode: String,
+    val accountCount: Int,
     val host: String,
     val port: Int,
     val outputLabel: String,
+    val message: String?,
 )
 
 data class ReceiverSettings(
@@ -65,10 +69,14 @@ class PreviewCoreGateway : CoreGateway {
         DashboardState(
             receiver = ReceiverState(
                 running = false,
+                phase = "Stopped",
                 protocol = "FTP",
+                authMode = "Accounts",
+                accountCount = 1,
                 host = "192.168.137.1",
                 port = 2121,
                 outputLabel = "Choose inbox folder",
+                message = null,
             ),
             accounts = listOf(
                 DeviceAccount(
@@ -92,13 +100,20 @@ class PreviewCoreGateway : CoreGateway {
 
     override suspend fun startReceiver() {
         dashboard.value = dashboard.value.copy(
-            receiver = dashboard.value.receiver.copy(running = true),
+            receiver = dashboard.value.receiver.copy(
+                running = true,
+                phase = "Running",
+                message = null,
+            ),
         )
     }
 
     override suspend fun stopReceiver() {
         dashboard.value = dashboard.value.copy(
-            receiver = dashboard.value.receiver.copy(running = false),
+            receiver = dashboard.value.receiver.copy(
+                running = false,
+                phase = "Stopped",
+            ),
         )
     }
 
@@ -106,10 +121,14 @@ class PreviewCoreGateway : CoreGateway {
         dashboard.value = dashboard.value.copy(
             receiver = ReceiverState(
                 running = dashboard.value.receiver.running,
+                phase = dashboard.value.receiver.phase,
                 protocol = settings.protocol,
+                authMode = dashboard.value.receiver.authMode,
+                accountCount = dashboard.value.receiver.accountCount,
                 host = settings.host,
                 port = if (settings.protocol == "SFTP") settings.sftpPort else settings.ftpPort,
                 outputLabel = settings.outputLabel,
+                message = dashboard.value.receiver.message,
             ),
         )
     }

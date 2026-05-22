@@ -50,10 +50,14 @@ fun CameraConnectorApp(
         initial = DashboardState(
             receiver = com.cameraconnector.app.core.ReceiverState(
                 running = false,
+                phase = "Unknown",
                 protocol = "FTP",
+                authMode = "Unknown",
+                accountCount = 0,
                 host = "0.0.0.0",
                 port = 2121,
                 outputLabel = "Not configured",
+                message = null,
             ),
             accounts = emptyList(),
             inbox = emptyList(),
@@ -166,7 +170,8 @@ private fun OverviewScreen(
                     Text("Receiver", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     Text("${dashboard.receiver.protocol} ${dashboard.receiver.host}:${dashboard.receiver.port}")
-                    Text(if (dashboard.receiver.running) "Running" else "Stopped")
+                    Text("${dashboard.receiver.phase} / ${dashboard.receiver.authMode} / accounts=${dashboard.receiver.accountCount}")
+                    dashboard.receiver.message?.let { Text(it) }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(

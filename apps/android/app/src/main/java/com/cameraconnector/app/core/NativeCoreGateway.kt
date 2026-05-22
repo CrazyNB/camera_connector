@@ -99,11 +99,20 @@ class NativeCoreGateway(
         return DashboardState(
             receiver = ReceiverState(
                 running = receiverStatus?.optString("phase") == "Running",
+                phase = receiverStatus?.optString("phase").orEmpty()
+                    .ifBlank { "Unknown" },
                 protocol = protocol,
+                authMode = receiverStatus?.optString("auth_mode").orEmpty()
+                    .ifBlank { "Unknown" },
+                accountCount = receiverStatus?.optInt("account_count") ?: 0,
                 host = host,
                 port = port,
                 outputLabel = paths?.optString("output_dir").orEmpty()
                     .ifBlank { "Choose inbox folder" },
+                message = receiverStatus?.takeIf { !it.isNull("message") }
+                    ?.optString("message")
+                    .orEmpty()
+                    .takeIf { it.isNotBlank() },
             ),
             accounts = mapAccounts(value),
             inbox = mapInbox(assets),
@@ -222,10 +231,14 @@ class NativeCoreGateway(
         DashboardState(
             receiver = ReceiverState(
                 running = false,
+                phase = "Unknown",
                 protocol = "FTP",
+                authMode = "Unknown",
+                accountCount = 0,
                 host = "0.0.0.0",
                 port = 2121,
                 outputLabel = "Choose inbox folder",
+                message = null,
             ),
             accounts = emptyList(),
             inbox = emptyList(),
