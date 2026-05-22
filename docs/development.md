@@ -98,6 +98,12 @@ List transfer records and filter by source name, original camera path, final fil
 target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --source-name "Z5_2" --original-path DCIM
 ```
 
+Use `--status completed` or `--status failed` when triaging receiver health:
+
+```powershell
+target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --status failed
+```
+
 For mobile-style views that cannot scan a real output folder, build groups from the transfer log:
 
 ```powershell
@@ -116,7 +122,7 @@ Read the app dashboard model in one command:
 target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50
 ```
 
-Dashboard output includes receiver status, safe account summaries, transfer health counts, connected devices, asset summary, and paged assets.
+Dashboard output includes receiver status, safe account summaries, transfer health counts, recent failed transfers, connected devices, asset summary, and paged assets.
 
 Use JSON output for UI shells or automation:
 

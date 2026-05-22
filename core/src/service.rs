@@ -30,6 +30,7 @@ pub struct ReceiverConfigRequest {
 
 #[derive(Debug, Clone, Default)]
 pub struct TransferQuery {
+    pub status: Option<TransferStatus>,
     pub transfer_id: Option<String>,
     pub original_path: Option<String>,
     pub final_filename: Option<String>,
@@ -115,6 +116,7 @@ pub struct CameraConnectorDashboard {
     pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
     pub transfers: TransferSummary,
+    pub recent_failures: Vec<TransferRecordView>,
     pub assets: AssetGroupPage,
 }
 
@@ -300,6 +302,37 @@ impl CameraConnectorService {
         Ok(summarize_transfers(&records))
     }
 
+    pub fn recent_failed_transfers(
+        &self,
+        output_dir: impl AsRef<Path>,
+        query: TransferQuery,
+        limit: usize,
+    ) -> Result<Vec<TransferRecordView>> {
+        let mut views = self.transfers(
+            output_dir,
+            TransferQuery {
+                status: Some(TransferStatus::Failed),
+                ..query
+            },
+        )?;
+        views.sort_by(|left, right| {
+            let left_at = left
+                .record
+                .completed_at_ms
+                .unwrap_or(left.record.started_at_ms);
+            let right_at = right
+                .record
+                .completed_at_ms
+                .unwrap_or(right.record.started_at_ms);
+            right_at
+                .cmp(&left_at)
+                .then_with(|| right.record.started_at_ms.cmp(&left.record.started_at_ms))
+                .then_with(|| right.record.transfer_id.cmp(&left.record.transfer_id))
+        });
+        views.truncate(limit);
+        Ok(views)
+    }
+
     pub fn connected_devices(
         &self,
         output_dir: impl AsRef<Path>,
@@ -343,6 +376,11 @@ impl CameraConnectorService {
                 state_dir,
                 transfer_query_from_asset_query(&asset_query),
             )?,
+            recent_failures: self.recent_failed_transfers(
+                state_dir,
+                transfer_query_from_asset_query(&asset_query),
+                5,
+            )?,
             assets: self.transfer_asset_group_page_with_query(
                 state_dir,
                 asset_query,
@@ -355,6 +393,7 @@ impl CameraConnectorService {
 
 fn transfer_query_from_asset_query(query: &AssetGroupQuery) -> TransferQuery {
     TransferQuery {
+        status: None,
         transfer_id: None,
         original_path: query.original_path.clone(),
         final_filename: None,
@@ -590,10 +629,14 @@ fn transfer_matches(
     accounts: &BTreeMap<String, ReceiverAccountConfig>,
 ) -> bool {
     query
-        .username
-        .as_ref()
-        .map(|expected| record.username.as_ref() == Some(expected))
+        .status
+        .map(|expected| record.status == expected)
         .unwrap_or(true)
+        && query
+            .username
+            .as_ref()
+            .map(|expected| record.username.as_ref() == Some(expected))
+            .unwrap_or(true)
         && query
             .source_name
             .as_ref()

@@ -156,6 +156,8 @@ enum Command {
         #[arg(long, alias = "path")]
         state: PathBuf,
         #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
         transfer_id: Option<String>,
         #[arg(long)]
         original_path: Option<String>,
@@ -468,6 +470,7 @@ async fn main() -> Result<()> {
         Some(Command::Transfers {
             config,
             state,
+            status,
             transfer_id,
             original_path,
             final_filename,
@@ -479,6 +482,7 @@ async fn main() -> Result<()> {
             for view in service.transfers(
                 state,
                 TransferQuery {
+                    status: status.as_deref().map(parse_transfer_status).transpose()?,
                     transfer_id,
                     original_path,
                     final_filename,
@@ -526,7 +530,7 @@ async fn main() -> Result<()> {
 fn transfer_view_line(view: &TransferRecordView) -> String {
     let record = &view.record;
     format!(
-        "{}\t{:?}\t{}\t{}\t{}\tusername={}\tremote={}\tsource={}\tdisplay={}\tlocation_kind={}\tlocation={}",
+        "{}\t{:?}\t{}\t{}\t{}\tusername={}\tremote={}\tsource={}\tdisplay={}\tlocation_kind={}\tlocation={}\terror={}",
         record.transfer_id,
         record.status,
         record.final_filename,
@@ -537,7 +541,8 @@ fn transfer_view_line(view: &TransferRecordView) -> String {
         view.display_source.as_deref().unwrap_or("-"),
         view.virtual_display_path,
         view.final_location_kind.as_deref().unwrap_or("-"),
-        view.final_location_label.as_deref().unwrap_or("-")
+        view.final_location_label.as_deref().unwrap_or("-"),
+        record.error.as_deref().unwrap_or("-")
     )
 }
 
@@ -581,6 +586,9 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
         dashboard.transfers.completed_count,
         dashboard.transfers.failed_count
     );
+    for view in dashboard.recent_failures {
+        println!("failure\t{}", transfer_view_line(&view));
+    }
     println!(
         "summary\t{}",
         asset_group_page_summary_line(&dashboard.assets).trim_start_matches("summary\t")
@@ -810,6 +818,14 @@ fn parse_source(value: &str) -> Result<ImportSource> {
         "sftp" | "sftp-push" => Ok(ImportSource::SftpPush),
         "manual" | "manual-drop" => Ok(ImportSource::ManualDrop),
         _ => Err(camera_connector_core::ImporterError::UnsupportedProtocol),
+    }
+}
+
+fn parse_transfer_status(value: &str) -> Result<TransferStatus> {
+    match value.to_ascii_lowercase().as_str() {
+        "completed" | "complete" | "ok" => Ok(TransferStatus::Completed),
+        "failed" | "fail" | "error" => Ok(TransferStatus::Failed),
+        _ => Err(camera_connector_core::ImporterError::InvalidUploadPath),
     }
 }
 
@@ -1054,6 +1070,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_transfers_status_filter_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "transfers",
+            "--state",
+            "C:\\CameraConnector\\state",
+            "--status",
+            "failed",
+        ])
+        .expect("transfers status command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Transfers {
+                status: Some(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn parses_dashboard_command() {
         let cli = Cli::try_parse_from([
             "camera-connector",
@@ -1110,6 +1147,28 @@ mod tests {
                 completed_count: 1,
                 failed_count: 1,
             },
+            recent_failures: vec![TransferRecordView {
+                record: TransferRecord {
+                    transfer_id: "ftp:failed".to_string(),
+                    protocol: "ftp".to_string(),
+                    status: TransferStatus::Failed,
+                    original_path: "IMG_0002.CR3".to_string(),
+                    final_filename: "IMG_0002.CR3".to_string(),
+                    final_path: None,
+                    final_location: None,
+                    size_bytes: 0,
+                    username: Some("z5".to_string()),
+                    remote_addr: Some("192.168.137.56".to_string()),
+                    source_name: Some("Camera".to_string()),
+                    started_at_ms: 11,
+                    completed_at_ms: Some(21),
+                    error: Some("connection reset".to_string()),
+                },
+                display_source: Some("Camera".to_string()),
+                virtual_display_path: "Camera/IMG_0002.CR3".to_string(),
+                final_location_kind: None,
+                final_location_label: None,
+            }],
             devices: vec![camera_connector_core::ConnectedDeviceView {
                 device: camera_connector_core::ConnectedDevice {
                     remote_addr: "192.168.137.56".to_string(),
@@ -1156,6 +1215,8 @@ mod tests {
         assert!(!json.contains("password_hash"));
         assert!(json.contains("\"transfers\""));
         assert!(json.contains("\"failed_count\": 1"));
+        assert!(json.contains("\"recent_failures\""));
+        assert!(json.contains("\"connection reset\""));
         assert!(json.contains("\"devices\""));
         assert!(json.contains("\"assets\""));
         assert!(json.contains("\"group_key\": \"IMG_0001\""));
@@ -1191,8 +1252,40 @@ mod tests {
         let line = transfer_view_line(&view);
 
         assert!(line.contains("username=-"));
+        assert!(line.contains("error=-"));
         assert!(line.contains("location_kind=document_uri"));
         assert!(line.contains("location=content://camera-connector/IMG_0001.DNG"));
+    }
+
+    #[test]
+    fn transfer_view_line_prints_failure_error() {
+        let view = TransferRecordView {
+            record: TransferRecord {
+                transfer_id: "ftp:failed".to_string(),
+                protocol: "ftp".to_string(),
+                status: TransferStatus::Failed,
+                original_path: "IMG_0002.CR3".to_string(),
+                final_filename: "IMG_0002.CR3".to_string(),
+                final_path: None,
+                final_location: None,
+                size_bytes: 0,
+                username: Some("z5".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Camera".to_string()),
+                started_at_ms: 11,
+                completed_at_ms: Some(21),
+                error: Some("connection reset".to_string()),
+            },
+            display_source: Some("Camera".to_string()),
+            virtual_display_path: "Camera/IMG_0002.CR3".to_string(),
+            final_location_kind: None,
+            final_location_label: None,
+        };
+
+        let line = transfer_view_line(&view);
+
+        assert!(line.contains("Failed"));
+        assert!(line.contains("error=connection reset"));
     }
 
     #[test]

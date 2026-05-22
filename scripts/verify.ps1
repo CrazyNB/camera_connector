@@ -231,6 +231,26 @@ if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 
+$transferLog = Join-Path $pushState "transfer-log.jsonl"
+$nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$failedTransfer = [ordered]@{
+    transfer_id = "ftp:verify-failed"
+    protocol = "ftp"
+    status = "Failed"
+    original_path = "IMG_9999.CR3"
+    final_filename = "IMG_9999.CR3"
+    final_path = $null
+    final_location = $null
+    size_bytes = 0
+    username = "verify"
+    remote_addr = "192.168.137.56"
+    source_name = "Verify Camera"
+    started_at_ms = $nowMs
+    completed_at_ms = $nowMs
+    error = "simulated failure"
+}
+($failedTransfer | ConvertTo-Json -Compress) | Add-Content -LiteralPath $transferLog
+
 & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
@@ -278,8 +298,11 @@ if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit
 if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*" }).Count -lt 1) {
     throw "dashboard did not expose account summary"
 }
-if (($dashboardOutput | Where-Object { $_ -like "transfers*total=2*completed=2*failed=0*" }).Count -lt 1) {
+if (($dashboardOutput | Where-Object { $_ -like "transfers*total=3*completed=2*failed=1*" }).Count -lt 1) {
     throw "dashboard did not expose transfer summary"
+}
+if (($dashboardOutput | Where-Object { $_ -like "failure*ftp:verify-failed*Failed*error=simulated failure*" }).Count -lt 1) {
+    throw "dashboard did not expose recent failure rows"
 }
 if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
     throw "dashboard did not expose filtered asset rows"
@@ -295,8 +318,11 @@ if ($dashboardJson.assets.summary.group_count -ne 2) {
 if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
     throw "dashboard json did not expose safe account summary"
 }
-if ($dashboardJson.transfers.total_count -ne 2 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 0) {
+if ($dashboardJson.transfers.total_count -ne 3 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 1) {
     throw "dashboard json did not expose transfer summary"
+}
+if ($dashboardJson.recent_failures.Count -ne 1 -or $dashboardJson.recent_failures[0].record.error -ne "simulated failure") {
+    throw "dashboard json did not expose recent failures"
 }
 if (($dashboardJsonOutput -join "`n") -like "*password_hash*") {
     throw "dashboard json exposed password hash"
@@ -322,16 +348,22 @@ if (($transfersOutput | Where-Object { $_ -like "*username=verify*display=Verify
 }
 Write-Output $transfersOutput
 
+$failedTransfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --username "verify" --status failed
+if ($LASTEXITCODE -ne 0) { throw "failed transfers status smoke failed" }
+if (($failedTransfersOutput | Where-Object { $_ -like "*ftp:verify-failed*Failed*error=simulated failure*" }).Count -ne 1) {
+    throw "failed transfers status filter did not return expected failure"
+}
+Write-Output $failedTransfersOutput
+
 $received = Get-Item -LiteralPath (Join-Path $pushOutput "IMG_1234.CR3")
 $duplicate = Get-Item -LiteralPath (Join-Path $pushOutput "IMG_1234 (1).CR3")
 if ($received.Length -le 0) { throw "received output is empty" }
 if ($duplicate.Length -le 0) { throw "duplicate output is empty" }
 
-$transferLog = Join-Path $pushState "transfer-log.jsonl"
 if (!(Test-Path -LiteralPath $transferLog)) { throw "transfer log was not written" }
 $transferRecords = @(Get-Content -LiteralPath $transferLog | ForEach-Object { $_ | ConvertFrom-Json })
-if ($transferRecords.Count -ne 2) { throw "expected 2 transfer log records, found $($transferRecords.Count)" }
-if (($transferRecords | Where-Object { $_.username -eq "verify" -and $_.source_name -eq "Verify Camera" }).Count -ne 2) {
+if ($transferRecords.Count -ne 3) { throw "expected 3 transfer log records, found $($transferRecords.Count)" }
+if (($transferRecords | Where-Object { $_.username -eq "verify" -and $_.source_name -eq "Verify Camera" }).Count -ne 3) {
     throw "transfer log username/source_name was not recorded"
 }
 

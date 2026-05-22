@@ -160,6 +160,75 @@ fn service_summarizes_transfer_statuses() {
 }
 
 #[test]
+fn service_filters_failed_transfer_views_by_status() {
+    let state_dir = unique_temp_dir("service-transfer-status-filter");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:ok".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "IMG_0001.CR3".to_string(),
+            final_filename: "IMG_0001.CR3".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_0001.CR3",
+            )),
+            size_bytes: 42,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("completed transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:failed".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Failed,
+            original_path: "IMG_0002.CR3".to_string(),
+            final_filename: "IMG_0002.CR3".to_string(),
+            final_path: None,
+            final_location: None,
+            size_bytes: 0,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: Some("connection reset".to_string()),
+        },
+    )
+    .expect("failed transfer should append");
+
+    let service = CameraConnectorService::new(None);
+    let transfers = service
+        .transfers(
+            &state_dir,
+            TransferQuery {
+                status: Some(TransferStatus::Failed),
+                username: Some("z5".to_string()),
+                ..TransferQuery::default()
+            },
+        )
+        .expect("failed transfers should load");
+
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].record.status, TransferStatus::Failed);
+    assert_eq!(
+        transfers[0].record.error.as_deref(),
+        Some("connection reset")
+    );
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_resolves_transfer_display_source_from_current_account_name() {
     let config_path = unique_temp_path("service-transfer-account-config");
     let state_dir = unique_temp_dir("service-transfer-account-state");
@@ -812,6 +881,26 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
         },
     )
     .expect("transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:dashboard-failed".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Failed,
+            original_path: "DCIM/100NIKON/DSC_0100.NEF".to_string(),
+            final_filename: "DSC_0100.NEF".to_string(),
+            final_path: None,
+            final_location: None,
+            size_bytes: 0,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Old Name".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: Some("connection reset".to_string()),
+        },
+    )
+    .expect("failed transfer should append");
 
     let service = CameraConnectorService::new(Some(config_path.clone()));
     let dashboard = service
@@ -840,6 +929,14 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     assert_eq!(dashboard.accounts[0].username, "z5");
     assert_eq!(dashboard.accounts[0].device_name, "Studio Z5");
     assert!(dashboard.accounts[0].password_configured);
+    assert_eq!(dashboard.transfers.total_count, 2);
+    assert_eq!(dashboard.transfers.completed_count, 1);
+    assert_eq!(dashboard.transfers.failed_count, 1);
+    assert_eq!(dashboard.recent_failures.len(), 1);
+    assert_eq!(
+        dashboard.recent_failures[0].record.error.as_deref(),
+        Some("connection reset")
+    );
     assert_eq!(dashboard.assets.summary.group_count, 1);
     assert_eq!(dashboard.assets.groups.len(), 1);
     assert_eq!(
