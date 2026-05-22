@@ -18,6 +18,17 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         call { saveReceiverSettingsJson(handle, patch.toString()) }
     }
 
+    fun saveAndroidReceiverDefaults(outputDir: String, stateDir: String) {
+        val patch = JSONObject()
+            .put("protocol", "ftp")
+            .put("bind_host", "0.0.0.0")
+            .put("ftp_port", 2121)
+            .put("sftp_port", 2222)
+            .put("output_dir", outputDir)
+            .put("state_dir", stateDir)
+        call { saveReceiverSettingsJson(handle, patch.toString()) }
+    }
+
     fun saveDeviceAccount(account: DeviceAccount, password: String?) {
         call {
             saveDeviceAccountJson(

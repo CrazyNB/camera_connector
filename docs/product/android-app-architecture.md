@@ -162,7 +162,8 @@ Android 13+ notification permission is treated as a receiver start prerequisite.
 MVP strategy:
 
 - Config/state: app-private storage.
-- Output/inbox: user-selected SAF document tree.
+- Current native smoke inbox: app-private `filesDir/inbox`.
+- Future user-facing output/inbox: user-selected SAF document tree.
 - Display path: virtual camera path from transfer log, not Android filesystem path.
 
 Android URI values stay inside the storage gateway. The dashboard and inbox still use product concepts: source name, username, transfer id, original path, format, duplicate count, and final location kind.

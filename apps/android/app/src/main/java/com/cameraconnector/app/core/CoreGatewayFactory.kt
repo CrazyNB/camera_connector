@@ -14,10 +14,17 @@ object CoreGatewayFactory {
         return runCatching {
             val appContext = context.applicationContext
             val configFile = File(appContext.filesDir, "camera-connector.json")
+            val inboxDir = File(appContext.filesDir, "inbox").also { it.mkdirs() }
             val stateDir = File(appContext.filesDir, "state").also { it.mkdirs() }
+            val nativeCore = NativeMobileCore(configFile.absolutePath).also {
+                it.saveAndroidReceiverDefaults(
+                    outputDir = inboxDir.absolutePath,
+                    stateDir = stateDir.absolutePath,
+                )
+            }
 
             NativeCoreGateway(
-                nativeCore = NativeMobileCore(configFile.absolutePath),
+                nativeCore = nativeCore,
                 stateDir = stateDir.absolutePath,
                 receiverServiceController = ReceiverServiceController(
                     appContext,
