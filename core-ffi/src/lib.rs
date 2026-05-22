@@ -1,3 +1,5 @@
+use std::ffi::{CStr, CString};
+use std::os::raw::c_char;
 use std::path::PathBuf;
 
 use camera_connector_core::{
@@ -5,6 +7,7 @@ use camera_connector_core::{
     ReceiverSettingsConfig, ReceiverSettingsUpdate,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MobileCoreError {
@@ -12,6 +15,14 @@ pub enum MobileCoreError {
     Core(#[from] ImporterError),
     #[error("invalid protocol: {0}")]
     InvalidProtocol(String),
+    #[error("mobile core pointer is null")]
+    NullCore,
+    #[error("input pointer is null: {0}")]
+    NullInput(&'static str),
+    #[error("input is not valid UTF-8: {0}")]
+    InvalidUtf8(&'static str),
+    #[error("response contains an interior nul byte")]
+    InteriorNul,
     #[error("{0}")]
     Json(#[from] serde_json::Error),
 }
@@ -131,4 +142,178 @@ fn parse_protocol(protocol: String) -> MobileCoreResult<PushProtocol> {
 #[allow(dead_code)]
 fn _assert_settings_config_is_serializable(settings: &ReceiverSettingsConfig) -> String {
     serde_json::to_string(settings).expect("receiver settings should serialize")
+}
+
+/// # Safety
+///
+/// `config_path` must be either null or a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_create(
+    config_path: *const c_char,
+) -> *mut MobileCore {
+    let config_path = optional_c_string(config_path).ok().flatten();
+    Box::into_raw(Box::new(MobileCore::new(config_path)))
+}
+
+/// # Safety
+///
+/// `core` must be a pointer returned by `camera_connector_mobile_core_create`.
+/// Passing the same pointer more than once is invalid.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_destroy(core: *mut MobileCore) {
+    if !core.is_null() {
+        drop(Box::from_raw(core));
+    }
+}
+
+/// # Safety
+///
+/// `value` must be a pointer returned by one of this crate's string-returning
+/// FFI functions. Passing the same pointer more than once is invalid.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_free_string(value: *mut c_char) {
+    if !value.is_null() {
+        drop(CString::from_raw(value));
+    }
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_config_path(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| Ok(json!(core_ref(core)?.config_path())))
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_default_state_dir(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| Ok(json!(core_ref(core)?.default_state_dir())))
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `state_dir` must be either null or a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_dashboard_json(
+    core: *const MobileCore,
+    state_dir: *const c_char,
+    offset: u32,
+    limit: u32,
+) -> *mut c_char {
+    ffi_response(|| {
+        let dashboard =
+            core_ref(core)?.dashboard_json(optional_c_string(state_dir)?, offset, limit)?;
+        parse_json_value(&dashboard)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `patch_json` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_save_receiver_settings_json(
+    core: *const MobileCore,
+    patch_json: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let patch_json = required_c_string(patch_json, "patch_json")?;
+        let patch = serde_json::from_str::<MobileReceiverSettingsPatch>(&patch_json)?;
+        let settings = core_ref(core)?.save_receiver_settings_json(patch)?;
+        parse_json_value(&settings)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `username` and `device_name` must be valid, null-terminated UTF-8 C strings.
+/// `password` must be either null or a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_save_device_account_json(
+    core: *const MobileCore,
+    username: *const c_char,
+    password: *const c_char,
+    device_name: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let username = required_c_string(username, "username")?;
+        let password = optional_c_string(password)?;
+        let device_name = required_c_string(device_name, "device_name")?;
+        let account = core_ref(core)?.save_device_account_json(username, password, device_name)?;
+        parse_json_value(&account)
+    })
+}
+
+fn parse_json_value(json: &str) -> MobileCoreResult<Value> {
+    Ok(serde_json::from_str(json)?)
+}
+
+fn core_ref<'a>(core: *const MobileCore) -> MobileCoreResult<&'a MobileCore> {
+    if core.is_null() {
+        Err(MobileCoreError::NullCore)
+    } else {
+        Ok(unsafe { &*core })
+    }
+}
+
+fn optional_c_string(value: *const c_char) -> MobileCoreResult<Option<String>> {
+    if value.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(c_string(value, "optional")?))
+    }
+}
+
+fn required_c_string(value: *const c_char, name: &'static str) -> MobileCoreResult<String> {
+    if value.is_null() {
+        Err(MobileCoreError::NullInput(name))
+    } else {
+        c_string(value, name)
+    }
+}
+
+fn c_string(value: *const c_char, name: &'static str) -> MobileCoreResult<String> {
+    unsafe { CStr::from_ptr(value) }
+        .to_str()
+        .map(ToOwned::to_owned)
+        .map_err(|_| MobileCoreError::InvalidUtf8(name))
+}
+
+fn ffi_response(action: impl FnOnce() -> MobileCoreResult<Value>) -> *mut c_char {
+    let response = match action() {
+        Ok(value) => json!({
+            "ok": true,
+            "value": value,
+            "error": Value::Null,
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "value": Value::Null,
+            "error": error.to_string(),
+        }),
+    };
+    string_to_ffi(
+        serde_json::to_string(&response)
+            .unwrap_or_else(|error| format!(r#"{{"ok":false,"value":null,"error":"{}"}}"#, error)),
+    )
+}
+
+fn string_to_ffi(value: String) -> *mut c_char {
+    match CString::new(value) {
+        Ok(value) => value.into_raw(),
+        Err(_) => CString::new(
+            r#"{"ok":false,"value":null,"error":"response contains an interior nul byte"}"#,
+        )
+        .expect("static error response should not contain nul")
+        .into_raw(),
+    }
 }

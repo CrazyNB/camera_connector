@@ -32,7 +32,7 @@ core/
   Existing Rust service, receiver, transfer log, accounts, grouping
 
 core-ffi/
-  Mobile-facing Rust facade, cdylib/staticlib target, JSON DTO boundary
+  Mobile-facing Rust facade, cdylib/staticlib target, C ABI and JSON DTO boundary
 
 future generated bindings/
   UniFFI or JNI Kotlin bindings over core-ffi
@@ -74,6 +74,29 @@ The first skeleton may use an in-memory gateway for layout and lifecycle wiring.
 This keeps the UI from depending directly on FFI-generated types and allows the product shell to evolve while the Rust bridge is built.
 
 The Rust side now has a `camera-connector-ffi` crate that exposes a mobile-facing `MobileCore` facade. Its first contract is JSON-based so it can be verified in the normal Rust workspace before Android SDK/NDK builds are available.
+
+The same crate also exports a narrow C ABI:
+
+- `camera_connector_mobile_core_create`
+- `camera_connector_mobile_core_destroy`
+- `camera_connector_mobile_core_free_string`
+- `camera_connector_mobile_core_dashboard_json`
+- `camera_connector_mobile_core_save_receiver_settings_json`
+- `camera_connector_mobile_core_save_device_account_json`
+
+Every string-returning call returns a JSON envelope:
+
+```json
+{"ok":true,"value":{},"error":null}
+```
+
+or:
+
+```json
+{"ok":false,"value":null,"error":"message"}
+```
+
+Android JNI bindings should keep this envelope at the native boundary, then map it into typed Kotlin state before it reaches Compose screens.
 
 ## 6. Storage Strategy
 
