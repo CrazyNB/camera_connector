@@ -28,6 +28,7 @@ The Android source now has a native gateway boundary:
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
 - The Output card launches Android's document tree picker and persists the selected inbox URI label; native smoke imports still use app-private storage until the Android storage backend writes through SAF or MediaStore.
+- Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
 
 `PreviewCoreGateway` remains the default entry point while native service smoke testing is still in progress. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.

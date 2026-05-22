@@ -122,6 +122,7 @@ The Android source now has the Kotlin side of that bridge:
 - Account connection diagnostics are also mapped: Overview can show active connection count, latest remote endpoint, last seen time, and last disconnected time without treating IP address as account identity.
 - Receiver runtime diagnostics are mapped as well: Overview shows phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
 - Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. This is not yet treated as a filesystem `output_dir`; the native smoke inbox remains app-private until the storage backend writes through SAF or MediaStore.
+- UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible Overview error card.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 

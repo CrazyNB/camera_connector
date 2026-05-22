@@ -70,6 +70,17 @@ fun CameraConnectorApp(
     val selectedInbox by selectedInboxLabel.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(MainTab.Overview) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+    fun runAction(action: suspend () -> Unit) {
+        scope.launch {
+            try {
+                action()
+                actionError = null
+            } catch (error: Throwable) {
+                actionError = error.message ?: error::class.java.simpleName
+            }
+        }
+    }
 
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -93,15 +104,17 @@ fun CameraConnectorApp(
                         notificationPermissionRequired = notificationPermissionRequired,
                         notificationPermissionGranted = notificationsGranted,
                         onRequestNotificationPermission = onRequestNotificationPermission,
+                        actionError = actionError,
+                        onClearActionError = { actionError = null },
                         selectedInboxLabel = selectedInbox,
                         onChooseInboxDirectory = onChooseInboxDirectory,
-                        onStart = { scope.launch { coreGateway.startReceiver() } },
-                        onStop = { scope.launch { coreGateway.stopReceiver() } },
+                        onStart = { runAction { coreGateway.startReceiver() } },
+                        onStop = { runAction { coreGateway.stopReceiver() } },
                         onSaveReceiverSettings = { settings ->
-                            scope.launch { coreGateway.saveReceiverSettings(settings) }
+                            runAction { coreGateway.saveReceiverSettings(settings) }
                         },
                         onSaveDeviceAccount = { account, password ->
-                            scope.launch { coreGateway.saveDeviceAccount(account, password) }
+                            runAction { coreGateway.saveDeviceAccount(account, password) }
                         },
                         modifier = Modifier.padding(padding),
                     )
@@ -133,6 +146,8 @@ private fun OverviewScreen(
     notificationPermissionRequired: Boolean,
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
+    actionError: String?,
+    onClearActionError: () -> Unit,
     selectedInboxLabel: String?,
     onChooseInboxDirectory: () -> Unit,
     onStart: () -> Unit,
@@ -169,6 +184,22 @@ private fun OverviewScreen(
     ) {
         item {
             Text("Camera Connector", style = MaterialTheme.typography.headlineMedium)
+        }
+
+        actionError?.let { message ->
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Action failed", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(message)
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = onClearActionError) {
+                            Text("Dismiss")
+                        }
+                    }
+                }
+            }
         }
 
         item {
