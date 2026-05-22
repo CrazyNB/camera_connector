@@ -7,7 +7,7 @@ use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
     PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, Result, TransferRecord, TransferStatus,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -24,6 +24,18 @@ pub struct ReceiverConfigRequest {
     pub state_dir: Option<PathBuf>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub advertised_host: Option<String>,
+    pub source_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReceiverSettingsUpdate {
+    pub protocol: Option<PushProtocol>,
+    pub bind_host: Option<String>,
+    pub ftp_port: Option<u16>,
+    pub sftp_port: Option<u16>,
+    pub output_dir: Option<PathBuf>,
+    pub state_dir: Option<PathBuf>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
 }
@@ -205,6 +217,40 @@ impl CameraConnectorService {
         let removed = config.remove_account(username).is_some();
         let path = self.save_config(&config)?;
         Ok((removed, path))
+    }
+
+    pub fn set_receiver_settings(
+        &self,
+        update: ReceiverSettingsUpdate,
+    ) -> Result<(ReceiverSettingsConfig, PathBuf)> {
+        let mut config = self.load_config()?;
+        if let Some(protocol) = update.protocol {
+            config.receiver.protocol = protocol;
+        }
+        if let Some(bind_host) = update.bind_host {
+            config.receiver.bind_host = bind_host;
+        }
+        if let Some(ftp_port) = update.ftp_port {
+            config.receiver.ftp_port = ftp_port;
+        }
+        if let Some(sftp_port) = update.sftp_port {
+            config.receiver.sftp_port = sftp_port;
+        }
+        if let Some(output_dir) = update.output_dir {
+            config.receiver.output_dir = Some(output_dir);
+        }
+        if let Some(state_dir) = update.state_dir {
+            config.receiver.state_dir = Some(state_dir);
+        }
+        if let Some(advertised_host) = update.advertised_host {
+            config.receiver.advertised_host = Some(advertised_host);
+        }
+        if let Some(source_name) = update.source_name {
+            config.receiver.source_name = Some(source_name);
+        }
+        let settings = config.receiver.clone();
+        let path = self.save_config(&config)?;
+        Ok((settings, path))
     }
 
     pub fn accounts(&self) -> Result<Vec<AccountView>> {

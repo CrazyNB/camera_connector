@@ -81,6 +81,17 @@ if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*" }).Count -l
 }
 Write-Output $accountList
 
+$receiverSettings = & (Join-Path $root "target\debug\camera-connector.exe") receiver-settings --config $configPath --protocol ftp --bind-host "0.0.0.0" --ftp-port 2121 --sftp-port 2222 --output $pushOutput --state $pushState --advertised-host "192.168.137.1" --source-name "Verify Camera"
+if ($LASTEXITCODE -ne 0) { throw "receiver-settings smoke failed" }
+if (($receiverSettings | Where-Object { $_ -like "config: $configPath*" }).Count -lt 1) {
+    throw "receiver-settings did not report config path"
+}
+Write-Output $receiverSettings
+$configJson = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+if ($configJson.receiver.output_dir -ne $pushOutput -or $configJson.receiver.state_dir -ne $pushState -or $configJson.receiver.source_name -ne "Verify Camera") {
+    throw "receiver-settings did not persist updated receiver paths"
+}
+
 & (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 

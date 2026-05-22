@@ -2,8 +2,8 @@ use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
     ImportSource, ObjectFormat, PushProtocol, ReceiverAuthMode, ReceiverConfigRequest,
-    ReceiverRuntimePhase, ReceiverRuntimeStatus, StoredObjectLocation, TransferQuery,
-    TransferRecord, TransferStatus,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate, StoredObjectLocation,
+    TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -53,6 +53,50 @@ fn service_builds_receiver_config_from_saved_accounts() {
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(output_dir);
     let _ = std::fs::remove_dir_all(configured_state_dir);
+}
+
+#[test]
+fn service_updates_receiver_settings() {
+    let config_path = unique_temp_path("service-receiver-settings");
+    let output_dir = unique_temp_dir("service-receiver-settings-output");
+    let state_dir = unique_temp_dir("service-receiver-settings-state");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+
+    let (settings, saved_path) = service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            protocol: Some(PushProtocol::Sftp),
+            bind_host: Some("127.0.0.1".to_string()),
+            ftp_port: Some(2122),
+            sftp_port: Some(2223),
+            output_dir: Some(output_dir.clone()),
+            state_dir: Some(state_dir.clone()),
+            advertised_host: Some("192.168.137.1".to_string()),
+            source_name: Some("Studio".to_string()),
+        })
+        .expect("receiver settings should save");
+
+    assert_eq!(saved_path, config_path);
+    assert_eq!(settings.protocol, PushProtocol::Sftp);
+    assert_eq!(settings.bind_host, "127.0.0.1");
+    assert_eq!(settings.ftp_port, 2122);
+    assert_eq!(settings.sftp_port, 2223);
+
+    let loaded = CameraConnectorConfig::load(Some(&config_path)).expect("config should load");
+    assert_eq!(
+        loaded.receiver.output_dir.as_deref(),
+        Some(output_dir.as_path())
+    );
+    assert_eq!(
+        loaded.receiver.state_dir.as_deref(),
+        Some(state_dir.as_path())
+    );
+    assert_eq!(
+        loaded.receiver.advertised_host.as_deref(),
+        Some("192.168.137.1")
+    );
+    assert_eq!(loaded.receiver.source_name.as_deref(), Some("Studio"));
+
+    let _ = std::fs::remove_file(config_path);
 }
 
 #[test]

@@ -6,8 +6,9 @@ use camera_connector_core::{
     append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, Result, StoredObjectLocation,
-    TransferQuery, TransferRecord, TransferRecordView, TransferStatus,
+    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
+    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
+    TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -51,6 +52,26 @@ enum Command {
         state: Option<PathBuf>,
         #[arg(long)]
         username: Option<String>,
+        #[arg(long)]
+        advertised_host: Option<String>,
+        #[arg(long)]
+        source_name: Option<String>,
+    },
+    ReceiverSettings {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        protocol: Option<String>,
+        #[arg(long)]
+        bind_host: Option<String>,
+        #[arg(long)]
+        ftp_port: Option<u16>,
+        #[arg(long)]
+        sftp_port: Option<u16>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        state: Option<PathBuf>,
         #[arg(long)]
         advertised_host: Option<String>,
         #[arg(long)]
@@ -218,6 +239,17 @@ struct ConfigArgs {
     source_name: Option<String>,
 }
 
+struct ReceiverSettingsArgs {
+    protocol: Option<PushProtocol>,
+    bind_host: Option<String>,
+    ftp_port: Option<u16>,
+    sftp_port: Option<u16>,
+    output: Option<PathBuf>,
+    state: Option<PathBuf>,
+    advertised_host: Option<String>,
+    source_name: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -311,6 +343,34 @@ async fn main() -> Result<()> {
                 source_name,
             })?;
             print_receiver_config(&config);
+        }
+        Some(Command::ReceiverSettings {
+            config,
+            protocol,
+            bind_host,
+            ftp_port,
+            sftp_port,
+            output,
+            state,
+            advertised_host,
+            source_name,
+        }) => {
+            handle_receiver_settings_command(
+                config.as_deref(),
+                ReceiverSettingsArgs {
+                    protocol: protocol
+                        .as_deref()
+                        .map(PushProtocol::from_str)
+                        .transpose()?,
+                    bind_host,
+                    ftp_port,
+                    sftp_port,
+                    output,
+                    state,
+                    advertised_host,
+                    source_name,
+                },
+            )?;
         }
         Some(Command::ReceiverStatus { state }) => {
             let service = CameraConnectorService::new(None);
@@ -927,6 +987,53 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
     Ok(())
 }
 
+fn handle_receiver_settings_command(
+    config_path: Option<&Path>,
+    args: ReceiverSettingsArgs,
+) -> Result<()> {
+    let service = CameraConnectorService::new(config_path.map(Path::to_path_buf));
+    let (settings, path) = service.set_receiver_settings(ReceiverSettingsUpdate {
+        protocol: args.protocol,
+        bind_host: args.bind_host,
+        ftp_port: args.ftp_port,
+        sftp_port: args.sftp_port,
+        output_dir: args.output,
+        state_dir: args.state,
+        advertised_host: args.advertised_host,
+        source_name: args.source_name,
+    })?;
+    println!("config: {}", path.display());
+    println!("protocol: {}", settings.protocol);
+    println!("bind_host: {}", settings.bind_host);
+    println!("ftp_port: {}", settings.ftp_port);
+    println!("sftp_port: {}", settings.sftp_port);
+    println!(
+        "output: {}",
+        settings
+            .output_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "state: {}",
+        settings
+            .state_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
+    println!(
+        "advertised_host: {}",
+        settings.advertised_host.as_deref().unwrap_or("-")
+    );
+    println!(
+        "source_name: {}",
+        settings.source_name.as_deref().unwrap_or("-")
+    );
+    Ok(())
+}
+
 fn source_protocol_label(source: ImportSource) -> &'static str {
     match source {
         ImportSource::FtpPush => "ftp",
@@ -1050,6 +1157,47 @@ mod tests {
         .expect("serve-sftp command should parse");
 
         assert!(matches!(cli.command, Some(Command::ServeSftp { .. })));
+    }
+
+    #[test]
+    fn receiver_settings_command_updates_config() {
+        let path = unique_temp_config_path("receiver-settings");
+
+        handle_receiver_settings_command(
+            Some(&path),
+            ReceiverSettingsArgs {
+                protocol: Some(PushProtocol::Sftp),
+                bind_host: Some("127.0.0.1".to_string()),
+                ftp_port: Some(2122),
+                sftp_port: Some(2223),
+                output: Some(PathBuf::from("C:\\CameraConnector\\Inbox")),
+                state: Some(PathBuf::from("C:\\CameraConnector\\State")),
+                advertised_host: Some("192.168.137.1".to_string()),
+                source_name: Some("Studio".to_string()),
+            },
+        )
+        .expect("receiver settings command should save");
+
+        let loaded = CameraConnectorConfig::load(Some(&path)).expect("config loads");
+        assert_eq!(loaded.receiver.protocol, PushProtocol::Sftp);
+        assert_eq!(loaded.receiver.bind_host, "127.0.0.1");
+        assert_eq!(loaded.receiver.ftp_port, 2122);
+        assert_eq!(loaded.receiver.sftp_port, 2223);
+        assert_eq!(
+            loaded.receiver.output_dir.as_deref(),
+            Some(Path::new("C:\\CameraConnector\\Inbox"))
+        );
+        assert_eq!(
+            loaded.receiver.state_dir.as_deref(),
+            Some(Path::new("C:\\CameraConnector\\State"))
+        );
+        assert_eq!(
+            loaded.receiver.advertised_host.as_deref(),
+            Some("192.168.137.1")
+        );
+        assert_eq!(loaded.receiver.source_name.as_deref(), Some("Studio"));
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
