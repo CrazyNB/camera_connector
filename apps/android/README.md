@@ -76,6 +76,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\collect_android_diag
 
 Diagnostics are written under `target\android-diagnostics\<timestamp>`. The receiver service logs under the `CameraConnectorReceiver` tag.
 
+For a full connected-device smoke pass, use:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_android_device.ps1
+```
+
+The smoke pass builds and installs the debug APK, grants notification permission when available, verifies `pm path com.cameraconnector.app`, launches the app, and writes diagnostics to `target\android-diagnostics\smoke-latest`.
+
 To rebuild only the Rust native library and copy it into the APK source tree:
 
 ```powershell
