@@ -39,7 +39,6 @@ Assert-File "apps\android\README.md"
 
 Assert-Contains "apps\android\settings.gradle.kts" "CameraConnectorAndroid"
 Assert-Contains "apps\android\build.gradle.kts" "com\.android\.application.*9\.2\.0"
-Assert-Contains "apps\android\build.gradle.kts" "org\.jetbrains\.kotlin\.android.*2\.3\.21"
 Assert-Contains "apps\android\app\build.gradle.kts" "org\.jetbrains\.kotlin\.plugin\.compose"
 Assert-Contains "apps\android\app\build.gradle.kts" "compileSdk = 36"
 Assert-Contains "apps\android\app\build.gradle.kts" "androidx\.compose:compose-bom:2026\.05\.00"

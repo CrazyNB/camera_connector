@@ -159,3 +159,11 @@ As of 2026-05-22, the Android skeleton targets:
 - minSdk 26
 
 These versions are intentionally centralized in Gradle files so they can be revised before the first CI build if the local Android SDK differs.
+
+Local Android build verification is available through:
+
+```text
+scripts/verify_android_build.ps1
+```
+
+The current Windows development setup uses JDK 17, Android SDK platform 36, build-tools 36.0.0, and Gradle 9.5.1.

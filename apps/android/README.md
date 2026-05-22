@@ -27,4 +27,14 @@ The Android source now has a native gateway boundary:
 - Android SDK with API 36
 - Gradle or a checked-in Gradle wrapper
 
-This workspace currently does not assume a local Android SDK is installed.
+This machine currently uses:
+
+- JDK: `C:\Program Files\ojdkbuild\java-17-openjdk-17.0.3.0.6-1`
+- Android SDK: `%LOCALAPPDATA%\Android\Sdk`
+- Gradle: `%LOCALAPPDATA%\CameraConnectorToolchains\gradle-9.5.1`
+
+Run the Android build check from the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
+```

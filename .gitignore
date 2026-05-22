@@ -1,3 +1,7 @@
 /target/
 **/*.tmp
 *.log
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/local.properties
+apps/android/**/build/
