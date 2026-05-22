@@ -123,6 +123,7 @@ The Android source now has the Kotlin side of that bridge:
 - Receiver runtime diagnostics are mapped as well: Overview shows phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
 - Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. This is not yet treated as a filesystem `output_dir`; the native smoke inbox remains app-private until the storage backend writes through SAF or MediaStore.
 - UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible Overview error card.
+- UI actions also publish an in-flight label while native gateway calls are running. Related controls are disabled during that window to avoid duplicate start, stop, settings, or account operations.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 

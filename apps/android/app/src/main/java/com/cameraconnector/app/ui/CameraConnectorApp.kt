@@ -71,13 +71,17 @@ fun CameraConnectorApp(
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(MainTab.Overview) }
     var actionError by remember { mutableStateOf<String?>(null) }
-    fun runAction(action: suspend () -> Unit) {
+    var actionInFlight by remember { mutableStateOf<String?>(null) }
+    fun runAction(actionName: String, action: suspend () -> Unit) {
         scope.launch {
+            actionInFlight = actionName
             try {
                 action()
                 actionError = null
             } catch (error: Throwable) {
                 actionError = error.message ?: error::class.java.simpleName
+            } finally {
+                actionInFlight = null
             }
         }
     }
@@ -105,16 +109,17 @@ fun CameraConnectorApp(
                         notificationPermissionGranted = notificationsGranted,
                         onRequestNotificationPermission = onRequestNotificationPermission,
                         actionError = actionError,
+                        actionInFlight = actionInFlight,
                         onClearActionError = { actionError = null },
                         selectedInboxLabel = selectedInbox,
                         onChooseInboxDirectory = onChooseInboxDirectory,
-                        onStart = { runAction { coreGateway.startReceiver() } },
-                        onStop = { runAction { coreGateway.stopReceiver() } },
+                        onStart = { runAction("Starting receiver") { coreGateway.startReceiver() } },
+                        onStop = { runAction("Stopping receiver") { coreGateway.stopReceiver() } },
                         onSaveReceiverSettings = { settings ->
-                            runAction { coreGateway.saveReceiverSettings(settings) }
+                            runAction("Saving receiver settings") { coreGateway.saveReceiverSettings(settings) }
                         },
                         onSaveDeviceAccount = { account, password ->
-                            runAction { coreGateway.saveDeviceAccount(account, password) }
+                            runAction("Saving account") { coreGateway.saveDeviceAccount(account, password) }
                         },
                         modifier = Modifier.padding(padding),
                     )
@@ -147,6 +152,7 @@ private fun OverviewScreen(
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
     actionError: String?,
+    actionInFlight: String?,
     onClearActionError: () -> Unit,
     selectedInboxLabel: String?,
     onChooseInboxDirectory: () -> Unit,
@@ -176,6 +182,7 @@ private fun OverviewScreen(
     val receiverSettingsValid = hostInput.trim().isNotBlank() &&
         ftpPort in 1..65_535 &&
         sftpPort in 1..65_535
+    val actionsEnabled = actionInFlight == null
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -202,6 +209,18 @@ private fun OverviewScreen(
             }
         }
 
+        actionInFlight?.let { action ->
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Working", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(action)
+                    }
+                }
+            }
+        }
+
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -214,11 +233,11 @@ private fun OverviewScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = onStart,
-                            enabled = !dashboard.receiver.running && notificationPermissionGranted,
+                            enabled = actionsEnabled && !dashboard.receiver.running && notificationPermissionGranted,
                         ) {
                             Text("Start")
                         }
-                        Button(onClick = onStop, enabled = dashboard.receiver.running) {
+                        Button(onClick = onStop, enabled = actionsEnabled && dashboard.receiver.running) {
                             Text("Stop")
                         }
                     }
@@ -228,13 +247,13 @@ private fun OverviewScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = { protocol = "FTP" },
-                            enabled = protocol != "FTP" && !dashboard.receiver.running,
+                            enabled = actionsEnabled && protocol != "FTP" && !dashboard.receiver.running,
                         ) {
                             Text("FTP")
                         }
                         Button(
                             onClick = { protocol = "SFTP" },
-                            enabled = protocol != "SFTP" && !dashboard.receiver.running,
+                            enabled = actionsEnabled && protocol != "SFTP" && !dashboard.receiver.running,
                         ) {
                             Text("SFTP")
                         }
@@ -246,7 +265,7 @@ private fun OverviewScreen(
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Bind host") },
                         singleLine = true,
-                        enabled = !dashboard.receiver.running,
+                        enabled = actionsEnabled && !dashboard.receiver.running,
                     )
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -256,7 +275,7 @@ private fun OverviewScreen(
                             modifier = Modifier.weight(1f),
                             label = { Text("FTP port") },
                             singleLine = true,
-                            enabled = !dashboard.receiver.running,
+                            enabled = actionsEnabled && !dashboard.receiver.running,
                         )
                         OutlinedTextField(
                             value = sftpPortInput,
@@ -264,7 +283,7 @@ private fun OverviewScreen(
                             modifier = Modifier.weight(1f),
                             label = { Text("SFTP port") },
                             singleLine = true,
-                            enabled = !dashboard.receiver.running,
+                            enabled = actionsEnabled && !dashboard.receiver.running,
                         )
                     }
                     if (dashboard.receiver.running) {
@@ -284,7 +303,7 @@ private fun OverviewScreen(
                                 ),
                             )
                         },
-                        enabled = !dashboard.receiver.running && receiverSettingsValid,
+                        enabled = actionsEnabled && !dashboard.receiver.running && receiverSettingsValid,
                     ) {
                         Text("Save receiver settings")
                     }
@@ -377,7 +396,7 @@ private fun OverviewScreen(
                             )
                             password = ""
                         },
-                        enabled = username.trim().isNotBlank() && password.isNotBlank(),
+                        enabled = actionsEnabled && username.trim().isNotBlank() && password.isNotBlank(),
                     ) {
                         Text("Save account")
                     }
