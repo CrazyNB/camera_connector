@@ -88,15 +88,19 @@ class NativeCoreGateway(
         val paths = value.optJSONObject("paths")
         val assets = value.optJSONObject("assets")
         val transfers = value.optJSONObject("transfers")
+        val protocol = receiverStatus?.optString("protocol")?.uppercase().orEmpty()
+            .ifBlank { "FTP" }
+        val (host, port) = splitHostAndPort(
+            receiverStatus?.optString("local_addr").orEmpty(),
+            defaultPort = if (protocol == "SFTP") 2222 else 2121,
+        )
 
         return DashboardState(
             receiver = ReceiverState(
                 running = receiverStatus?.optString("phase") == "Running",
-                protocol = receiverStatus?.optString("protocol")?.uppercase().orEmpty()
-                    .ifBlank { "FTP" },
-                host = receiverStatus?.optString("local_addr").orEmpty()
-                    .ifBlank { "0.0.0.0" },
-                port = receiverStatus?.optInt("port", 2121) ?: 2121,
+                protocol = protocol,
+                host = host,
+                port = port,
                 outputLabel = paths?.optString("output_dir").orEmpty()
                     .ifBlank { "Choose inbox folder" },
             ),
@@ -104,6 +108,30 @@ class NativeCoreGateway(
             inbox = mapInbox(assets),
             transfers = mapTransfers(transfers),
         )
+    }
+
+    private fun splitHostAndPort(localAddr: String, defaultPort: Int): Pair<String, Int> {
+        val trimmed = localAddr.trim()
+        if (trimmed.isBlank()) {
+            return "0.0.0.0" to defaultPort
+        }
+
+        if (trimmed.startsWith("[")) {
+            val hostEnd = trimmed.indexOf(']')
+            val host = trimmed.substring(0, hostEnd + 1).takeIf { hostEnd > 0 } ?: trimmed
+            val port = trimmed.substringAfter("]:", "")
+                .toIntOrNull()
+                ?: defaultPort
+            return host to port
+        }
+
+        val splitAt = trimmed.lastIndexOf(':')
+        if (splitAt <= 0 || splitAt == trimmed.lastIndex || trimmed.indexOf(':') != splitAt) {
+            return trimmed to defaultPort
+        }
+
+        return trimmed.substring(0, splitAt) to
+            (trimmed.substring(splitAt + 1).toIntOrNull() ?: defaultPort)
     }
 
     private fun mapAccounts(value: JSONObject): List<DeviceAccount> {
