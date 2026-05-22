@@ -298,6 +298,9 @@ if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit
 if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*" }).Count -lt 1) {
     throw "dashboard did not expose account summary"
 }
+if (($dashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {
+    throw "dashboard did not expose system paths"
+}
 if (($dashboardOutput | Where-Object { $_ -like "transfers*total=3*completed=2*failed=1*" }).Count -lt 1) {
     throw "dashboard did not expose transfer summary"
 }
@@ -317,6 +320,9 @@ if ($dashboardJson.assets.summary.group_count -ne 2) {
 }
 if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
     throw "dashboard json did not expose safe account summary"
+}
+if ($dashboardJson.paths.config_path -ne $configPath -or $dashboardJson.paths.state_dir -ne $pushState) {
+    throw "dashboard json did not expose system paths"
 }
 if ($dashboardJson.transfers.total_count -ne 3 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 1) {
     throw "dashboard json did not expose transfer summary"

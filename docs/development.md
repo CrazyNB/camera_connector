@@ -122,7 +122,7 @@ Read the app dashboard model in one command:
 target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50
 ```
 
-Dashboard output includes receiver status, safe account summaries, transfer health counts, recent failed transfers, connected devices, asset summary, and paged assets.
+Dashboard output includes receiver status, config/state/output paths, safe account summaries, transfer health counts, recent failed transfers, connected devices, asset summary, and paged assets.
 
 Use JSON output for UI shells or automation:
 

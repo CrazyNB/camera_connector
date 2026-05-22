@@ -111,8 +111,16 @@ pub struct AccountView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SystemPathsView {
+    pub config_path: PathBuf,
+    pub state_dir: PathBuf,
+    pub output_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
+    pub paths: SystemPathsView,
     pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
     pub transfers: TransferSummary,
@@ -364,8 +372,16 @@ impl CameraConnectorService {
         online_devices_only: bool,
     ) -> Result<CameraConnectorDashboard> {
         let state_dir = state_dir.as_ref();
+        let receiver_status = self.receiver_status(state_dir)?;
         Ok(CameraConnectorDashboard {
-            receiver_status: self.receiver_status(state_dir)?,
+            paths: SystemPathsView {
+                config_path: self.config_path(),
+                state_dir: state_dir.to_path_buf(),
+                output_dir: receiver_status
+                    .as_ref()
+                    .and_then(|status| status.output_dir.clone()),
+            },
+            receiver_status,
             accounts: self.accounts()?,
             devices: self.connected_devices(
                 state_dir,

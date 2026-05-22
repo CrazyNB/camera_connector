@@ -557,6 +557,17 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
         Some(status) => println!("status\t{}", receiver_status_tab_fields(&status)),
         None => println!("status\tphase=Unknown\tmessage=receiver status file not found"),
     }
+    println!(
+        "paths\tconfig={}\tstate={}\toutput={}",
+        dashboard.paths.config_path.display(),
+        dashboard.paths.state_dir.display(),
+        dashboard
+            .paths
+            .output_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "-".to_string())
+    );
     for account in dashboard.accounts {
         println!(
             "account\tusername={}\tdevice={}\tpassword_configured={}",
@@ -1137,6 +1148,11 @@ mod tests {
                 account_count: 1,
                 message: None,
             }),
+            paths: camera_connector_core::SystemPathsView {
+                config_path: PathBuf::from("C:\\CameraConnector\\config.json"),
+                state_dir: PathBuf::from("C:\\CameraConnector\\state"),
+                output_dir: None,
+            },
             accounts: vec![camera_connector_core::AccountView {
                 username: "z5".to_string(),
                 device_name: "Camera".to_string(),
@@ -1210,6 +1226,9 @@ mod tests {
         let json = dashboard_json(&dashboard).expect("dashboard should serialize");
 
         assert!(json.contains("\"receiver_status\""));
+        assert!(json.contains("\"paths\""));
+        assert!(json.contains("\"config_path\""));
+        assert!(json.contains("\"state_dir\""));
         assert!(json.contains("\"accounts\""));
         assert!(json.contains("\"password_configured\": true"));
         assert!(!json.contains("password_hash"));

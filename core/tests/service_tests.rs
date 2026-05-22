@@ -929,6 +929,12 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     assert_eq!(dashboard.accounts[0].username, "z5");
     assert_eq!(dashboard.accounts[0].device_name, "Studio Z5");
     assert!(dashboard.accounts[0].password_configured);
+    assert_eq!(dashboard.paths.config_path, config_path);
+    assert_eq!(dashboard.paths.state_dir, state_dir);
+    assert_eq!(
+        dashboard.paths.output_dir.as_deref(),
+        Some(state_dir.as_path())
+    );
     assert_eq!(dashboard.transfers.total_count, 2);
     assert_eq!(dashboard.transfers.completed_count, 1);
     assert_eq!(dashboard.transfers.failed_count, 1);
