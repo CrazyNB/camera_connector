@@ -122,7 +122,23 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
 The JNI shim reuses the same `MobileCore` facade as the C ABI, so Android-specific binding code does not duplicate receiver, account, dashboard, or transfer logic.
 
-The remaining bridge work is packaging Android ABI `.so` outputs into `apps/android/app/src/main/jniLibs`.
+Android arm64 native packaging is produced by:
+
+```text
+scripts/build_android_native.ps1
+```
+
+The script builds `core-ffi` for `aarch64-linux-android` and copies `libcamera_connector_ffi.so` into `apps/android/app/src/main/jniLibs/arm64-v8a`.
+
+Android APK verification is handled by:
+
+```text
+scripts/verify_android_build.ps1
+```
+
+That script builds the native arm64 library, assembles the debug APK, and checks that the APK contains `lib/arm64-v8a/libcamera_connector_ffi.so`.
+
+The remaining bridge work is wiring `NativeCoreGateway` as a selectable runtime app gateway after device-side smoke testing confirms the native library loads cleanly.
 
 ## 6. Storage Strategy
 

@@ -34,8 +34,14 @@ This machine currently uses:
 - Android SDK: `%LOCALAPPDATA%\Android\Sdk`
 - Gradle: `%LOCALAPPDATA%\CameraConnectorToolchains\gradle-9.5.1`
 
-Run the Android build check from the repository root:
+Run the Android build check from the repository root. It builds the Rust native library for Android arm64, assembles the debug APK, and verifies the APK contains `lib/arm64-v8a/libcamera_connector_ffi.so`.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
+```
+
+To rebuild only the Rust native library and copy it into the APK source tree:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_android_native.ps1
 ```

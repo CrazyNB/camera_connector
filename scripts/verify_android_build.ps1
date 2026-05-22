@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $androidRoot = Join-Path $root "apps\android"
+$buildNativeScript = Join-Path $root "scripts\build_android_native.ps1"
 
 $defaultJavaHome = "C:\Program Files\ojdkbuild\java-17-openjdk-17.0.3.0.6-1"
 $defaultSdkRoot = Join-Path $env:LOCALAPPDATA "Android\Sdk"
@@ -35,6 +36,11 @@ if (-not (Test-Path -LiteralPath $gradle)) {
 
 $env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin;$env:ANDROID_SDK_ROOT\platform-tools;$env:Path"
 
+& $buildNativeScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Android native library build failed"
+}
+
 Push-Location $androidRoot
 try {
     & $gradle ":app:assembleDebug" "--no-daemon"
@@ -45,4 +51,20 @@ try {
     Pop-Location
 }
 
-Write-Host "Android debug build passed."
+$apk = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
+if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
+    throw "Android debug APK not found: $apk"
+}
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::OpenRead($apk)
+try {
+    $nativeEntry = $zip.Entries | Where-Object { $_.FullName -eq "lib/arm64-v8a/libcamera_connector_ffi.so" } | Select-Object -First 1
+    if ($null -eq $nativeEntry -or $nativeEntry.Length -le 0) {
+        throw "Android debug APK does not contain lib/arm64-v8a/libcamera_connector_ffi.so"
+    }
+} finally {
+    $zip.Dispose()
+}
+
+Write-Host "Android debug build passed with arm64 native core packaged."
