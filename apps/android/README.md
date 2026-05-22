@@ -24,6 +24,7 @@ The Android source now has a native gateway boundary:
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
 - The Overview screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
 - The Overview screen can save receiver protocol, bind host, FTP port, and SFTP port through the native gateway; output storage stays app-private until Android directory selection is wired.
+- The Transfers screen reads native dashboard transfer counts and recent failure rows, including virtual display paths and core error messages.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
 
 `PreviewCoreGateway` remains the default entry point while native service smoke testing is still in progress. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.

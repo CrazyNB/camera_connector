@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class NativeCoreGateway(
@@ -106,7 +107,7 @@ class NativeCoreGateway(
             ),
             accounts = mapAccounts(value),
             inbox = mapInbox(assets),
-            transfers = mapTransfers(transfers),
+            transfers = mapTransfers(transfers, value.optJSONArray("recent_failures")),
         )
     }
 
@@ -170,18 +171,44 @@ class NativeCoreGateway(
         }
     }
 
-    private fun mapTransfers(transfers: JSONObject?): List<TransferRow> {
-        if (transfers == null) {
+    private fun mapTransfers(transfers: JSONObject?, recentFailures: JSONArray?): List<TransferRow> {
+        if (transfers == null && recentFailures == null) {
             return emptyList()
         }
-        return listOf(
-            TransferRow(
-                id = "summary",
-                status = "completed=${transfers.optInt("completed_count")}",
-                displayPath = "failed=${transfers.optInt("failed_count")}",
-                message = "total=${transfers.optInt("total_count")}",
-            ),
-        )
+
+        return buildList {
+            transfers?.let {
+                add(
+                    TransferRow(
+                        id = "summary",
+                        status = "completed=${it.optInt("completed_count")}",
+                        displayPath = "failed=${it.optInt("failed_count")}",
+                        message = "total=${it.optInt("total_count")}",
+                    ),
+                )
+            }
+
+            if (recentFailures != null) {
+                for (index in 0 until recentFailures.length()) {
+                    val item = recentFailures.optJSONObject(index) ?: continue
+                    val record = item.optJSONObject("record")
+                    add(
+                        TransferRow(
+                            id = record?.optString("transfer_id").orEmpty()
+                                .ifBlank { "failure-$index" },
+                            status = record?.optString("status").orEmpty()
+                                .ifBlank { "Failed" },
+                            displayPath = item.optString("virtual_display_path")
+                                .ifBlank { record?.optString("original_path").orEmpty() }
+                                .ifBlank { record?.optString("final_filename").orEmpty() }
+                                .ifBlank { "Failed transfer" },
+                            message = record?.optString("error").orEmpty()
+                                .takeIf { it.isNotBlank() },
+                        ),
+                    )
+                }
+            }
+        }
     }
 
     private fun emptyDashboard(): DashboardState =

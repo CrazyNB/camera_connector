@@ -118,6 +118,7 @@ The Android source now has the Kotlin side of that bridge:
 - `PreviewCoreGateway` remains the default app entry until native service smoke testing is complete.
 - Device account setup flows through the same gateway: Compose collects device name, FTP/SFTP username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
 - Receiver setup also flows through the gateway: Compose can save protocol, bind host, FTP port, and SFTP port while leaving Android output storage on the current app-private inbox until SAF or MediaStore selection is wired.
+- Transfer diagnostics are mapped from the native dashboard into Compose: transfer counts remain visible and recent failed transfers show the core-provided virtual display path plus error text.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
