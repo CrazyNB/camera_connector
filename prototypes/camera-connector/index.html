@@ -83,6 +83,14 @@
       margin-top: 20px;
     }
 
+    .route-section {
+      margin: 14px 0 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
     .route-list button {
       display: grid;
       grid-template-columns: 24px 1fr auto;
@@ -118,6 +126,10 @@
       border-color: var(--blue);
       background: var(--surface);
       box-shadow: inset 0 0 0 1px var(--blue);
+    }
+
+    .route-list button.secondary-route {
+      background: rgba(248, 250, 252, 0.76);
     }
 
     .phone {
@@ -159,6 +171,10 @@
       grid-template-columns: 1fr auto;
       align-items: center;
       gap: 12px;
+    }
+
+    .topbar.secondary-topbar {
+      grid-template-columns: auto 1fr auto;
     }
 
     .topbar h2 {
@@ -553,7 +569,7 @@
     .tabbar {
       min-height: 62px;
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       background: rgba(255, 255, 255, 0.96);
       border-top: 1px solid var(--line);
     }
@@ -594,11 +610,13 @@
     <p>端侧开发前的产品原型。当前版本对齐 core dashboard：receiver 设置、账号状态、设备连接、传输健康、失败记录和资产分组。</p>
     <p>身份以账号和设备名为准，IP 只作为最近连接来源。上传目录保持扁平，原始相机路径进入日志和筛选标签。</p>
     <div class="route-list" aria-label="prototype routes">
+      <div class="route-section">一级导航</div>
       <button class="active" data-route="dashboard"><span>1</span>概览<small>dashboard</small></button>
-      <button data-route="receiver"><span>2</span>接收设置<small>receiver</small></button>
-      <button data-route="devices"><span>3</span>设备账号<small>accounts</small></button>
-      <button data-route="inbox"><span>4</span>收件箱<small>assets</small></button>
-      <button data-route="transfers"><span>5</span>传输日志<small>logs</small></button>
+      <button data-route="inbox"><span>2</span>收件箱<small>assets</small></button>
+      <button data-route="transfers"><span>3</span>传输日志<small>logs</small></button>
+      <div class="route-section">二级页面</div>
+      <button class="secondary-route" data-route="receiver"><span>4</span>接收设置<small>settings</small></button>
+      <button class="secondary-route" data-route="devices"><span>5</span>设备账号<small>accounts</small></button>
     </div>
   </aside>
 
@@ -691,15 +709,14 @@
         </div>
         <nav class="tabbar">
           <button class="active" data-route="dashboard">概览</button>
-          <button data-route="receiver">设置</button>
-          <button data-route="devices">设备</button>
           <button data-route="inbox">收件箱</button>
           <button data-route="transfers">传输</button>
         </nav>
       </div>
 
       <div id="receiver" class="view hidden">
-        <header class="topbar">
+        <header class="topbar secondary-topbar">
+          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
           <div>
             <h2>接收设置</h2>
             <small>receiver-settings · core config</small>
@@ -750,6 +767,19 @@
 
             <section class="panel">
               <div class="panel-title">
+                <h3>相关设置</h3>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>账号与设备</strong>
+                  <span>管理 username、password、device name 和最近连接来源</span>
+                </div>
+                <button class="secondary" data-route="devices">进入</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
                 <h3>存储与日志</h3>
                 <small>分离目录</small>
               </div>
@@ -770,17 +800,11 @@
             </section>
           </div>
         </div>
-        <nav class="tabbar">
-          <button data-route="dashboard">概览</button>
-          <button class="active" data-route="receiver">设置</button>
-          <button data-route="devices">设备</button>
-          <button data-route="inbox">收件箱</button>
-          <button data-route="transfers">传输</button>
-        </nav>
       </div>
 
       <div id="devices" class="view hidden">
-        <header class="topbar">
+        <header class="topbar secondary-topbar">
+          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
           <div>
             <h2>设备账号</h2>
             <small>账号是身份，IP 是连接属性</small>
@@ -854,13 +878,6 @@
             </section>
           </div>
         </div>
-        <nav class="tabbar">
-          <button data-route="dashboard">概览</button>
-          <button data-route="receiver">设置</button>
-          <button class="active" data-route="devices">设备</button>
-          <button data-route="inbox">收件箱</button>
-          <button data-route="transfers">传输</button>
-        </nav>
       </div>
 
       <div id="inbox" class="view hidden">
@@ -931,8 +948,6 @@
         </div>
         <nav class="tabbar">
           <button data-route="dashboard">概览</button>
-          <button data-route="receiver">设置</button>
-          <button data-route="devices">设备</button>
           <button class="active" data-route="inbox">收件箱</button>
           <button data-route="transfers">传输</button>
         </nav>
@@ -1006,8 +1021,6 @@
         </div>
         <nav class="tabbar">
           <button data-route="dashboard">概览</button>
-          <button data-route="receiver">设置</button>
-          <button data-route="devices">设备</button>
           <button data-route="inbox">收件箱</button>
           <button class="active" data-route="transfers">传输</button>
         </nav>
