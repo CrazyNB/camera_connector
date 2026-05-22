@@ -13,6 +13,7 @@ license = "MIT"
 [workspace.dependencies]
 argon2 = "0.5"
 clap = { version = "4.5", features = ["derive"] }
+jni = "0.22.4"
 password-hash = { version = "0.5", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 rand = "0.10"

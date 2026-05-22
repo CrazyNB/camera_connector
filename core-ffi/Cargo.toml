@@ -9,6 +9,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
 camera_connector_core = { path = "../core" }
+jni = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

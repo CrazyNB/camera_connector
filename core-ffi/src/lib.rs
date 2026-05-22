@@ -6,6 +6,10 @@ use camera_connector_core::{
     AssetGroupQuery, CameraConnectorDashboard, CameraConnectorService, ImporterError, PushProtocol,
     ReceiverSettingsConfig, ReceiverSettingsUpdate,
 };
+use jni::errors::ThrowRuntimeExAndDefault;
+use jni::objects::{JClass, JString};
+use jni::sys::{jint, jlong, jstring};
+use jni::{Env, EnvUnowned};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -23,6 +27,8 @@ pub enum MobileCoreError {
     InvalidUtf8(&'static str),
     #[error("response contains an interior nul byte")]
     InteriorNul,
+    #[error("{0}")]
+    Jni(#[from] jni::errors::Error),
     #[error("{0}")]
     Json(#[from] serde_json::Error),
 }
@@ -316,4 +322,144 @@ fn string_to_ffi(value: String) -> *mut c_char {
         .expect("static error response should not contain nul")
         .into_raw(),
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_create(
+    mut env: EnvUnowned,
+    _class: JClass,
+    config_path: JString,
+) -> jlong {
+    env.with_env(|env| -> Result<jlong, jni::errors::Error> {
+        let config_path = optional_java_string(env, config_path).unwrap_or(None);
+        Ok(Box::into_raw(Box::new(MobileCore::new(config_path))) as jlong)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+/// # Safety
+///
+/// `handle` must be a pointer value returned by
+/// `Java_com_cameraconnector_app_core_NativeMobileCore_create`. Passing the
+/// same handle more than once is invalid.
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_destroy(
+    _env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) {
+    if handle != 0 {
+        drop(Box::from_raw(handle as *mut MobileCore));
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_dashboardJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    state_dir: JString,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    env.with_env(|env| {
+        let state_dir = optional_java_string(env, state_dir);
+        java_response(env, || {
+            let dashboard = mobile_core_from_handle(handle)?.dashboard_json(
+                state_dir?,
+                offset.max(0) as u32,
+                limit.max(0) as u32,
+            )?;
+            parse_json_value(&dashboard)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveReceiverSettingsJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    patch_json: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let patch_json = required_java_string(env, patch_json, "patch_json");
+        java_response(env, || {
+            let patch = serde_json::from_str::<MobileReceiverSettingsPatch>(&patch_json?)?;
+            let settings = mobile_core_from_handle(handle)?.save_receiver_settings_json(patch)?;
+            parse_json_value(&settings)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveDeviceAccountJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    username: JString,
+    password: JString,
+    device_name: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let username = required_java_string(env, username, "username");
+        let password = optional_java_string(env, password);
+        let device_name = required_java_string(env, device_name, "device_name");
+        java_response(env, || {
+            let account = mobile_core_from_handle(handle)?.save_device_account_json(
+                username?,
+                password?,
+                device_name?,
+            )?;
+            parse_json_value(&account)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+fn mobile_core_from_handle<'a>(handle: jlong) -> MobileCoreResult<&'a MobileCore> {
+    if handle == 0 {
+        Err(MobileCoreError::NullCore)
+    } else {
+        Ok(unsafe { &*(handle as *const MobileCore) })
+    }
+}
+
+fn optional_java_string(env: &mut Env, value: JString) -> MobileCoreResult<Option<String>> {
+    if value.is_null() {
+        Ok(None)
+    } else {
+        Ok(Some(value.try_to_string(env)?))
+    }
+}
+
+fn required_java_string(
+    env: &mut Env,
+    value: JString,
+    name: &'static str,
+) -> MobileCoreResult<String> {
+    optional_java_string(env, value)?.ok_or(MobileCoreError::NullInput(name))
+}
+
+fn java_response(
+    env: &mut Env,
+    action: impl FnOnce() -> MobileCoreResult<Value>,
+) -> Result<jstring, jni::errors::Error> {
+    let response = match action() {
+        Ok(value) => json!({
+            "ok": true,
+            "value": value,
+            "error": Value::Null,
+        }),
+        Err(error) => json!({
+            "ok": false,
+            "value": Value::Null,
+            "error": error.to_string(),
+        }),
+    };
+    let raw = serde_json::to_string(&response)
+        .unwrap_or_else(|error| format!(r#"{{"ok":false,"value":null,"error":"{}"}}"#, error));
+    JString::from_str(env, raw).map(|value| value.into_raw())
 }

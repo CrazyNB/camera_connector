@@ -104,15 +104,25 @@ or:
 {"ok":false,"value":null,"error":"message"}
 ```
 
-Android JNI bindings should keep this envelope at the native boundary, then map it into typed Kotlin state before it reaches Compose screens.
+Android JNI bindings keep this envelope at the native boundary, then map it into typed Kotlin state before it reaches Compose screens.
 
 The Android source now has the Kotlin side of that bridge:
 
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
-- `PreviewCoreGateway` remains the default app entry until the Rust JNI shim is linked and an Android SDK/NDK build is available.
+- `PreviewCoreGateway` remains the default app entry until Android ABI `.so` files are packaged into the APK.
 
-The remaining bridge work is the Rust JNI shim that maps Kotlin `external` methods to the existing `core-ffi` C ABI/facade functions.
+The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
+
+- `create`
+- `destroy`
+- `dashboardJson`
+- `saveReceiverSettingsJson`
+- `saveDeviceAccountJson`
+
+The JNI shim reuses the same `MobileCore` facade as the C ABI, so Android-specific binding code does not duplicate receiver, account, dashboard, or transfer logic.
+
+The remaining bridge work is packaging Android ABI `.so` outputs into `apps/android/app/src/main/jniLibs`.
 
 ## 6. Storage Strategy
 

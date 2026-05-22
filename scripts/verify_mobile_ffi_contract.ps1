@@ -21,6 +21,13 @@ $requiredFunctions = @(
     "camera_connector_mobile_core_save_receiver_settings_json",
     "camera_connector_mobile_core_save_device_account_json"
 )
+$requiredJniFunctions = @(
+    "Java_com_cameraconnector_app_core_NativeMobileCore_create",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_destroy",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_dashboardJson",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_saveReceiverSettingsJson",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_saveDeviceAccountJson"
+)
 
 foreach ($functionName in $requiredFunctions) {
     if ($header -notmatch [regex]::Escape($functionName)) {
@@ -28,6 +35,12 @@ foreach ($functionName in $requiredFunctions) {
     }
     if ($rust -notmatch [regex]::Escape($functionName)) {
         throw "Rust FFI implementation does not export $functionName"
+    }
+}
+
+foreach ($functionName in $requiredJniFunctions) {
+    if ($rust -notmatch [regex]::Escape($functionName)) {
+        throw "Rust JNI implementation does not export $functionName"
     }
 }
 
