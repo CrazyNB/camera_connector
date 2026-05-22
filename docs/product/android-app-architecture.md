@@ -153,6 +153,8 @@ gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 
 The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. The remaining bridge work is status polling, permission gating, and native gateway device smoke testing.
 
+`NativeCoreGateway` polls the native dashboard every 2 seconds while it is open. This keeps receiver status, connected accounts, transfer failures, and newly imported assets moving into Compose without coupling the UI to service internals.
+
 ## 6. Storage Strategy
 
 MVP strategy:

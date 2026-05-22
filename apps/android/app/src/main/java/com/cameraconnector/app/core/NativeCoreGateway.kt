@@ -1,11 +1,16 @@
 package com.cameraconnector.app.core
 
 import com.cameraconnector.app.service.ReceiverServiceController
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -14,10 +19,12 @@ class NativeCoreGateway(
     private val stateDir: String?,
     private val receiverServiceController: ReceiverServiceController,
 ) : CoreGateway, AutoCloseable {
+    private val gatewayScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dashboard = MutableStateFlow(emptyDashboard())
 
     init {
         dashboard.value = loadDashboard()
+        pollDashboard()
     }
 
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
@@ -53,6 +60,7 @@ class NativeCoreGateway(
     }
 
     override fun close() {
+        gatewayScope.cancel()
         nativeCore.close()
     }
 
@@ -62,6 +70,17 @@ class NativeCoreGateway(
     private suspend fun refreshAfterServiceCommand() {
         delay(250)
         refresh()
+    }
+
+    private fun pollDashboard() {
+        gatewayScope.launch {
+            while (isActive) {
+                runCatching {
+                    dashboard.value = loadDashboard()
+                }
+                delay(DASHBOARD_POLL_INTERVAL_MS)
+            }
+        }
     }
 
     private fun mapDashboard(value: JSONObject): DashboardState {
@@ -150,4 +169,8 @@ class NativeCoreGateway(
             inbox = emptyList(),
             transfers = emptyList(),
         )
+
+    private companion object {
+        const val DASHBOARD_POLL_INTERVAL_MS = 2_000L
+    }
 }
