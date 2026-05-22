@@ -90,8 +90,16 @@ pub struct ConnectedDeviceView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountView {
+    pub username: String,
+    pub device_name: String,
+    pub password_configured: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
+    pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
     pub assets: AssetGroupPage,
 }
@@ -153,6 +161,15 @@ impl CameraConnectorService {
         let removed = config.remove_account(username).is_some();
         let path = self.save_config(&config)?;
         Ok((removed, path))
+    }
+
+    pub fn accounts(&self) -> Result<Vec<AccountView>> {
+        Ok(self
+            .load_config()?
+            .accounts
+            .into_values()
+            .map(account_view)
+            .collect())
     }
 
     pub fn inbox_groups(
@@ -285,6 +302,7 @@ impl CameraConnectorService {
         let state_dir = state_dir.as_ref();
         Ok(CameraConnectorDashboard {
             receiver_status: self.receiver_status(state_dir)?,
+            accounts: self.accounts()?,
             devices: self.connected_devices(
                 state_dir,
                 asset_query.username.as_deref(),
@@ -297,6 +315,15 @@ impl CameraConnectorService {
                 limit,
             )?,
         })
+    }
+}
+
+fn account_view(account: ReceiverAccountConfig) -> AccountView {
+    let password_configured = account.password_configured();
+    AccountView {
+        username: account.username,
+        device_name: account.device_name,
+        password_configured,
     }
 }
 

@@ -272,6 +272,9 @@ if ($LASTEXITCODE -ne 0) { throw "dashboard smoke failed" }
 if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
     throw "dashboard did not expose paged asset summary"
 }
+if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*" }).Count -lt 1) {
+    throw "dashboard did not expose account summary"
+}
 if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
     throw "dashboard did not expose filtered asset rows"
 }
@@ -282,6 +285,12 @@ if ($LASTEXITCODE -ne 0) { throw "dashboard json smoke failed" }
 $dashboardJson = $dashboardJsonOutput -join "`n" | ConvertFrom-Json
 if ($dashboardJson.assets.summary.group_count -ne 2) {
     throw "dashboard json did not expose asset summary"
+}
+if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
+    throw "dashboard json did not expose safe account summary"
+}
+if (($dashboardJsonOutput -join "`n") -like "*password_hash*") {
+    throw "dashboard json exposed password hash"
 }
 if ($dashboardJson.assets.groups[0].primary.username -ne "verify") {
     throw "dashboard json did not expose filtered asset username"

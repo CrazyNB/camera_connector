@@ -552,6 +552,12 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
         Some(status) => println!("status\t{}", receiver_status_tab_fields(&status)),
         None => println!("status\tphase=Unknown\tmessage=receiver status file not found"),
     }
+    for account in dashboard.accounts {
+        println!(
+            "account\tusername={}\tdevice={}\tpassword_configured={}",
+            account.username, account.device_name, account.password_configured
+        );
+    }
     for view in dashboard.devices {
         let device = view.device;
         println!(
@@ -1080,6 +1086,11 @@ mod tests {
                 account_count: 1,
                 message: None,
             }),
+            accounts: vec![camera_connector_core::AccountView {
+                username: "z5".to_string(),
+                device_name: "Camera".to_string(),
+                password_configured: true,
+            }],
             devices: vec![camera_connector_core::ConnectedDeviceView {
                 device: camera_connector_core::ConnectedDevice {
                     remote_addr: "192.168.137.56".to_string(),
@@ -1121,6 +1132,9 @@ mod tests {
         let json = dashboard_json(&dashboard).expect("dashboard should serialize");
 
         assert!(json.contains("\"receiver_status\""));
+        assert!(json.contains("\"accounts\""));
+        assert!(json.contains("\"password_configured\": true"));
+        assert!(!json.contains("password_hash"));
         assert!(json.contains("\"devices\""));
         assert!(json.contains("\"assets\""));
         assert!(json.contains("\"group_key\": \"IMG_0001\""));

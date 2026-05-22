@@ -720,6 +720,10 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     );
     assert_eq!(dashboard.devices.len(), 1);
     assert_eq!(dashboard.devices[0].display_source, "Studio Z5");
+    assert_eq!(dashboard.accounts.len(), 1);
+    assert_eq!(dashboard.accounts[0].username, "z5");
+    assert_eq!(dashboard.accounts[0].device_name, "Studio Z5");
+    assert!(dashboard.accounts[0].password_configured);
     assert_eq!(dashboard.assets.summary.group_count, 1);
     assert_eq!(dashboard.assets.groups.len(), 1);
     assert_eq!(
