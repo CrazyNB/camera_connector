@@ -166,6 +166,8 @@ MVP strategy:
 - Future user-facing output/inbox: user-selected SAF document tree.
 - Display path: virtual camera path from transfer log, not Android filesystem path.
 
+The Android bootstrap only seeds `output_dir` and `state_dir` into native receiver settings. It must not reset protocol, host, or ports on app startup because those are user-configurable receiver settings.
+
 Android URI values stay inside the storage gateway. The dashboard and inbox still use product concepts: source name, username, transfer id, original path, format, duplicate count, and final location kind.
 
 ## 7. Receiver Lifecycle

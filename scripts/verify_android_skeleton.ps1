@@ -22,6 +22,18 @@ function Assert-Contains {
     }
 }
 
+function Assert-NotContains {
+    param(
+        [string]$Path,
+        [string]$Pattern
+    )
+    $fullPath = Join-Path $root $Path
+    $content = Get-Content -LiteralPath $fullPath -Raw
+    if ($content -match $Pattern) {
+        throw "Expected '$Path' not to contain pattern: $Pattern"
+    }
+}
+
 Assert-File "docs\product\android-app-architecture.md"
 Assert-File "apps\android\settings.gradle.kts"
 Assert-File "apps\android\build.gradle.kts"
@@ -57,7 +69,8 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Cor
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "NativeCoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "ReceiverServiceController"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" '"inbox"'
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "saveAndroidReceiverDefaults"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "saveAndroidReceiverPaths"
+Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "saveAndroidReceiverDefaults"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" 'System\.loadLibrary\("camera_connector_ffi"\)'
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "NativeEnvelope"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" '"state_dir"'

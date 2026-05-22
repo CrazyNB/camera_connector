@@ -19,7 +19,7 @@ The Android source now has a native gateway boundary:
 - `NativeMobileCore` owns the native handle and JSON envelope parsing.
 - `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
-- `CoreGatewayFactory` seeds native receiver settings with app-private `filesDir/inbox` and `filesDir/state`.
+- `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/inbox` and `filesDir/state`.
 - `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.

@@ -17,7 +17,7 @@ object CoreGatewayFactory {
             val inboxDir = File(appContext.filesDir, "inbox").also { it.mkdirs() }
             val stateDir = File(appContext.filesDir, "state").also { it.mkdirs() }
             val nativeCore = NativeMobileCore(configFile.absolutePath).also {
-                it.saveAndroidReceiverDefaults(
+                it.saveAndroidReceiverPaths(
                     outputDir = inboxDir.absolutePath,
                     stateDir = stateDir.absolutePath,
                 )
