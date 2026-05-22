@@ -108,6 +108,12 @@ pub struct AccountView {
     pub username: String,
     pub device_name: String,
     pub password_configured: bool,
+    pub online: bool,
+    pub active_connections: u32,
+    pub last_remote_addr: Option<String>,
+    pub last_remote_port: Option<u16>,
+    pub last_seen_at_ms: Option<i64>,
+    pub last_disconnected_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +379,12 @@ impl CameraConnectorService {
     ) -> Result<CameraConnectorDashboard> {
         let state_dir = state_dir.as_ref();
         let receiver_status = self.receiver_status(state_dir)?;
+        let devices = self.connected_devices(
+            state_dir,
+            asset_query.username.as_deref(),
+            online_devices_only,
+        )?;
+        let accounts = accounts_with_devices(self.accounts()?, &devices);
         Ok(CameraConnectorDashboard {
             paths: SystemPathsView {
                 config_path: self.config_path(),
@@ -382,12 +394,8 @@ impl CameraConnectorService {
                     .and_then(|status| status.output_dir.clone()),
             },
             receiver_status,
-            accounts: self.accounts()?,
-            devices: self.connected_devices(
-                state_dir,
-                asset_query.username.as_deref(),
-                online_devices_only,
-            )?,
+            accounts,
+            devices,
             transfers: self.transfer_summary_with_query(
                 state_dir,
                 transfer_query_from_asset_query(&asset_query),
@@ -439,7 +447,51 @@ fn account_view(account: ReceiverAccountConfig) -> AccountView {
         username: account.username,
         device_name: account.device_name,
         password_configured,
+        online: false,
+        active_connections: 0,
+        last_remote_addr: None,
+        last_remote_port: None,
+        last_seen_at_ms: None,
+        last_disconnected_at_ms: None,
     }
+}
+
+fn accounts_with_devices(
+    accounts: Vec<AccountView>,
+    devices: &[ConnectedDeviceView],
+) -> Vec<AccountView> {
+    accounts
+        .into_iter()
+        .map(|mut account| {
+            let matching_devices = devices
+                .iter()
+                .filter(|view| view.device.username.as_deref() == Some(account.username.as_str()));
+            let mut active_connections = 0u32;
+            let mut latest: Option<&ConnectedDevice> = None;
+            for device in matching_devices.map(|view| &view.device) {
+                active_connections = active_connections.saturating_add(device.active_connections);
+                latest = Some(match latest {
+                    Some(current)
+                        if current.online && !device.online
+                            || current.online == device.online
+                                && current.last_seen_at_ms >= device.last_seen_at_ms =>
+                    {
+                        current
+                    }
+                    _ => device,
+                });
+            }
+            if let Some(device) = latest {
+                account.online = device.online;
+                account.active_connections = active_connections;
+                account.last_remote_addr = Some(device.remote_addr.clone());
+                account.last_remote_port = device.last_remote_port;
+                account.last_seen_at_ms = Some(device.last_seen_at_ms);
+                account.last_disconnected_at_ms = device.last_disconnected_at_ms;
+            }
+            account
+        })
+        .collect()
 }
 
 fn summarize_asset_groups(groups: &[ReceivedAssetGroup]) -> AssetGroupSummary {

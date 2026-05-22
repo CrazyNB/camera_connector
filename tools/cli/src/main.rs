@@ -570,8 +570,25 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
     );
     for account in dashboard.accounts {
         println!(
-            "account\tusername={}\tdevice={}\tpassword_configured={}",
-            account.username, account.device_name, account.password_configured
+            "account\tusername={}\tdevice={}\tpassword_configured={}\tonline={}\tconnections={}\tremote={}\tport={}\tlast_seen_ms={}\tlast_disconnected_ms={}",
+            account.username,
+            account.device_name,
+            account.password_configured,
+            account.online,
+            account.active_connections,
+            account.last_remote_addr.as_deref().unwrap_or("-"),
+            account
+                .last_remote_port
+                .map(|port| port.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            account
+                .last_seen_at_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            account
+                .last_disconnected_at_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string())
         );
     }
     for view in dashboard.devices {
@@ -1157,6 +1174,12 @@ mod tests {
                 username: "z5".to_string(),
                 device_name: "Camera".to_string(),
                 password_configured: true,
+                online: true,
+                active_connections: 1,
+                last_remote_addr: Some("192.168.137.56".to_string()),
+                last_remote_port: Some(50123),
+                last_seen_at_ms: Some(20),
+                last_disconnected_at_ms: None,
             }],
             transfers: camera_connector_core::TransferSummary {
                 total_count: 2,
@@ -1231,6 +1254,8 @@ mod tests {
         assert!(json.contains("\"state_dir\""));
         assert!(json.contains("\"accounts\""));
         assert!(json.contains("\"password_configured\": true"));
+        assert!(json.contains("\"online\": true"));
+        assert!(json.contains("\"last_remote_addr\": \"192.168.137.56\""));
         assert!(!json.contains("password_hash"));
         assert!(json.contains("\"transfers\""));
         assert!(json.contains("\"failed_count\": 1"));

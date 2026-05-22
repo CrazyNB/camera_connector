@@ -929,6 +929,13 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     assert_eq!(dashboard.accounts[0].username, "z5");
     assert_eq!(dashboard.accounts[0].device_name, "Studio Z5");
     assert!(dashboard.accounts[0].password_configured);
+    assert!(dashboard.accounts[0].online);
+    assert_eq!(
+        dashboard.accounts[0].last_remote_addr.as_deref(),
+        Some("192.168.137.56")
+    );
+    assert_eq!(dashboard.accounts[0].active_connections, 1);
+    assert!(dashboard.accounts[0].last_seen_at_ms.is_some());
     assert_eq!(dashboard.paths.config_path, config_path);
     assert_eq!(dashboard.paths.state_dir, state_dir);
     assert_eq!(

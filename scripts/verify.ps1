@@ -295,7 +295,7 @@ if ($LASTEXITCODE -ne 0) { throw "dashboard smoke failed" }
 if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
     throw "dashboard did not expose paged asset summary"
 }
-if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*" }).Count -lt 1) {
+if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*online=*connections=*remote=*" }).Count -lt 1) {
     throw "dashboard did not expose account summary"
 }
 if (($dashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {
@@ -320,6 +320,9 @@ if ($dashboardJson.assets.summary.group_count -ne 2) {
 }
 if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
     throw "dashboard json did not expose safe account summary"
+}
+if ($null -eq $dashboardJson.accounts[0].online -or $null -eq $dashboardJson.accounts[0].active_connections) {
+    throw "dashboard json did not expose account connection state"
 }
 if ($dashboardJson.paths.config_path -ne $configPath -or $dashboardJson.paths.state_dir -ne $pushState) {
     throw "dashboard json did not expose system paths"
