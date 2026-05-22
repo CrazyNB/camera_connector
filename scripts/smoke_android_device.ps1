@@ -15,6 +15,20 @@ if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) {
     throw "adb not found at $adb. Set ANDROID_SDK_ROOT or install Android platform-tools."
 }
 
+function Collect-Diagnostics {
+    param([string]$Name)
+
+    if ($NoDiagnostics) {
+        return
+    }
+
+    $diagnosticsDir = Join-Path $root "target\android-diagnostics\$Name"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") @serialArgs -OutputDir $diagnosticsDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android diagnostics collection failed for $Name."
+    }
+}
+
 $serialArgs = @()
 if ($Serial) {
     $serialArgs = @("-Serial", $Serial)
@@ -43,6 +57,7 @@ if ($SkipBuild) {
 
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "install_android_debug.ps1") @installArgs
 if ($LASTEXITCODE -ne 0) {
+    Collect-Diagnostics "smoke-install-failed"
     exit $LASTEXITCODE
 }
 
@@ -50,22 +65,26 @@ if ($LASTEXITCODE -ne 0) {
 
 $packagePath = (& $adb @adbArgs shell pm path $packageName) -join "`n"
 if ($packagePath -notmatch "package:") {
+    Collect-Diagnostics "smoke-package-missing"
     throw "Installed package was not found by 'pm path $packageName'."
 }
 
+& $adb @adbArgs logcat -c
+
 & $adb @adbArgs shell monkey -p $packageName -c android.intent.category.LAUNCHER 1 | Out-Host
 if ($LASTEXITCODE -ne 0) {
+    Collect-Diagnostics "smoke-launch-failed"
     exit $LASTEXITCODE
 }
 
 Start-Sleep -Seconds 2
 
-$diagnosticsDir = Join-Path $root "target\android-diagnostics\smoke-latest"
-if (-not $NoDiagnostics) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") @serialArgs -OutputDir $diagnosticsDir
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
+$appPid = (& $adb @adbArgs shell pidof $packageName) -join "`n"
+if ($appPid.Trim().Length -eq 0) {
+    Collect-Diagnostics "smoke-process-missing"
+    throw "App process is not running after launch."
 }
+
+Collect-Diagnostics "smoke-latest"
 
 Write-Host "Android device smoke passed for $packageName"
