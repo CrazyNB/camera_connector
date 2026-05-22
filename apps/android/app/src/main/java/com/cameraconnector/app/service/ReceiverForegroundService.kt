@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.cameraconnector.app.MainActivity
 import com.cameraconnector.app.core.NativeMobileCore
@@ -30,6 +31,7 @@ class ReceiverForegroundService : Service() {
         return when (intent?.action) {
             ACTION_STOP -> {
                 serviceScope.launch {
+                    Log.i(LOG_TAG, "receiver stop requested")
                     stopNativeReceiver()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf(startId)
@@ -40,6 +42,7 @@ class ReceiverForegroundService : Service() {
             else -> {
                 startForeground(NOTIFICATION_ID, notification("Starting receiver"))
                 val configPath = intent?.getStringExtra(EXTRA_CONFIG_PATH)
+                Log.i(LOG_TAG, "receiver start requested configPath=$configPath")
                 serviceScope.launch {
                     startNativeReceiver(configPath)
                 }
@@ -59,14 +62,17 @@ class ReceiverForegroundService : Service() {
     private fun startNativeReceiver(configPath: String?) {
         runCatching {
             if (nativeCore != null) {
+                Log.i(LOG_TAG, "receiver start ignored because native core is already running")
                 startForeground(NOTIFICATION_ID, notification("Receiver is already running"))
                 return
             }
             val core = nativeCore ?: NativeMobileCore(configPath).also { nativeCore = it }
             val status = core.startReceiver()
             val localAddr = status.optString("local_addr").ifBlank { "ready" }
+            Log.i(LOG_TAG, "receiver started localAddr=$localAddr")
             startForeground(NOTIFICATION_ID, notification("Receiver running at $localAddr"))
         }.onFailure { error ->
+            Log.e(LOG_TAG, "receiver start failed", error)
             startForeground(NOTIFICATION_ID, notification("Receiver failed: ${error.message}"))
         }
     }
@@ -74,6 +80,9 @@ class ReceiverForegroundService : Service() {
     private fun stopNativeReceiver() {
         runCatching {
             nativeCore?.stopReceiver()
+            Log.i(LOG_TAG, "receiver stopped")
+        }.onFailure { error ->
+            Log.e(LOG_TAG, "receiver stop failed", error)
         }
         nativeCore?.close()
         nativeCore = null
@@ -127,6 +136,7 @@ class ReceiverForegroundService : Service() {
         const val ACTION_START = "com.cameraconnector.app.receiver.START"
         const val ACTION_STOP = "com.cameraconnector.app.receiver.STOP"
 
+        private const val LOG_TAG = "CameraConnectorReceiver"
         private const val CHANNEL_ID = "camera_connector_receiver"
         private const val NOTIFICATION_ID = 1201
         private const val OPEN_APP_REQUEST_CODE = 1202

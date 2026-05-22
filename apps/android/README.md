@@ -68,6 +68,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_android_debu
 
 If multiple adb devices are connected, pass `-Serial <serial>`. Use `-SkipBuild` for a quick reinstall of the existing APK or `-NoLaunch` when you only want to install.
 
+To collect package, foreground service, and receiver logcat diagnostics from a connected Android device:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\collect_android_diagnostics.ps1
+```
+
+Diagnostics are written under `target\android-diagnostics\<timestamp>`. The receiver service logs under the `CameraConnectorReceiver` tag.
+
 To rebuild only the Rust native library and copy it into the APK source tree:
 
 ```powershell
