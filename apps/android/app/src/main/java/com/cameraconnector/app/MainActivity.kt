@@ -14,11 +14,21 @@ import kotlinx.coroutines.flow.MutableStateFlow
 class MainActivity : ComponentActivity() {
     private lateinit var coreGateway: CoreGateway
     private lateinit var permissionGateway: AndroidPermissionGateway
+    private lateinit var storageGateway: AndroidStorageGateway
     private val notificationPermissionGranted = MutableStateFlow(true)
+    private val selectedInboxLabel = MutableStateFlow<String?>(null)
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
         notificationPermissionGranted.value = permissionGateway.hasNotificationPermission()
+    }
+    private val requestInboxDirectory = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            storageGateway.persistInboxDirectory(uri)
+            selectedInboxLabel.value = storageGateway.selectedInboxLabel()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -27,7 +37,8 @@ class MainActivity : ComponentActivity() {
         coreGateway = CoreGatewayFactory.create(this)
         permissionGateway = AndroidPermissionGateway(this)
         notificationPermissionGranted.value = permissionGateway.hasNotificationPermission()
-        val storageGateway = AndroidStorageGateway(this)
+        storageGateway = AndroidStorageGateway(this)
+        selectedInboxLabel.value = storageGateway.selectedInboxLabel()
 
         setContent {
             CameraConnectorApp(
@@ -35,8 +46,12 @@ class MainActivity : ComponentActivity() {
                 storageGateway = storageGateway,
                 notificationPermissionRequired = permissionGateway.notificationPermissionRequired(),
                 notificationPermissionGranted = notificationPermissionGranted,
+                selectedInboxLabel = selectedInboxLabel,
                 onRequestNotificationPermission = {
                     requestNotificationPermission.launch(permissionGateway.notificationPermission())
+                },
+                onChooseInboxDirectory = {
+                    requestInboxDirectory.launch(null)
                 },
             )
         }

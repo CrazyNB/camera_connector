@@ -27,6 +27,7 @@ The Android source now has a native gateway boundary:
 - The Transfers screen reads native dashboard transfer counts and recent failure rows, including virtual display paths and core error messages.
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
+- The Output card launches Android's document tree picker and persists the selected inbox URI label; native smoke imports still use app-private storage until the Android storage backend writes through SAF or MediaStore.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
 
 `PreviewCoreGateway` remains the default entry point while native service smoke testing is still in progress. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.

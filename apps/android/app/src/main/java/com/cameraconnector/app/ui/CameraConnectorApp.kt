@@ -44,7 +44,9 @@ fun CameraConnectorApp(
     storageGateway: AndroidStorageGateway,
     notificationPermissionRequired: Boolean,
     notificationPermissionGranted: Flow<Boolean>,
+    selectedInboxLabel: Flow<String?>,
     onRequestNotificationPermission: () -> Unit,
+    onChooseInboxDirectory: () -> Unit,
 ) {
     val dashboard by coreGateway.observeDashboard().collectAsState(
         initial = DashboardState(
@@ -65,6 +67,7 @@ fun CameraConnectorApp(
         ),
     )
     val notificationsGranted by notificationPermissionGranted.collectAsState(initial = true)
+    val selectedInbox by selectedInboxLabel.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(MainTab.Overview) }
 
@@ -90,6 +93,8 @@ fun CameraConnectorApp(
                         notificationPermissionRequired = notificationPermissionRequired,
                         notificationPermissionGranted = notificationsGranted,
                         onRequestNotificationPermission = onRequestNotificationPermission,
+                        selectedInboxLabel = selectedInbox,
+                        onChooseInboxDirectory = onChooseInboxDirectory,
                         onStart = { scope.launch { coreGateway.startReceiver() } },
                         onStop = { scope.launch { coreGateway.stopReceiver() } },
                         onSaveReceiverSettings = { settings ->
@@ -128,6 +133,8 @@ private fun OverviewScreen(
     notificationPermissionRequired: Boolean,
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
+    selectedInboxLabel: String?,
+    onChooseInboxDirectory: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSaveReceiverSettings: (ReceiverSettings) -> Unit,
@@ -352,7 +359,13 @@ private fun OverviewScreen(
                 Column(Modifier.padding(16.dp)) {
                     Text("Output", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    Text(dashboard.receiver.outputLabel)
+                    Text(selectedInboxLabel ?: "App-private inbox")
+                    Spacer(Modifier.height(4.dp))
+                    Text("Native inbox: ${dashboard.receiver.outputLabel}")
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onChooseInboxDirectory) {
+                        Text("Choose import folder")
+                    }
                 }
             }
         }
