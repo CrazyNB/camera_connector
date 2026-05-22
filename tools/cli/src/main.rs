@@ -720,7 +720,7 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
     let primary_location = group.primary.storage_location.as_ref();
 
     format!(
-        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tdisplay={}\tprimary_location_kind={}\tprimary_location={}",
+        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tdisplay={}\tduplicate={}\tprimary_location_kind={}\tprimary_location={}",
         group.group_key,
         group.primary.filename,
         jpeg,
@@ -732,6 +732,7 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
         group.primary.remote_addr.as_deref().unwrap_or("-"),
         group.primary.original_path.as_deref().unwrap_or("-"),
         group.primary.virtual_display_path.as_deref().unwrap_or("-"),
+        duplicate_label(&group.primary),
         primary_location
             .map(StoredObjectLocation::kind)
             .unwrap_or("-"),
@@ -739,6 +740,13 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
             .map(StoredObjectLocation::display_label)
             .unwrap_or_else(|| "-".to_string())
     )
+}
+
+fn duplicate_label(asset: &ReceivedAsset) -> String {
+    match (asset.duplicate_index, asset.duplicate_count) {
+        (Some(index), Some(count)) => format!("{index}/{count}"),
+        _ => "-".to_string(),
+    }
 }
 
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
@@ -1203,6 +1211,7 @@ mod tests {
         assert!(line.contains("remote=192.168.137.56"));
         assert!(line.contains("original=DCIM/IMG_0001.CR3"));
         assert!(line.contains("display=Z5_2/DCIM/IMG_0001.CR3"));
+        assert!(line.contains("duplicate=-"));
     }
 
     #[test]

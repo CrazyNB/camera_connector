@@ -317,6 +317,57 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
 }
 
 #[test]
+fn service_marks_duplicate_assets_from_same_account_and_original_path() {
+    let state_dir = unique_temp_dir("service-transfer-duplicates");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    for (index, final_filename) in ["IMG_7777.CR3", "IMG_7777 (1).CR3"].iter().enumerate() {
+        append_transfer_record(
+            &state_dir,
+            &TransferRecord {
+                transfer_id: format!("ftp:duplicate:{index}"),
+                protocol: "ftp".to_string(),
+                status: TransferStatus::Completed,
+                original_path: "DCIM/100CANON/IMG_7777.CR3".to_string(),
+                final_filename: final_filename.to_string(),
+                final_path: None,
+                final_location: Some(StoredObjectLocation::document_uri(format!(
+                    "content://camera-connector/{final_filename}"
+                ))),
+                size_bytes: 100,
+                username: Some("canon".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("R5".to_string()),
+                started_at_ms: 10 + index as i64,
+                completed_at_ms: Some(20 + index as i64),
+                error: None,
+            },
+        )
+        .expect("transfer should append");
+    }
+
+    let service = CameraConnectorService::new(None);
+    let groups = service
+        .transfer_asset_groups_with_query(
+            &state_dir,
+            AssetGroupQuery {
+                username: Some("canon".to_string()),
+                ..AssetGroupQuery::default()
+            },
+        )
+        .expect("groups should load");
+
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].primary.filename, "IMG_7777 (1).CR3");
+    assert_eq!(groups[0].primary.duplicate_index, Some(2));
+    assert_eq!(groups[0].primary.duplicate_count, Some(2));
+    assert_eq!(groups[1].primary.filename, "IMG_7777.CR3");
+    assert_eq!(groups[1].primary.duplicate_index, Some(1));
+    assert_eq!(groups[1].primary.duplicate_count, Some(2));
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_filters_transfer_asset_groups_by_metadata_and_format() {
     let state_dir = unique_temp_dir("service-transfer-group-filter");
     std::fs::create_dir_all(&state_dir).expect("state dir should create");

@@ -248,6 +248,9 @@ if (($logBackedInboxOutput | Where-Object { $_ -like "*primary_location_kind=loc
 if (($logBackedInboxOutput | Where-Object { $_ -like "*username=verify*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "log-backed inbox did not expose transfer metadata"
 }
+if (($logBackedInboxOutput | Where-Object { $_ -like "*IMG_1234 (1)*duplicate=2/2*" }).Count -lt 1) {
+    throw "log-backed inbox did not expose duplicate metadata"
+}
 Write-Output $logBackedInboxOutput
 
 $pagedLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --summary --offset 1 --limit 1
@@ -294,6 +297,9 @@ if (($dashboardJsonOutput -join "`n") -like "*password_hash*") {
 }
 if ($dashboardJson.assets.groups[0].primary.username -ne "verify") {
     throw "dashboard json did not expose filtered asset username"
+}
+if ($dashboardJson.assets.groups[0].primary.duplicate_index -ne 2 -or $dashboardJson.assets.groups[0].primary.duplicate_count -ne 2) {
+    throw "dashboard json did not expose duplicate metadata"
 }
 Write-Output $dashboardJsonOutput
 

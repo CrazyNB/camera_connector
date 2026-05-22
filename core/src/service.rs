@@ -47,6 +47,12 @@ pub struct AssetGroupQuery {
     pub format: Option<ObjectFormat>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DuplicateInfo {
+    pub index: usize,
+    pub count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransferRecordView {
     pub record: TransferRecord,
@@ -193,10 +199,14 @@ impl CameraConnectorService {
         query: AssetGroupQuery,
     ) -> Result<Vec<ReceivedAssetGroup>> {
         let accounts = self.load_config()?.accounts;
-        let assets = read_transfer_log(state_dir)?
+        let records = read_transfer_log(state_dir)?
             .into_iter()
             .filter(|record| record.status == TransferStatus::Completed)
-            .map(|record| asset_from_transfer_record(record, &accounts))
+            .collect::<Vec<_>>();
+        let duplicates = duplicate_info_by_transfer_id(&records, &accounts);
+        let assets = records
+            .into_iter()
+            .map(|record| asset_from_transfer_record(record, &accounts, &duplicates))
             .collect::<Vec<_>>();
         Ok(group_received_assets(assets)
             .into_iter()
@@ -422,6 +432,7 @@ fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {
 fn asset_from_transfer_record(
     record: TransferRecord,
     accounts: &BTreeMap<String, ReceiverAccountConfig>,
+    duplicates: &BTreeMap<String, DuplicateInfo>,
 ) -> ReceivedAsset {
     let storage_location = record.resolved_final_location();
     let display_source = record_display_source(&record, accounts);
@@ -439,7 +450,80 @@ fn asset_from_transfer_record(
     asset.display_source = display_source;
     asset.remote_addr = record.remote_addr;
     asset.virtual_display_path = Some(virtual_display_path);
+    if let Some(duplicate) = duplicates.get(&record.transfer_id) {
+        asset.duplicate_index = Some(duplicate.index);
+        asset.duplicate_count = Some(duplicate.count);
+    }
     asset
+}
+
+fn duplicate_info_by_transfer_id(
+    records: &[TransferRecord],
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> BTreeMap<String, DuplicateInfo> {
+    let mut duplicate_keys = BTreeMap::<String, Vec<&TransferRecord>>::new();
+    for record in records {
+        if let Some(key) = duplicate_key(record, accounts) {
+            duplicate_keys.entry(key).or_default().push(record);
+        }
+    }
+
+    let mut duplicates = BTreeMap::new();
+    for duplicate_records in duplicate_keys.values_mut() {
+        if duplicate_records.len() < 2 {
+            continue;
+        }
+        duplicate_records.sort_by_key(|record| {
+            (
+                record.completed_at_ms.unwrap_or(record.started_at_ms),
+                record.started_at_ms,
+                record.transfer_id.clone(),
+            )
+        });
+        let count = duplicate_records.len();
+        for (index, record) in duplicate_records.iter().enumerate() {
+            duplicates.insert(
+                record.transfer_id.clone(),
+                DuplicateInfo {
+                    index: index + 1,
+                    count,
+                },
+            );
+        }
+    }
+    duplicates
+}
+
+fn duplicate_key(
+    record: &TransferRecord,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> Option<String> {
+    let original_path = normalized_duplicate_segment(&record.original_path)?;
+    let identity = record
+        .username
+        .as_deref()
+        .and_then(normalized_duplicate_segment)
+        .or_else(|| {
+            record_display_source(record, accounts)
+                .and_then(|value| normalized_duplicate_segment(&value))
+        })
+        .or_else(|| {
+            record
+                .remote_addr
+                .as_deref()
+                .and_then(normalized_duplicate_segment)
+        })
+        .unwrap_or_else(|| "-".to_string());
+    Some(format!("{identity}\t{original_path}"))
+}
+
+fn normalized_duplicate_segment(value: &str) -> Option<String> {
+    let normalized = value.trim().replace('\\', "/").to_ascii_lowercase();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 fn import_source_from_protocol(protocol: &str) -> ImportSource {

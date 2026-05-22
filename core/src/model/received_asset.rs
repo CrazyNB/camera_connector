@@ -28,6 +28,8 @@ pub struct ReceivedAsset {
     pub display_source: Option<String>,
     pub remote_addr: Option<String>,
     pub virtual_display_path: Option<String>,
+    pub duplicate_index: Option<usize>,
+    pub duplicate_count: Option<usize>,
 }
 
 impl ReceivedAsset {
@@ -58,6 +60,8 @@ impl ReceivedAsset {
             display_source: None,
             remote_addr: None,
             virtual_display_path: None,
+            duplicate_index: None,
+            duplicate_count: None,
         }
     }
 

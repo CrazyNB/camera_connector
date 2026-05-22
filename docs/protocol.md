@@ -80,6 +80,7 @@ Not yet implemented:
 - Recognize common RAW extensions across camera brands: `NEF`, `NRW`, `CR2`, `CR3`, `ARW`, `SRF`, `SR2`, `RAF`, `RW2`, `RWL`, `ORF`, `PEF`, and `DNG`.
 - Group files by normalized filename stem, such as `IMG_1001.JPG` and `IMG_1001.CR3`.
 - Preserve duplicates with numbered filenames instead of overwriting previous completed files.
+- Mark repeated completed imports from the same account/source and original camera path with `duplicate_index` and `duplicate_count` in asset views.
 
 ## Transfer Log
 

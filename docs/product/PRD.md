@@ -76,7 +76,6 @@ P0:
 P1:
 
 - Add authentication polish.
-- Add duplicate detection.
 - Validate SFTP receiver with real cameras and update compatibility coverage.
 
 P2:
@@ -108,6 +107,7 @@ P2:
 | RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
 | RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
 | RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
+| RX-008A | Duplicate detection | P0 | Re-uploaded assets from the same account/source and original camera path expose duplicate index and duplicate count in grouped asset views |
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename, platform final location, bytes, protocol, optional login username, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, login username, source name, remote address, transfer id, and original path; display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
