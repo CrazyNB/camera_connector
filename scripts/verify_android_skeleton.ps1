@@ -51,6 +51,7 @@ Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\storage\Andr
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverServiceController.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt"
 Assert-File "apps\android\README.md"
+Assert-File "scripts\install_android_debug.ps1"
 
 Assert-Contains "apps\android\settings.gradle.kts" "CameraConnectorAndroid"
 Assert-Contains "apps\android\build.gradle.kts" "com\.android\.application.*9\.2\.0"
@@ -126,6 +127,11 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "setContentIntent"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "\.addAction\(.*Stop"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "FLAG_IMMUTABLE"
+Assert-Contains "scripts\install_android_debug.ps1" "verify_android_build\.ps1"
+Assert-Contains "scripts\install_android_debug.ps1" "adb"
+Assert-Contains "scripts\install_android_debug.ps1" "install"
+Assert-Contains "scripts\install_android_debug.ps1" "monkey"
+Assert-Contains "scripts\install_android_debug.ps1" "com\.cameraconnector\.app"
 Assert-Contains "docs\product\android-app-architecture.md" "Kotlin \+ Jetpack Compose"
 Assert-Contains "docs\product\android-app-architecture.md" "Rust core"
 

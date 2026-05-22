@@ -60,6 +60,14 @@ cd apps\android
 %LOCALAPPDATA%\CameraConnectorToolchains\gradle-9.5.1\bin\gradle.bat :app:assembleDebug --no-daemon -PcameraConnector.useNativeCore=true
 ```
 
+To build, install, and launch the debug APK on a connected Android device:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_android_debug.ps1
+```
+
+If multiple adb devices are connected, pass `-Serial <serial>`. Use `-SkipBuild` for a quick reinstall of the existing APK or `-NoLaunch` when you only want to install.
+
 To rebuild only the Rust native library and copy it into the APK source tree:
 
 ```powershell
