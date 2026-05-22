@@ -27,6 +27,8 @@ apps/android/
     ReceiverForegroundService
     Android storage gateway
     Core gateway interface
+    NativeMobileCore Kotlin adapter
+    NativeCoreGateway dashboard adapter
 
 core/
   Existing Rust service, receiver, transfer log, accounts, grouping
@@ -103,6 +105,14 @@ or:
 ```
 
 Android JNI bindings should keep this envelope at the native boundary, then map it into typed Kotlin state before it reaches Compose screens.
+
+The Android source now has the Kotlin side of that bridge:
+
+- `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
+- `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
+- `PreviewCoreGateway` remains the default app entry until the Rust JNI shim is linked and an Android SDK/NDK build is available.
+
+The remaining bridge work is the Rust JNI shim that maps Kotlin `external` methods to the existing `core-ffi` C ABI/facade functions.
 
 ## 6. Storage Strategy
 

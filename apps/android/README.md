@@ -14,6 +14,13 @@ This directory is a scaffold. It establishes the project layout and Android boun
 
 The next implementation step is a `core-ffi` bridge that exposes the current Rust service API to Kotlin through UniFFI or JNI.
 
+The Android source now has a native gateway boundary:
+
+- `NativeMobileCore` owns the native handle and JSON envelope parsing.
+- `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
+
+`PreviewCoreGateway` remains the default entry point until an Android SDK/NDK build is available and the JNI shim is linked into the APK.
+
 ## Local Build Prerequisites
 
 - JDK 17
