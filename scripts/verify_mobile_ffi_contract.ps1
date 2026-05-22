@@ -19,14 +19,18 @@ $requiredFunctions = @(
     "camera_connector_mobile_core_default_state_dir",
     "camera_connector_mobile_core_dashboard_json",
     "camera_connector_mobile_core_save_receiver_settings_json",
-    "camera_connector_mobile_core_save_device_account_json"
+    "camera_connector_mobile_core_save_device_account_json",
+    "camera_connector_mobile_core_start_receiver_json",
+    "camera_connector_mobile_core_stop_receiver_json"
 )
 $requiredJniFunctions = @(
     "Java_com_cameraconnector_app_core_NativeMobileCore_create",
     "Java_com_cameraconnector_app_core_NativeMobileCore_destroy",
     "Java_com_cameraconnector_app_core_NativeMobileCore_dashboardJson",
     "Java_com_cameraconnector_app_core_NativeMobileCore_saveReceiverSettingsJson",
-    "Java_com_cameraconnector_app_core_NativeMobileCore_saveDeviceAccountJson"
+    "Java_com_cameraconnector_app_core_NativeMobileCore_saveDeviceAccountJson",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_startReceiverJson",
+    "Java_com_cameraconnector_app_core_NativeMobileCore_stopReceiverJson"
 )
 
 foreach ($functionName in $requiredFunctions) {

@@ -26,10 +26,16 @@ class NativeCoreGateway(
     }
 
     override suspend fun startReceiver() {
+        withContext(Dispatchers.IO) {
+            nativeCore.startReceiver()
+        }
         refresh()
     }
 
     override suspend fun stopReceiver() {
+        withContext(Dispatchers.IO) {
+            nativeCore.stopReceiver()
+        }
         refresh()
     }
 

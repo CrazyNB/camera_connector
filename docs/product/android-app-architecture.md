@@ -85,6 +85,8 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_dashboard_json`
 - `camera_connector_mobile_core_save_receiver_settings_json`
 - `camera_connector_mobile_core_save_device_account_json`
+- `camera_connector_mobile_core_start_receiver_json`
+- `camera_connector_mobile_core_stop_receiver_json`
 
 The consumable C contract lives in:
 
@@ -120,8 +122,10 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 - `dashboardJson`
 - `saveReceiverSettingsJson`
 - `saveDeviceAccountJson`
+- `startReceiverJson`
+- `stopReceiverJson`
 
-The JNI shim reuses the same `MobileCore` facade as the C ABI, so Android-specific binding code does not duplicate receiver, account, dashboard, or transfer logic.
+The JNI shim reuses the same `MobileCore` facade as the C ABI, so Android-specific binding code does not duplicate receiver, account, dashboard, transfer, or receiver lifecycle logic.
 
 Android arm64 native packaging is produced by:
 
@@ -145,7 +149,7 @@ Native gateway builds can be produced without editing source code:
 gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 ```
 
-The remaining bridge work is making `ReceiverForegroundService` own native receiver start/stop, then using the native gateway build for device-side smoke testing once the service can report real receiver state.
+The native gateway can now call core start/stop directly. The remaining bridge work is moving those calls behind `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status.
 
 ## 6. Storage Strategy
 

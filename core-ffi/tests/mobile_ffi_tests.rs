@@ -7,6 +7,8 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_destroy, camera_connector_mobile_core_free_string,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
+    camera_connector_mobile_core_start_receiver_json,
+    camera_connector_mobile_core_stop_receiver_json,
 };
 
 #[test]
@@ -127,6 +129,45 @@ fn ffi_rejects_null_core_pointer() {
 
     assert_eq!(value["ok"], false);
     assert_eq!(value["error"], "mobile core pointer is null");
+}
+
+#[test]
+fn ffi_starts_and_stops_receiver_with_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let output_dir = temp.path().join("output");
+    let state_dir = temp.path().join("state");
+    let patch = CString::new(format!(
+        r#"{{
+            "protocol":"ftp",
+            "bind_host":"127.0.0.1",
+            "ftp_port":0,
+            "output_dir":{},
+            "state_dir":{}
+        }}"#,
+        serde_json::to_string(&output_dir.to_string_lossy()).unwrap(),
+        serde_json::to_string(&state_dir.to_string_lossy()).unwrap(),
+    ))
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_receiver_settings_json(core, patch.as_ptr())
+    });
+
+    let started =
+        take_ffi_string(unsafe { camera_connector_mobile_core_start_receiver_json(core) });
+    let started: Value = serde_json::from_str(&started).unwrap();
+    assert_eq!(started["ok"], true);
+    assert_eq!(started["value"]["phase"], "Running");
+
+    let stopped = take_ffi_string(unsafe { camera_connector_mobile_core_stop_receiver_json(core) });
+    let stopped: Value = serde_json::from_str(&stopped).unwrap();
+    assert_eq!(stopped["ok"], true);
+    assert_eq!(stopped["value"]["phase"], "Stopped");
+
+    unsafe { camera_connector_mobile_core_destroy(core) };
 }
 
 fn take_ffi_string(ptr: *mut std::os::raw::c_char) -> String {

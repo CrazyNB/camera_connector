@@ -29,6 +29,12 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         }
     }
 
+    fun startReceiver(): JSONObject =
+        call { startReceiverJson(handle) }
+
+    fun stopReceiver(): JSONObject =
+        call { stopReceiverJson(handle) }
+
     override fun close() {
         val current = handle
         if (current != 0L) {
@@ -56,6 +62,8 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         password: String?,
         deviceName: String,
     ): String
+    private external fun startReceiverJson(handle: Long): String
+    private external fun stopReceiverJson(handle: Long): String
 
     companion object {
         init {

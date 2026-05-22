@@ -3,8 +3,9 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorDashboard, CameraConnectorService, ImporterError, PushProtocol,
-    ReceiverSettingsConfig, ReceiverSettingsUpdate,
+    AssetGroupQuery, CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService,
+    ImporterError, PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig,
+    ReceiverSettingsUpdate,
 };
 use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JClass, JString};
@@ -38,6 +39,8 @@ pub type MobileCoreResult<T> = std::result::Result<T, MobileCoreError>;
 #[derive(Debug, Clone)]
 pub struct MobileCore {
     service: CameraConnectorService,
+    runtime: CameraConnectorRuntime,
+    async_runtime: std::sync::Arc<tokio::runtime::Runtime>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -61,8 +64,13 @@ pub struct MobileAccountView {
 
 impl MobileCore {
     pub fn new(config_path: Option<String>) -> Self {
+        let service = CameraConnectorService::new(config_path.map(PathBuf::from));
         Self {
-            service: CameraConnectorService::new(config_path.map(PathBuf::from)),
+            runtime: CameraConnectorRuntime::new(service.clone()),
+            service,
+            async_runtime: std::sync::Arc::new(
+                tokio::runtime::Runtime::new().expect("mobile async runtime should initialize"),
+            ),
         }
     }
 
@@ -117,6 +125,28 @@ impl MobileCore {
             password_configured,
         };
         Ok(serde_json::to_string(&view)?)
+    }
+
+    pub fn start_receiver_json(&self) -> MobileCoreResult<String> {
+        let status =
+            self.async_runtime
+                .block_on(self.runtime.start_receiver(ReceiverConfigRequest {
+                    protocol: None,
+                    bind_host: None,
+                    port: None,
+                    output_dir: None,
+                    state_dir: None,
+                    username: None,
+                    password: None,
+                    advertised_host: None,
+                    source_name: None,
+                }))?;
+        Ok(serde_json::to_string(&status)?)
+    }
+
+    pub fn stop_receiver_json(&self) -> MobileCoreResult<String> {
+        let status = self.async_runtime.block_on(self.runtime.stop_receiver())?;
+        Ok(serde_json::to_string(&status)?)
     }
 }
 
@@ -256,6 +286,32 @@ pub unsafe extern "C" fn camera_connector_mobile_core_save_device_account_json(
         let device_name = required_c_string(device_name, "device_name")?;
         let account = core_ref(core)?.save_device_account_json(username, password, device_name)?;
         parse_json_value(&account)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_start_receiver_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let status = core_ref(core)?.start_receiver_json()?;
+        parse_json_value(&status)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_stop_receiver_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let status = core_ref(core)?.stop_receiver_json()?;
+        parse_json_value(&status)
     })
 }
 
@@ -414,6 +470,36 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveDe
                 device_name?,
             )?;
             parse_json_value(&account)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_startReceiverJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let status = mobile_core_from_handle(handle)?.start_receiver_json()?;
+            parse_json_value(&status)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_stopReceiverJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let status = mobile_core_from_handle(handle)?.stop_receiver_json()?;
+            parse_json_value(&status)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()
