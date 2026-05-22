@@ -29,6 +29,11 @@ Invoke-CargoDev "cargo clippy --workspace -- -D warnings"
 Invoke-CargoDev "cargo test --workspace"
 Invoke-CargoDev "cargo build --workspace"
 
+& (Join-Path $root "scripts\verify_android_skeleton.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "Android skeleton verification failed"
+}
+
 if (Test-Path $pushInput) {
     Remove-Item -LiteralPath $pushInput -Recurse -Force
 }
