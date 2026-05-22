@@ -122,6 +122,10 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Nat
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "ACTION_START"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "ACTION_STOP"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "NativeMobileCore"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "PendingIntent"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "setContentIntent"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "\.addAction\(.*Stop"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "FLAG_IMMUTABLE"
 Assert-Contains "docs\product\android-app-architecture.md" "Kotlin \+ Jetpack Compose"
 Assert-Contains "docs\product\android-app-architecture.md" "Rust core"
 

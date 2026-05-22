@@ -2,12 +2,14 @@ package com.cameraconnector.app.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.cameraconnector.app.MainActivity
 import com.cameraconnector.app.core.NativeMobileCore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,8 +84,30 @@ class ReceiverForegroundService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setContentTitle("Camera Connector")
             .setContentText(message)
+            .setContentIntent(openAppPendingIntent())
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(0, "Stop", stopReceiverPendingIntent())
             .build()
+
+    private fun openAppPendingIntent(): PendingIntent =
+        PendingIntent.getActivity(
+            this,
+            OPEN_APP_REQUEST_CODE,
+            Intent(this, MainActivity::class.java)
+                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    private fun stopReceiverPendingIntent(): PendingIntent =
+        PendingIntent.getService(
+            this,
+            STOP_RECEIVER_REQUEST_CODE,
+            Intent(this, ReceiverForegroundService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -105,6 +129,8 @@ class ReceiverForegroundService : Service() {
 
         private const val CHANNEL_ID = "camera_connector_receiver"
         private const val NOTIFICATION_ID = 1201
+        private const val OPEN_APP_REQUEST_CODE = 1202
+        private const val STOP_RECEIVER_REQUEST_CODE = 1203
         private const val EXTRA_CONFIG_PATH = "config_path"
         private const val EXTRA_STATE_DIR = "state_dir"
 

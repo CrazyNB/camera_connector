@@ -115,6 +115,7 @@ The Android source now has the Kotlin side of that bridge:
 - `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`.
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
+- The foreground notification deep-links back into `MainActivity` and exposes a Stop action backed by an immutable service `PendingIntent`.
 - `PreviewCoreGateway` remains the default app entry until native service smoke testing is complete.
 - Device account setup flows through the same gateway: Compose collects device name, FTP/SFTP username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
 - Receiver setup also flows through the gateway: Compose can save protocol, bind host, FTP port, and SFTP port while leaving Android output storage on the current app-private inbox until SAF or MediaStore selection is wired.

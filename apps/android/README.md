@@ -21,6 +21,7 @@ The Android source now has a native gateway boundary:
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
 - `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/inbox` and `filesDir/state`.
 - `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
+- The foreground notification can reopen the app and exposes a Stop action so receiver shutdown is available outside the Compose UI.
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
 - The Overview screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
 - The Overview screen can save receiver protocol, bind host, FTP port, and SFTP port through the native gateway; output storage stays app-private until Android directory selection is wired.
