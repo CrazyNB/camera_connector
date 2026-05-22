@@ -84,6 +84,12 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_save_receiver_settings_json`
 - `camera_connector_mobile_core_save_device_account_json`
 
+The consumable C contract lives in:
+
+```text
+core-ffi/include/camera_connector_mobile.h
+```
+
 Every string-returning call returns a JSON envelope:
 
 ```json

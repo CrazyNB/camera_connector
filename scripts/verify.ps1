@@ -33,6 +33,10 @@ Invoke-CargoDev "cargo build --workspace"
 if ($LASTEXITCODE -ne 0) {
     throw "Android skeleton verification failed"
 }
+& (Join-Path $root "scripts\verify_mobile_ffi_contract.ps1")
+if ($LASTEXITCODE -ne 0) {
+    throw "Mobile FFI contract verification failed"
+}
 
 if (Test-Path $pushInput) {
     Remove-Item -LiteralPath $pushInput -Recurse -Force
