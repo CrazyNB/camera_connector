@@ -275,8 +275,17 @@ private fun OverviewScreen(
                     } else {
                         dashboard.accounts.forEach { account ->
                             Text("${account.deviceName} / ${account.username}")
-                            val address = account.latestIp?.let { " / $it" }.orEmpty()
-                            Text("${if (account.online) "Online" else "Offline"}$address")
+                            val endpoint = listOfNotNull(
+                                account.latestIp,
+                                account.latestPort?.toString(),
+                            ).joinToString(":")
+                            Text(
+                                "${if (account.online) "Online" else "Offline"} / " +
+                                    "connections=${account.activeConnections}" +
+                                    endpoint.ifBlank { "" }.let { if (it.isBlank()) "" else " / $it" },
+                            )
+                            account.lastSeenAtMs?.let { Text("Last seen: $it") }
+                            account.lastDisconnectedAtMs?.let { Text("Last disconnected: $it") }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -315,6 +324,10 @@ private fun OverviewScreen(
                                     deviceName = deviceName.trim().ifBlank { cleanUsername },
                                     passwordConfigured = cleanPassword.isNotBlank(),
                                     latestIp = null,
+                                    latestPort = null,
+                                    activeConnections = 0,
+                                    lastSeenAtMs = null,
+                                    lastDisconnectedAtMs = null,
                                     online = false,
                                 ),
                                 cleanPassword.takeIf { it.isNotBlank() },

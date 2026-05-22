@@ -146,6 +146,13 @@ class NativeCoreGateway(
                         deviceName = item.optString("device_name"),
                         passwordConfigured = item.optBoolean("password_configured"),
                         latestIp = item.optString("last_remote_addr").takeIf { it.isNotBlank() },
+                        latestPort = item.optInt("last_remote_port")
+                            .takeIf { !item.isNull("last_remote_port") },
+                        activeConnections = item.optInt("active_connections"),
+                        lastSeenAtMs = item.optLong("last_seen_at_ms")
+                            .takeIf { !item.isNull("last_seen_at_ms") },
+                        lastDisconnectedAtMs = item.optLong("last_disconnected_at_ms")
+                            .takeIf { !item.isNull("last_disconnected_at_ms") },
                         online = item.optBoolean("online"),
                     ),
                 )

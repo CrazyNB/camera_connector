@@ -40,6 +40,10 @@ data class DeviceAccount(
     val deviceName: String,
     val passwordConfigured: Boolean,
     val latestIp: String?,
+    val latestPort: Int?,
+    val activeConnections: Int,
+    val lastSeenAtMs: Long?,
+    val lastDisconnectedAtMs: Long?,
     val online: Boolean,
 )
 
@@ -72,6 +76,10 @@ class PreviewCoreGateway : CoreGateway {
                     deviceName = "Camera 01",
                     passwordConfigured = true,
                     latestIp = null,
+                    latestPort = null,
+                    activeConnections = 0,
+                    lastSeenAtMs = null,
+                    lastDisconnectedAtMs = null,
                     online = false,
                 ),
             ),
