@@ -278,6 +278,9 @@ if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit
 if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*" }).Count -lt 1) {
     throw "dashboard did not expose account summary"
 }
+if (($dashboardOutput | Where-Object { $_ -like "transfers*total=2*completed=2*failed=0*" }).Count -lt 1) {
+    throw "dashboard did not expose transfer summary"
+}
 if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
     throw "dashboard did not expose filtered asset rows"
 }
@@ -291,6 +294,9 @@ if ($dashboardJson.assets.summary.group_count -ne 2) {
 }
 if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
     throw "dashboard json did not expose safe account summary"
+}
+if ($dashboardJson.transfers.total_count -ne 2 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 0) {
+    throw "dashboard json did not expose transfer summary"
 }
 if (($dashboardJsonOutput -join "`n") -like "*password_hash*") {
     throw "dashboard json exposed password hash"

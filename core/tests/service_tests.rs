@@ -95,6 +95,71 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
 }
 
 #[test]
+fn service_summarizes_transfer_statuses() {
+    let state_dir = unique_temp_dir("service-transfer-summary");
+    std::fs::create_dir_all(&state_dir).expect("state dir should create");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:ok".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "IMG_0001.CR3".to_string(),
+            final_filename: "IMG_0001.CR3".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/IMG_0001.CR3",
+            )),
+            size_bytes: 42,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        },
+    )
+    .expect("completed transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:failed".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Failed,
+            original_path: "IMG_0002.CR3".to_string(),
+            final_filename: "IMG_0002.CR3".to_string(),
+            final_path: None,
+            final_location: None,
+            size_bytes: 0,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 11,
+            completed_at_ms: Some(21),
+            error: Some("connection reset".to_string()),
+        },
+    )
+    .expect("failed transfer should append");
+
+    let service = CameraConnectorService::new(None);
+    let summary = service
+        .transfer_summary_with_query(
+            &state_dir,
+            TransferQuery {
+                username: Some("z5".to_string()),
+                ..TransferQuery::default()
+            },
+        )
+        .expect("transfer summary should load");
+
+    assert_eq!(summary.total_count, 2);
+    assert_eq!(summary.completed_count, 1);
+    assert_eq!(summary.failed_count, 1);
+
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_resolves_transfer_display_source_from_current_account_name() {
     let config_path = unique_temp_path("service-transfer-account-config");
     let state_dir = unique_temp_dir("service-transfer-account-state");

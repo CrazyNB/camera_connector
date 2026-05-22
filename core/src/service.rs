@@ -63,6 +63,13 @@ pub struct TransferRecordView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferSummary {
+    pub total_count: usize,
+    pub completed_count: usize,
+    pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetFacetCount {
     pub value: String,
     pub group_count: usize,
@@ -107,6 +114,7 @@ pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
     pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
+    pub transfers: TransferSummary,
     pub assets: AssetGroupPage,
 }
 
@@ -279,6 +287,19 @@ impl CameraConnectorService {
         Ok(views)
     }
 
+    pub fn transfer_summary_with_query(
+        &self,
+        output_dir: impl AsRef<Path>,
+        query: TransferQuery,
+    ) -> Result<TransferSummary> {
+        let accounts = self.load_config()?.accounts;
+        let records = read_transfer_log(output_dir)?
+            .into_iter()
+            .filter(|record| transfer_matches(record, &query, &accounts))
+            .collect::<Vec<_>>();
+        Ok(summarize_transfers(&records))
+    }
+
     pub fn connected_devices(
         &self,
         output_dir: impl AsRef<Path>,
@@ -318,6 +339,10 @@ impl CameraConnectorService {
                 asset_query.username.as_deref(),
                 online_devices_only,
             )?,
+            transfers: self.transfer_summary_with_query(
+                state_dir,
+                transfer_query_from_asset_query(&asset_query),
+            )?,
             assets: self.transfer_asset_group_page_with_query(
                 state_dir,
                 asset_query,
@@ -325,6 +350,31 @@ impl CameraConnectorService {
                 limit,
             )?,
         })
+    }
+}
+
+fn transfer_query_from_asset_query(query: &AssetGroupQuery) -> TransferQuery {
+    TransferQuery {
+        transfer_id: None,
+        original_path: query.original_path.clone(),
+        final_filename: None,
+        username: query.username.clone(),
+        source_name: query.source_name.clone(),
+        remote_addr: query.remote_addr.clone(),
+    }
+}
+
+fn summarize_transfers(records: &[TransferRecord]) -> TransferSummary {
+    TransferSummary {
+        total_count: records.len(),
+        completed_count: records
+            .iter()
+            .filter(|record| record.status == TransferStatus::Completed)
+            .count(),
+        failed_count: records
+            .iter()
+            .filter(|record| record.status == TransferStatus::Failed)
+            .count(),
     }
 }
 

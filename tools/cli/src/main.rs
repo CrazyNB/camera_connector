@@ -576,6 +576,12 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
         );
     }
     println!(
+        "transfers\ttotal={}\tcompleted={}\tfailed={}",
+        dashboard.transfers.total_count,
+        dashboard.transfers.completed_count,
+        dashboard.transfers.failed_count
+    );
+    println!(
         "summary\t{}",
         asset_group_page_summary_line(&dashboard.assets).trim_start_matches("summary\t")
     );
@@ -1099,6 +1105,11 @@ mod tests {
                 device_name: "Camera".to_string(),
                 password_configured: true,
             }],
+            transfers: camera_connector_core::TransferSummary {
+                total_count: 2,
+                completed_count: 1,
+                failed_count: 1,
+            },
             devices: vec![camera_connector_core::ConnectedDeviceView {
                 device: camera_connector_core::ConnectedDevice {
                     remote_addr: "192.168.137.56".to_string(),
@@ -1143,6 +1154,8 @@ mod tests {
         assert!(json.contains("\"accounts\""));
         assert!(json.contains("\"password_configured\": true"));
         assert!(!json.contains("password_hash"));
+        assert!(json.contains("\"transfers\""));
+        assert!(json.contains("\"failed_count\": 1"));
         assert!(json.contains("\"devices\""));
         assert!(json.contains("\"assets\""));
         assert!(json.contains("\"group_key\": \"IMG_0001\""));

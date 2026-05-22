@@ -30,5 +30,5 @@ pub use runtime::{
 pub use service::{
     AccountView, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorDashboard, CameraConnectorService, ConnectedDeviceView, ReceiverConfigRequest,
-    TransferQuery, TransferRecordView,
+    TransferQuery, TransferRecordView, TransferSummary,
 };
