@@ -1,4 +1,6 @@
-use camera_connector_core::{CameraConnectorConfig, ReceiverAccountConfig, ReceiverPassword};
+use camera_connector_core::{
+    CameraConnectorConfig, PushProtocol, ReceiverAccountConfig, ReceiverPassword,
+};
 
 #[test]
 fn receiver_account_config_hashes_plain_passwords() {
@@ -92,6 +94,45 @@ fn camera_connector_config_overrides_with_transient_account() {
         .expect("receiver password should exist")
         .verify("new-secret")
         .expect("new password should verify"));
+}
+
+#[test]
+fn camera_connector_config_persists_receiver_settings() {
+    let path = unique_temp_config_path("core-receiver-config");
+    let output_dir = std::env::temp_dir().join("camera-connector-config-output");
+    let state_dir = std::env::temp_dir().join("camera-connector-config-state");
+    let mut config = CameraConnectorConfig::default();
+    config.receiver.protocol = PushProtocol::Sftp;
+    config.receiver.bind_host = "127.0.0.1".to_string();
+    config.receiver.ftp_port = 2122;
+    config.receiver.sftp_port = 2223;
+    config.receiver.output_dir = Some(output_dir.clone());
+    config.receiver.state_dir = Some(state_dir.clone());
+    config.receiver.advertised_host = Some("192.168.137.1".to_string());
+    config.receiver.source_name = Some("Studio".to_string());
+
+    config.save(Some(&path)).expect("config saves");
+    let loaded = CameraConnectorConfig::load(Some(&path)).expect("config loads");
+
+    assert_eq!(loaded.receiver.protocol, PushProtocol::Sftp);
+    assert_eq!(loaded.receiver.bind_host, "127.0.0.1");
+    assert_eq!(loaded.receiver.ftp_port, 2122);
+    assert_eq!(loaded.receiver.sftp_port, 2223);
+    assert_eq!(
+        loaded.receiver.output_dir.as_deref(),
+        Some(output_dir.as_path())
+    );
+    assert_eq!(
+        loaded.receiver.state_dir.as_deref(),
+        Some(state_dir.as_path())
+    );
+    assert_eq!(
+        loaded.receiver.advertised_host.as_deref(),
+        Some("192.168.137.1")
+    );
+    assert_eq!(loaded.receiver.source_name.as_deref(), Some("Studio"));
+
+    let _ = std::fs::remove_file(path);
 }
 
 fn unique_temp_config_path(name: &str) -> std::path::PathBuf {

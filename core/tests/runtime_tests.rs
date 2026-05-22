@@ -16,10 +16,10 @@ async fn runtime_starts_and_stops_ftp_receiver() {
 
     let running = runtime
         .start_receiver(ReceiverConfigRequest {
-            protocol: PushProtocol::Ftp,
-            bind_host: "127.0.0.1".to_string(),
-            port: 0,
-            output_dir: output_dir.clone(),
+            protocol: Some(PushProtocol::Ftp),
+            bind_host: Some("127.0.0.1".to_string()),
+            port: Some(0),
+            output_dir: Some(output_dir.clone()),
             state_dir: Some(state_dir.clone()),
             username: None,
             password: None,
@@ -82,10 +82,10 @@ async fn runtime_status_reports_account_authentication_mode() {
 
     let running = runtime
         .start_receiver(ReceiverConfigRequest {
-            protocol: PushProtocol::Ftp,
-            bind_host: "127.0.0.1".to_string(),
-            port: 0,
-            output_dir: output_dir.clone(),
+            protocol: Some(PushProtocol::Ftp),
+            bind_host: Some("127.0.0.1".to_string()),
+            port: Some(0),
+            output_dir: Some(output_dir.clone()),
             state_dir: Some(state_dir.clone()),
             username: None,
             password: None,
@@ -117,10 +117,10 @@ async fn runtime_records_failed_status_when_port_is_unavailable() {
 
     let result = runtime
         .start_receiver(ReceiverConfigRequest {
-            protocol: PushProtocol::Ftp,
-            bind_host: "127.0.0.1".to_string(),
-            port,
-            output_dir: output_dir.clone(),
+            protocol: Some(PushProtocol::Ftp),
+            bind_host: Some("127.0.0.1".to_string()),
+            port: Some(port),
+            output_dir: Some(output_dir.clone()),
             state_dir: Some(state_dir.clone()),
             username: None,
             password: None,

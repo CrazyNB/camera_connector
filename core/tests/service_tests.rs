@@ -11,6 +11,13 @@ fn service_builds_receiver_config_from_saved_accounts() {
     let config_path = unique_temp_path("service-config");
     let output_dir = unique_temp_dir("service-output");
     let mut app_config = CameraConnectorConfig::default();
+    let configured_state_dir = unique_temp_dir("service-config-state");
+    app_config.receiver.protocol = PushProtocol::Sftp;
+    app_config.receiver.bind_host = "127.0.0.1".to_string();
+    app_config.receiver.sftp_port = 2223;
+    app_config.receiver.output_dir = Some(output_dir.clone());
+    app_config.receiver.state_dir = Some(configured_state_dir.clone());
+    app_config.receiver.advertised_host = Some("192.168.137.1".to_string());
     app_config
         .set_account("z5", Some("secret"), "Z5_2")
         .expect("account should save");
@@ -21,29 +28,31 @@ fn service_builds_receiver_config_from_saved_accounts() {
     let service = CameraConnectorService::new(Some(config_path.clone()));
     let receiver = service
         .receiver_config(ReceiverConfigRequest {
-            protocol: PushProtocol::Ftp,
-            bind_host: "0.0.0.0".to_string(),
-            port: 2121,
-            output_dir: output_dir.clone(),
+            protocol: None,
+            bind_host: None,
+            port: None,
+            output_dir: None,
             state_dir: None,
             username: None,
             password: None,
-            advertised_host: Some("192.168.137.1".to_string()),
+            advertised_host: None,
             source_name: None,
         })
         .expect("receiver config should build");
 
+    assert_eq!(receiver.protocol, PushProtocol::Sftp);
+    assert_eq!(receiver.bind_host, "127.0.0.1");
+    assert_eq!(receiver.port, 2223);
+    assert_eq!(receiver.output_dir, output_dir);
     assert_eq!(receiver.accounts.len(), 1);
     assert_eq!(receiver.accounts[0].username, "z5");
     assert_eq!(receiver.accounts[0].device_name, "Z5_2");
     assert_eq!(receiver.advertised_host.as_deref(), Some("192.168.137.1"));
-    assert_eq!(
-        receiver.state_dir,
-        config_path.parent().unwrap().join("state")
-    );
+    assert_eq!(receiver.state_dir, configured_state_dir);
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(output_dir);
+    let _ = std::fs::remove_dir_all(configured_state_dir);
 }
 
 #[test]

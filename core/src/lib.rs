@@ -11,7 +11,8 @@ pub use model::{
 };
 pub use push::{
     CameraConnectorConfig, FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer,
-    ReceiverAccount, ReceiverAccountConfig, ReceiverPassword, SftpPushServer,
+    ReceiverAccount, ReceiverAccountConfig, ReceiverPassword, ReceiverSettingsConfig,
+    SftpPushServer,
 };
 pub use receive::{
     append_transfer_record, connected_devices_path, mark_all_connected_devices_offline,

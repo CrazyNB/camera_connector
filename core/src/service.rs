@@ -17,10 +17,10 @@ pub struct CameraConnectorService {
 
 #[derive(Debug, Clone)]
 pub struct ReceiverConfigRequest {
-    pub protocol: PushProtocol,
-    pub bind_host: String,
-    pub port: u16,
-    pub output_dir: PathBuf,
+    pub protocol: Option<PushProtocol>,
+    pub bind_host: Option<String>,
+    pub port: Option<u16>,
+    pub output_dir: Option<PathBuf>,
     pub state_dir: Option<PathBuf>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -156,17 +156,31 @@ impl CameraConnectorService {
     }
 
     pub fn receiver_config(&self, request: ReceiverConfigRequest) -> Result<PushReceiverConfig> {
-        let state_dir = request.state_dir.unwrap_or_else(|| self.state_dir());
-        let mut config = PushReceiverConfig::new(
-            request.protocol,
-            request.bind_host,
-            request.port,
-            request.output_dir,
-        )
-        .with_state_dir(state_dir);
-        config.advertised_host = request.advertised_host;
-        config.source_name = request.source_name;
-        config.accounts = self.load_config()?.effective_accounts(
+        let app_config = self.load_config()?;
+        let receiver_settings = app_config.receiver.clone();
+        let protocol = request.protocol.unwrap_or(receiver_settings.protocol);
+        let bind_host = request
+            .bind_host
+            .unwrap_or_else(|| receiver_settings.bind_host.clone());
+        let port = request.port.unwrap_or(match protocol {
+            PushProtocol::Ftp => receiver_settings.ftp_port,
+            PushProtocol::Sftp => receiver_settings.sftp_port,
+        });
+        let output_dir = request
+            .output_dir
+            .or(receiver_settings.output_dir.clone())
+            .unwrap_or_else(CameraConnectorConfig::default_output_dir);
+        let state_dir = request
+            .state_dir
+            .or(receiver_settings.state_dir.clone())
+            .unwrap_or_else(|| self.state_dir());
+        let mut config = PushReceiverConfig::new(protocol, bind_host, port, output_dir)
+            .with_state_dir(state_dir);
+        config.advertised_host = request
+            .advertised_host
+            .or(receiver_settings.advertised_host);
+        config.source_name = request.source_name.or(receiver_settings.source_name);
+        config.accounts = app_config.effective_accounts(
             request.username.as_deref(),
             request.password.as_deref(),
             config.source_name.as_deref(),

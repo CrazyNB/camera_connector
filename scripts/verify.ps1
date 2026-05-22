@@ -69,6 +69,10 @@ if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
 $configRaw = Get-Content -Raw -LiteralPath $configPath
 if ($configRaw -like "*secret*") { throw "account config leaked plaintext password" }
 if ($configRaw -notlike "*password_hash*") { throw "account config did not store a password hash" }
+$configJson = $configRaw | ConvertFrom-Json
+if ($configJson.receiver.protocol -ne "Ftp" -or $configJson.receiver.ftp_port -ne 2121 -or $configJson.receiver.sftp_port -ne 2222) {
+    throw "receiver settings were not persisted in config"
+}
 
 $accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
 if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }

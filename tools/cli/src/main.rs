@@ -369,10 +369,10 @@ async fn main() -> Result<()> {
             let service = CameraConnectorService::new(config.clone());
             let runtime = CameraConnectorRuntime::new(service.clone());
             let request = ReceiverConfigRequest {
-                protocol: PushProtocol::Ftp,
-                bind_host,
-                port,
-                output_dir: output,
+                protocol: Some(PushProtocol::Ftp),
+                bind_host: Some(bind_host),
+                port: Some(port),
+                output_dir: Some(output),
                 state_dir: state,
                 username,
                 password,
@@ -403,10 +403,10 @@ async fn main() -> Result<()> {
             let service = CameraConnectorService::new(config.clone());
             let runtime = CameraConnectorRuntime::new(service.clone());
             let request = ReceiverConfigRequest {
-                protocol: PushProtocol::Sftp,
-                bind_host,
-                port,
-                output_dir: output,
+                protocol: Some(PushProtocol::Sftp),
+                bind_host: Some(bind_host),
+                port: Some(port),
+                output_dir: Some(output),
                 state_dir: state,
                 username,
                 password,
@@ -793,10 +793,10 @@ fn duplicate_label(asset: &ReceivedAsset) -> String {
 
 fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
     CameraConnectorService::new(args.config_path).receiver_config(ReceiverConfigRequest {
-        protocol: args.protocol,
-        bind_host: args.bind_host,
-        port: args.port,
-        output_dir: args.output,
+        protocol: Some(args.protocol),
+        bind_host: Some(args.bind_host),
+        port: Some(args.port),
+        output_dir: Some(args.output),
         state_dir: args.state,
         username: args.username,
         password: args.password,

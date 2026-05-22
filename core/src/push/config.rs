@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ImporterError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushProtocol {
+    #[default]
     Ftp,
     Sftp,
 }
@@ -104,7 +105,44 @@ pub struct ReceiverAccountConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraConnectorConfig {
     #[serde(default)]
+    pub receiver: ReceiverSettingsConfig,
+    #[serde(default)]
     pub accounts: BTreeMap<String, ReceiverAccountConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiverSettingsConfig {
+    #[serde(default)]
+    pub protocol: PushProtocol,
+    #[serde(default = "default_bind_host")]
+    pub bind_host: String,
+    #[serde(default = "default_ftp_port")]
+    pub ftp_port: u16,
+    #[serde(default = "default_sftp_port")]
+    pub sftp_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advertised_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<String>,
+}
+
+impl Default for ReceiverSettingsConfig {
+    fn default() -> Self {
+        Self {
+            protocol: PushProtocol::Ftp,
+            bind_host: default_bind_host(),
+            ftp_port: default_ftp_port(),
+            sftp_port: default_sftp_port(),
+            output_dir: None,
+            state_dir: None,
+            advertised_host: None,
+            source_name: None,
+        }
+    }
 }
 
 impl CameraConnectorConfig {
@@ -150,6 +188,10 @@ impl CameraConnectorConfig {
             .parent()
             .map(|parent| parent.join("state"))
             .unwrap_or_else(|| PathBuf::from("camera-connector-state"))
+    }
+
+    pub fn default_output_dir() -> PathBuf {
+        default_output_dir()
     }
 
     pub fn set_account(
@@ -301,6 +343,30 @@ fn default_config_path() -> PathBuf {
             .join("config.json");
     }
     PathBuf::from("camera-connector-config.json")
+}
+
+fn default_output_dir() -> PathBuf {
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        return PathBuf::from(profile)
+            .join("Pictures")
+            .join("CameraConnector");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join("Pictures").join("CameraConnector");
+    }
+    PathBuf::from("CameraConnector")
+}
+
+fn default_bind_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_ftp_port() -> u16 {
+    2121
+}
+
+fn default_sftp_port() -> u16 {
+    2222
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -134,7 +134,7 @@ The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 
-Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
+Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The same config file stores receiver defaults such as protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, source name, and accounts. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
 
 The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, receiver lifecycle, transfer logs, connected devices, flat inbox handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call `CameraConnectorService`, `CameraConnectorRuntime`, or lower-level core APIs, and print results.
 
