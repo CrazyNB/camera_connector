@@ -31,8 +31,11 @@ apps/android/
 core/
   Existing Rust service, receiver, transfer log, accounts, grouping
 
-future core-ffi/
-  Rust cdylib and generated Kotlin bindings
+core-ffi/
+  Mobile-facing Rust facade, cdylib/staticlib target, JSON DTO boundary
+
+future generated bindings/
+  UniFFI or JNI Kotlin bindings over core-ffi
 ```
 
 ## 4. Android Responsibilities
@@ -69,6 +72,8 @@ UI code talks to a Kotlin `CoreGateway` interface:
 The first skeleton may use an in-memory gateway for layout and lifecycle wiring. Native Rust bindings should later implement the same interface.
 
 This keeps the UI from depending directly on FFI-generated types and allows the product shell to evolve while the Rust bridge is built.
+
+The Rust side now has a `camera-connector-ffi` crate that exposes a mobile-facing `MobileCore` facade. Its first contract is JSON-based so it can be verified in the normal Rust workspace before Android SDK/NDK builds are available.
 
 ## 6. Storage Strategy
 

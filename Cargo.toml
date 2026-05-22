@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "core",
+    "core-ffi",
     "tools/cli",
 ]
 resolver = "2"

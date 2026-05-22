@@ -261,6 +261,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "camera-connector-ffi"
+version = "0.1.0"
+dependencies = [
+ "camera_connector_core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "camera_connector_core"
 version = "0.1.0"
 dependencies = [
