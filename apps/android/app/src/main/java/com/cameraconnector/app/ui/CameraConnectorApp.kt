@@ -16,6 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,12 +28,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
+import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.storage.AndroidStorageGateway
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
 @Composable
 fun CameraConnectorApp(
@@ -84,6 +87,9 @@ fun CameraConnectorApp(
                         onRequestNotificationPermission = onRequestNotificationPermission,
                         onStart = { scope.launch { coreGateway.startReceiver() } },
                         onStop = { scope.launch { coreGateway.stopReceiver() } },
+                        onSaveDeviceAccount = { account, password ->
+                            scope.launch { coreGateway.saveDeviceAccount(account, password) }
+                        },
                         modifier = Modifier.padding(padding),
                     )
 
@@ -116,8 +122,13 @@ private fun OverviewScreen(
     onRequestNotificationPermission: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onSaveDeviceAccount: (DeviceAccount, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var deviceName by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -171,9 +182,60 @@ private fun OverviewScreen(
                 Column(Modifier.padding(16.dp)) {
                     Text("Accounts", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    dashboard.accounts.forEach { account ->
-                        Text("${account.deviceName} / ${account.username}")
-                        Text(if (account.online) "Online" else "Offline")
+                    if (dashboard.accounts.isEmpty()) {
+                        Text("No camera accounts yet.")
+                    } else {
+                        dashboard.accounts.forEach { account ->
+                            Text("${account.deviceName} / ${account.username}")
+                            val address = account.latestIp?.let { " / $it" }.orEmpty()
+                            Text("${if (account.online) "Online" else "Offline"}$address")
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = deviceName,
+                        onValueChange = { deviceName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Device name") },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("FTP/SFTP username") },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            val cleanUsername = username.trim()
+                            val cleanPassword = password
+                            onSaveDeviceAccount(
+                                DeviceAccount(
+                                    username = cleanUsername,
+                                    deviceName = deviceName.trim().ifBlank { cleanUsername },
+                                    passwordConfigured = cleanPassword.isNotBlank(),
+                                    latestIp = null,
+                                    online = false,
+                                ),
+                                cleanPassword.takeIf { it.isNotBlank() },
+                            )
+                            password = ""
+                        },
+                        enabled = username.trim().isNotBlank() && password.isNotBlank(),
+                    ) {
+                        Text("Save account")
                     }
                 }
             }

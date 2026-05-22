@@ -116,6 +116,7 @@ The Android source now has the Kotlin side of that bridge:
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
 - `PreviewCoreGateway` remains the default app entry until native service smoke testing is complete.
+- Device account setup flows through the same gateway: Compose collects device name, FTP/SFTP username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
@@ -151,7 +152,7 @@ Native gateway builds can be produced without editing source code:
 gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 ```
 
-The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. The remaining bridge work is status polling, permission gating, and native gateway device smoke testing.
+The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. Account setup also crosses the gateway, keeping authentication rules in the shared core. The remaining bridge work is storage directory selection, settings editing, and native gateway device smoke testing.
 
 `NativeCoreGateway` polls the native dashboard every 2 seconds while it is open. This keeps receiver status, connected accounts, transfer failures, and newly imported assets moving into Compose without coupling the UI to service internals.
 

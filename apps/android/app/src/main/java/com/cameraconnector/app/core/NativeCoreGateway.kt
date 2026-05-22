@@ -52,9 +52,9 @@ class NativeCoreGateway(
         refresh()
     }
 
-    override suspend fun saveDeviceAccount(account: DeviceAccount) {
+    override suspend fun saveDeviceAccount(account: DeviceAccount, password: String?) {
         withContext(Dispatchers.IO) {
-            nativeCore.saveDeviceAccount(account, password = null)
+            nativeCore.saveDeviceAccount(account, password = password?.takeIf { it.isNotBlank() })
         }
         refresh()
     }
