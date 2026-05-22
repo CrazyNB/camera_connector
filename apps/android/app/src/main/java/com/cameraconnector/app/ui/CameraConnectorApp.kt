@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
+import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -87,6 +88,9 @@ fun CameraConnectorApp(
                         onRequestNotificationPermission = onRequestNotificationPermission,
                         onStart = { scope.launch { coreGateway.startReceiver() } },
                         onStop = { scope.launch { coreGateway.stopReceiver() } },
+                        onSaveReceiverSettings = { settings ->
+                            scope.launch { coreGateway.saveReceiverSettings(settings) }
+                        },
                         onSaveDeviceAccount = { account, password ->
                             scope.launch { coreGateway.saveDeviceAccount(account, password) }
                         },
@@ -122,12 +126,30 @@ private fun OverviewScreen(
     onRequestNotificationPermission: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onSaveReceiverSettings: (ReceiverSettings) -> Unit,
     onSaveDeviceAccount: (DeviceAccount, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var protocol by remember(dashboard.receiver.protocol) {
+        mutableStateOf(dashboard.receiver.protocol.ifBlank { "FTP" })
+    }
+    var hostInput by remember(dashboard.receiver.host) {
+        mutableStateOf(dashboard.receiver.host)
+    }
+    var ftpPortInput by remember(dashboard.receiver.protocol, dashboard.receiver.port) {
+        mutableStateOf(if (dashboard.receiver.protocol == "FTP") dashboard.receiver.port.toString() else "2121")
+    }
+    var sftpPortInput by remember(dashboard.receiver.protocol, dashboard.receiver.port) {
+        mutableStateOf(if (dashboard.receiver.protocol == "SFTP") dashboard.receiver.port.toString() else "2222")
+    }
     var deviceName by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val ftpPort = ftpPortInput.toIntOrNull()
+    val sftpPort = sftpPortInput.toIntOrNull()
+    val receiverSettingsValid = hostInput.trim().isNotBlank() &&
+        ftpPort in 1..65_535 &&
+        sftpPort in 1..65_535
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -156,6 +178,72 @@ private fun OverviewScreen(
                         Button(onClick = onStop, enabled = dashboard.receiver.running) {
                             Text("Stop")
                         }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Settings", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { protocol = "FTP" },
+                            enabled = protocol != "FTP" && !dashboard.receiver.running,
+                        ) {
+                            Text("FTP")
+                        }
+                        Button(
+                            onClick = { protocol = "SFTP" },
+                            enabled = protocol != "SFTP" && !dashboard.receiver.running,
+                        ) {
+                            Text("SFTP")
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = hostInput,
+                        onValueChange = { hostInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Bind host") },
+                        singleLine = true,
+                        enabled = !dashboard.receiver.running,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = ftpPortInput,
+                            onValueChange = { ftpPortInput = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("FTP port") },
+                            singleLine = true,
+                            enabled = !dashboard.receiver.running,
+                        )
+                        OutlinedTextField(
+                            value = sftpPortInput,
+                            onValueChange = { sftpPortInput = it },
+                            modifier = Modifier.weight(1f),
+                            label = { Text("SFTP port") },
+                            singleLine = true,
+                            enabled = !dashboard.receiver.running,
+                        )
+                    }
+                    if (dashboard.receiver.running) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Stop receiver before changing settings.")
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            onSaveReceiverSettings(
+                                ReceiverSettings(
+                                    protocol = protocol,
+                                    host = hostInput.trim(),
+                                    ftpPort = ftpPort ?: 2121,
+                                    sftpPort = sftpPort ?: 2222,
+                                    outputLabel = dashboard.receiver.outputLabel,
+                                ),
+                            )
+                        },
+                        enabled = !dashboard.receiver.running && receiverSettingsValid,
+                    ) {
+                        Text("Save receiver settings")
                     }
                 }
             }
