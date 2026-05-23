@@ -16,12 +16,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -55,6 +58,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
@@ -819,6 +824,7 @@ private fun InboxScreen(
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
     var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
     var filterExpanded by remember { mutableStateOf(false) }
+    var gridColumnCount by rememberSaveable { mutableStateOf(3) }
     val filteredAssets = remember(dashboard.inbox, selectedSource, selectedFilter) {
         dashboard.inbox
             .filter { asset -> selectedSource == null || asset.sourceLabel() == selectedSource }
@@ -834,55 +840,98 @@ private fun InboxScreen(
         return
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
     ) {
-        item {
-            Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
                 Text("收件箱", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
                 Text("照片信息流", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        item {
-            FilterToggleRow(
-                selectedSource = selectedSource,
-                selectedFilter = selectedFilter,
-                expanded = filterExpanded,
-                onToggle = { filterExpanded = !filterExpanded },
+            Spacer(Modifier.width(12.dp))
+            GridColumnToggle(
+                columnCount = gridColumnCount,
+                onColumnCountChange = { gridColumnCount = it },
             )
         }
+        Spacer(Modifier.height(10.dp))
+        FilterToggleRow(
+            selectedSource = selectedSource,
+            selectedFilter = selectedFilter,
+            expanded = filterExpanded,
+            onToggle = { filterExpanded = !filterExpanded },
+        )
         if (filterExpanded) {
-            item {
-                SourceFilterBar(
+            Spacer(Modifier.height(8.dp))
+            SourceFilterBar(
                 selectedSource = selectedSource,
                 onSourceChange = { selectedSource = it },
                 assets = dashboard.inbox,
-                )
-            }
-            item {
-                InboxFilterBar(
-                    selectedFilter = selectedFilter,
-                    onFilterChange = { selectedFilter = it },
-                    assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
-                )
-            }
+            )
+            Spacer(Modifier.height(8.dp))
+            InboxFilterBar(
+                selectedFilter = selectedFilter,
+                onFilterChange = { selectedFilter = it },
+                assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
+            )
         }
+        Spacer(Modifier.height(10.dp))
         if (filteredAssets.isEmpty()) {
-            item {
-                ElementCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        if (dashboard.inbox.isEmpty()) "还没有导入文件。" else "当前筛选下没有文件。",
-                        modifier = Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (dashboard.inbox.isEmpty()) "还没有导入文件。" else "当前筛选下没有文件。",
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
-            items(filteredAssets) { asset ->
-                PhotoInfoCard(asset = asset, onClick = { selectedPhoto = asset })
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(gridColumnCount),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                items(
+                    count = filteredAssets.size,
+                    key = { index -> filteredAssets[index].id.ifBlank { filteredAssets[index].displayPath } },
+                ) { index ->
+                    val asset = filteredAssets[index]
+                    CompactPhotoTile(asset = asset, onClick = { selectedPhoto = asset })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridColumnToggle(
+    columnCount: Int,
+    onColumnCountChange: (Int) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(2 to "2列", 3 to "3列").forEach { (count, label) ->
+            OutlinedButton(
+                onClick = { onColumnCountChange(count) },
+                modifier = Modifier
+                    .height(30.dp)
+                    .defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                border = BorderStroke(1.dp, if (columnCount == count) ElementBlue else ElementBorder),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (columnCount == count) ElementBlue else Color.White,
+                    contentColor = if (columnCount == count) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+                shape = elementShape,
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -970,6 +1019,9 @@ private fun FilterChipButton(
 ) {
     OutlinedButton(
         onClick = onClick,
+        modifier = Modifier
+            .height(30.dp)
+            .defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
         border = BorderStroke(1.dp, if (selected) ElementBlue else ElementBorder),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = if (selected) ElementBlue else Color.White,
@@ -983,54 +1035,36 @@ private fun FilterChipButton(
 }
 
 @Composable
-private fun PhotoInfoCard(asset: InboxAsset, onClick: () -> Unit) {
-    ElementCard(
+private fun CompactPhotoTile(asset: InboxAsset, onClick: () -> Unit) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
     ) {
-        Column {
-            PhotoPreview(
-                asset = asset,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(4f / 3f),
-            )
-            Column(Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        asset.groupTitle(),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        asset.displayPath,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(asset.formatBadges(), color = ElementBlue, fontWeight = FontWeight.SemiBold)
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ElementTag(asset.sourceLabel(), ElementBlue)
-                asset.username?.let { ElementTag("账号：$it", ElementInfo) }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ElementTag("接收 ${formatEpochMillisTextForDisplay(asset.receivedAt)}", ElementInfo)
-            }
-            }
-        }
+        PhotoPreview(
+            asset = asset,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f),
+        )
+        Spacer(Modifier.height(5.dp))
+        Text(
+            asset.filename(),
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            listOf(asset.sourceLabel(), asset.formatBadges()).joinToString(" · "),
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
