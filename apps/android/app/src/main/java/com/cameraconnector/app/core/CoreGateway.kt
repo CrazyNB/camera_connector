@@ -62,6 +62,7 @@ data class InboxAsset(
     val displaySource: String? = null,
     val originalPath: String? = null,
     val sizeBytes: Long? = null,
+    val previewLocation: String? = null,
     val rawPath: String? = null,
     val jpegPath: String? = null,
     val videoPath: String? = null,

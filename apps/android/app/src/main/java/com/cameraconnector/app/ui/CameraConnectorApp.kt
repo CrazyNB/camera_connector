@@ -1,12 +1,21 @@
 package com.cameraconnector.app.ui
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import java.io.File
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,8 +59,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -366,44 +379,17 @@ private fun OverviewScreen(
         }
 
         item {
-            ElementCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        if (dashboard.receiver.running) "接收服务运行中" else "接收服务已停止",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "${dashboard.receiver.protocol} $displayHost:${dashboard.receiver.port}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(20.dp))
-                    PowerButton(
-                        running = dashboard.receiver.running,
-                        enabled = actionsEnabled && (dashboard.receiver.running || notificationPermissionGranted),
-                        onClick = onToggleReceiver,
-                    )
-                    Spacer(Modifier.height(20.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ElementTag(
-                            text = receiverPhaseLabel(dashboard.receiver.phase),
-                            color = if (dashboard.receiver.running) ElementSuccess else ElementInfo,
-                        )
-                        ElementTag(
-                            text = if (onlineConnections > 0) "在线连接 $onlineConnections" else "未连接",
-                            color = if (onlineConnections > 0) ElementSuccess else ElementInfo,
-                        )
-                        ElementTag(text = "已配置账号 ${dashboard.accounts.size}", color = ElementBlue)
-                    }
-                    dashboard.receiver.message?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
+            ReceiverHeroControl(
+                running = dashboard.receiver.running,
+                phase = dashboard.receiver.phase,
+                endpoint = "${dashboard.receiver.protocol} $displayHost:${dashboard.receiver.port}",
+                onlineConnections = onlineConnections,
+                accountCount = dashboard.accounts.size,
+                message = dashboard.receiver.message,
+                enabled = actionsEnabled && (dashboard.receiver.running || notificationPermissionGranted),
+                onToggleReceiver = onToggleReceiver,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         item {
@@ -473,6 +459,53 @@ private fun OverviewScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ReceiverHeroControl(
+    running: Boolean,
+    phase: String,
+    endpoint: String,
+    onlineConnections: Int,
+    accountCount: Int,
+    message: String?,
+    enabled: Boolean,
+    onToggleReceiver: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            if (running) "接收服务运行中" else "接收服务已停止",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(endpoint, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(22.dp))
+        PowerButton(
+            running = running,
+            enabled = enabled,
+            onClick = onToggleReceiver,
+        )
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ElementTag(
+                text = receiverPhaseLabel(phase),
+                color = if (running) ElementSuccess else ElementInfo,
+            )
+            ElementTag(
+                text = if (onlineConnections > 0) "在线连接 $onlineConnections" else "未连接",
+                color = if (onlineConnections > 0) ElementSuccess else ElementInfo,
+            )
+            ElementTag(text = "已配置账号 $accountCount", color = ElementBlue)
+        }
+        message?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -785,6 +818,7 @@ private fun InboxScreen(
     var selectedSource by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
     var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
+    var filterExpanded by remember { mutableStateOf(false) }
     val filteredAssets = remember(dashboard.inbox, selectedSource, selectedFilter) {
         dashboard.inbox
             .filter { asset -> selectedSource == null || asset.sourceLabel() == selectedSource }
@@ -809,22 +843,32 @@ private fun InboxScreen(
             Column {
                 Text("收件箱", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
-                Text("按账号、来源和路径标签筛选照片信息流。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("照片信息流", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
-            SourceFilterBar(
+            FilterToggleRow(
+                selectedSource = selectedSource,
+                selectedFilter = selectedFilter,
+                expanded = filterExpanded,
+                onToggle = { filterExpanded = !filterExpanded },
+            )
+        }
+        if (filterExpanded) {
+            item {
+                SourceFilterBar(
                 selectedSource = selectedSource,
                 onSourceChange = { selectedSource = it },
                 assets = dashboard.inbox,
-            )
-        }
-        item {
-            InboxFilterBar(
-                selectedFilter = selectedFilter,
-                onFilterChange = { selectedFilter = it },
-                assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
-            )
+                )
+            }
+            item {
+                InboxFilterBar(
+                    selectedFilter = selectedFilter,
+                    onFilterChange = { selectedFilter = it },
+                    assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
+                )
+            }
         }
         if (filteredAssets.isEmpty()) {
             item {
@@ -837,17 +881,38 @@ private fun InboxScreen(
                 }
             }
         } else {
-            filteredAssets
-                .groupBy { it.formatGroupLabel() }
-                .forEach { (groupLabel, assets) ->
-                    item {
-                        FormatGroupSection(title = groupLabel, count = assets.size)
-                    }
-                    items(assets) { asset ->
-                        PhotoInfoCard(asset = asset, onClick = { selectedPhoto = asset })
-                    }
-                }
+            items(filteredAssets) { asset ->
+                PhotoInfoCard(asset = asset, onClick = { selectedPhoto = asset })
+            }
         }
+    }
+}
+
+@Composable
+private fun FilterToggleRow(
+    selectedSource: String?,
+    selectedFilter: InboxFilter,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text("筛选", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                listOf(selectedSource ?: "全部来源", selectedFilter.label).joinToString(" / "),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(if (expanded) "收起 ▲" else "展开 ▼", color = ElementBlue, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -911,20 +976,9 @@ private fun FilterChipButton(
             contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
         ),
         shape = elementShape,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
     ) {
-        Text(label)
-    }
-}
-
-@Composable
-private fun FormatGroupSection(title: String, count: Int) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        ElementTag("$count 组", ElementInfo)
+        Text(label, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -935,7 +989,14 @@ private fun PhotoInfoCard(asset: InboxAsset, onClick: () -> Unit) {
             .fillMaxWidth()
             .clickable(onClick = onClick),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column {
+            PhotoPreview(
+                asset = asset,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(4f / 3f),
+            )
+            Column(Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -957,20 +1018,17 @@ private fun PhotoInfoCard(asset: InboxAsset, onClick: () -> Unit) {
                     )
                 }
                 Spacer(Modifier.width(8.dp))
-                ElementTag(asset.format.ifBlank { "未知" }, formatColor(asset.format))
+                Text(asset.formatBadges(), color = ElementBlue, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ElementTag(asset.sourceLabel(), ElementBlue)
                 asset.username?.let { ElementTag("账号：$it", ElementInfo) }
-                ElementTag("详情 >", ElementInfo)
             }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                asset.jpegPath?.let { ElementTag("JPEG", ElementSuccess) }
-                asset.rawPath?.let { ElementTag("RAW", ElementWarning) }
-                asset.videoPath?.let { ElementTag("视频", ElementBlue) }
                 ElementTag("接收 ${formatEpochMillisTextForDisplay(asset.receivedAt)}", ElementInfo)
+            }
             }
         }
     }
@@ -992,6 +1050,14 @@ private fun PhotoDetailScreen(
                 title = asset.groupTitle(),
                 subtitle = "照片详情",
                 onBack = onBack,
+            )
+        }
+        item {
+            PhotoPreview(
+                asset = asset,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
             )
         }
         item {
@@ -1020,6 +1086,57 @@ private fun PhotoDetailScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PhotoPreview(
+    asset: InboxAsset,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val previewLocation = asset.previewLocation
+    val bitmap = remember(previewLocation) {
+        loadPreviewBitmap(context, previewLocation)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(elementShape)
+            .background(Color(0xFFE4E7ED)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = asset.groupTitle(),
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (asset.rawPath != null) "RAW 预览待生成" else "暂无预览",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(asset.formatBadges(), color = ElementInfo)
+            }
+        }
+    }
+}
+
+private fun loadPreviewBitmap(context: Context, location: String?): Bitmap? {
+    if (location.isNullOrBlank()) {
+        return null
+    }
+    return runCatching {
+        if (location.startsWith("content://")) {
+            context.contentResolver.openInputStream(Uri.parse(location))?.use(BitmapFactory::decodeStream)
+        } else {
+            File(location).inputStream().use(BitmapFactory::decodeStream)
+        }
+    }.getOrNull()
 }
 
 @Composable
@@ -1216,13 +1333,13 @@ private fun InboxAsset.sourceLabel(): String =
         ?: username?.takeIf { it.isNotBlank() }?.let { "账号：$it" }
         ?: sourceGroupLabel(displayPath)
 
-private fun InboxAsset.formatGroupLabel(): String = when {
-    videoPath != null || format.lowercase() in setOf("mov", "mp4") -> "视频"
-    rawPath != null && jpegPath != null -> "RAW + JPEG"
-    rawPath != null || format.isRawFormat() -> "RAW"
-    jpegPath != null || format.lowercase() in setOf("jpeg", "jpg") -> "JPEG"
-    else -> "其他"
-}
+private fun InboxAsset.formatBadges(): String =
+    buildList {
+        if (jpegPath != null || format.lowercase() in setOf("jpeg", "jpg")) add("JPG")
+        if (rawPath != null || format.isRawFormat()) add("RAW")
+        if (videoPath != null || format.lowercase() in setOf("mov", "mp4")) add("视频")
+        if (isEmpty()) add(format.ifBlank { "未知" })
+    }.joinToString(" · ")
 
 private fun String.isRawFormat(): Boolean =
     lowercase() in setOf("raw", "nef", "nrw", "cr3", "cr2", "arw", "raf", "orf", "rw2", "pef", "dng")

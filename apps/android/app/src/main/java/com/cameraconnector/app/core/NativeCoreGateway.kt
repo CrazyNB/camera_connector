@@ -206,6 +206,8 @@ class NativeCoreGateway(
                         displaySource = primary.optString("display_source").takeIf { it.isNotBlank() },
                         originalPath = primary.optString("original_path").takeIf { it.isNotBlank() },
                         sizeBytes = primary.optLong("size_bytes").takeIf { !primary.isNull("size_bytes") },
+                        previewLocation = jpeg?.assetStorageLocation()
+                            ?: primary.assetStorageLocation(),
                         rawPath = raw?.assetDisplayPath(),
                         jpegPath = jpeg?.assetDisplayPath(),
                         videoPath = video?.assetDisplayPath(),
@@ -217,6 +219,13 @@ class NativeCoreGateway(
 
     private fun JSONObject.assetDisplayPath(): String =
         optString("virtual_display_path").ifBlank { optString("filename") }
+
+    private fun JSONObject.assetStorageLocation(): String? {
+        val location = optJSONObject("storage_location") ?: return null
+        return location.optString("path")
+            .ifBlank { location.optString("uri") }
+            .ifBlank { null }
+    }
 
     private fun mapTransfers(
         transfers: JSONObject?,

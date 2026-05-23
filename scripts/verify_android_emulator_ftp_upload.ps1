@@ -21,12 +21,27 @@ $androidState = "/data/user/0/$packageName/files/state"
 $sampleRawName = "VERIFY_9001.NEF"
 $sampleJpegName = "VERIFY_9001.JPG"
 $sampleRawBytes = [byte[]](0x4E, 0x45, 0x46, 0x21, 0x01, 0x02, 0x03, 0x04)
-$sampleJpegBytes = [byte[]](0xFF, 0xD8, 0xFF, 0xE1, 0x43, 0x43, 0x01, 0x02)
+$sampleJpegBytes = $null
 $dumpPath = "/sdcard/camera_connector_ftp_verify_window.xml"
 $localDumpPath = Join-Path $root "target\android-diagnostics\emulator-ftp-upload-window.xml"
 
 if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) {
     throw "adb not found at $adb. Set ANDROID_SDK_ROOT or install Android platform-tools."
+}
+
+Add-Type -AssemblyName System.Drawing
+$sampleBitmap = [System.Drawing.Bitmap]::new(96, 72)
+$sampleGraphics = [System.Drawing.Graphics]::FromImage($sampleBitmap)
+$sampleStream = [System.IO.MemoryStream]::new()
+try {
+    $sampleGraphics.Clear([System.Drawing.Color]::FromArgb(38, 132, 255))
+    $sampleGraphics.FillEllipse([System.Drawing.Brushes]::White, 26, 14, 44, 44)
+    $sampleBitmap.Save($sampleStream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+    $sampleJpegBytes = $sampleStream.ToArray()
+} finally {
+    $sampleGraphics.Dispose()
+    $sampleBitmap.Dispose()
+    $sampleStream.Dispose()
 }
 
 function Invoke-Adb {
@@ -277,7 +292,7 @@ Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") |
 Start-Sleep -Seconds 3
 $inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox"
 Assert-UiContains $inboxUi "RAW" "raw pair tag"
-Assert-UiContains $inboxUi "JPEG" "jpeg pair tag"
+Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
 $transferUi = Tap-UntilUiContains 900 2240 $sampleJpegName "uploaded transfer row"
 Assert-UiContains $transferUi $sampleRawName "uploaded raw transfer row"
