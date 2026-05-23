@@ -153,12 +153,30 @@ function Get-UiXml {
             Remove-Item -LiteralPath $localDumpPath -Force
         }
         Invoke-Adb @("shell", "rm", "-f", $dumpPath) | Out-Null
-        $dumpOutput = Invoke-Adb @("shell", "uiautomator", "dump", $dumpPath)
-        if (($dumpOutput -join "`n") -notmatch "dumped to") {
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $dumpOutput = & $adb -s $Serial shell uiautomator dump $dumpPath 2>&1
+            $dumpExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($dumpExitCode -ne 0 -or (($dumpOutput -join "`n") -notmatch "dumped to")) {
             Start-Sleep -Milliseconds 400
             continue
         }
-        Invoke-Adb @("pull", $dumpPath, $localDumpPath) | Out-Null
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $adb -s $Serial pull $dumpPath $localDumpPath 2>&1 | Out-Null
+            $pullExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($pullExitCode -ne 0 -or -not (Test-Path -LiteralPath $localDumpPath -PathType Leaf)) {
+            Start-Sleep -Milliseconds 400
+            continue
+        }
         $xml = [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
         if ($xml.Contains("<hierarchy")) {
             return $xml
