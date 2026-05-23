@@ -68,8 +68,7 @@ Content:
 
 - Protocol: FTP or SFTP.
 - Bind host.
-- FTP port.
-- SFTP port.
+- Unified camera-facing port.
 - Advertised host shown to the camera.
 - Source name.
 - Upload/output location.

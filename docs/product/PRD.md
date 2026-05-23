@@ -64,7 +64,7 @@ P0:
 - Scan the receiver inbox as the product's import source.
 - Record a transfer log for filtering by login username, transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
-- Let users configure camera accounts with FTP/SFTP username, password, and device name.
+- Let users configure camera accounts with camera login username, password, and device name.
 - Persist camera account passwords as core-generated hashes; never store or display plaintext passwords after setup.
 - Show current and recently connected devices from receiver metadata so the latest IP is visible as connection state, not account identity.
 - Expose receiver runtime lifecycle from core: stopped, starting, running, stopping, and failed.
@@ -112,7 +112,7 @@ P2:
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename, platform final location, bytes, protocol, optional login username, remote address, and optional source name |
 | RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, login username, source name, remote address, transfer id, and original path; display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; FTP and SFTP receivers authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
-| RX-012A | Receiver settings configuration | P0 | Core config persists receiver defaults including protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, and source name; runtime start requests can override these values without rewriting saved config |
+| RX-012A | Receiver settings configuration | P0 | Core config persists receiver defaults including protocol, bind host, camera-facing port, optional output/state directories, advertised host, and source name; Android presents one unified port and writes it to the relevant core port fields; runtime start requests can override these values without rewriting saved config |
 | RX-013 | Connected device view | P0 | FTP and SFTP receivers record current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
 | RX-014A | Dashboard read-model | P0 | Core exposes one dashboard query for UI shells with config/state/output paths, safe account summaries, per-account current connection state, receiver status, transfer health counts, recent failed transfers with error text, connected devices, filtered asset summary, and paged asset groups; CLI can emit the same model as JSON for app shells and automation |

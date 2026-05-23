@@ -22,7 +22,7 @@ The Android source now has a native gateway boundary:
 - The foreground notification can reopen the app and exposes a Stop action so receiver shutdown is available outside the Compose UI.
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
 - The Overview screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
-- The Overview screen can save receiver protocol, bind host, FTP port, and SFTP port through the native gateway; output storage stays app-private until Android directory selection is wired.
+- The Overview screen can save receiver protocol, bind host, and one unified camera-facing port through the native gateway; the Kotlin adapter writes that port into both core protocol fields so the UI does not expose duplicate port settings.
 - The Transfers screen reads native dashboard transfer counts and recent failure rows, including virtual display paths and core error messages.
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
