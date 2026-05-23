@@ -39,14 +39,28 @@ function Get-UiXml {
     for ($attempt = 1; $attempt -le 6; $attempt++) {
         Remove-Item -LiteralPath $localDumpPath -ErrorAction SilentlyContinue
         & $adb -s $Serial shell rm -f $dumpPath 2>$null | Out-Null
-        & $adb -s $Serial shell uiautomator dump $dumpPath | Out-Null
-        if ($LASTEXITCODE -ne 0) {
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $dumpOutput = & $adb -s $Serial shell uiautomator dump $dumpPath 2>&1
+            $dumpExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($dumpExitCode -ne 0 -or (($dumpOutput -join "`n") -notmatch "dumped to")) {
             Start-Sleep -Milliseconds 800
             continue
         }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
-        & $adb -s $Serial pull $dumpPath $localDumpPath | Out-Null
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $localDumpPath -PathType Leaf)) {
+        $oldErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $adb -s $Serial pull $dumpPath $localDumpPath 2>&1 | Out-Null
+            $pullExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        if ($pullExitCode -ne 0 -or -not (Test-Path -LiteralPath $localDumpPath -PathType Leaf)) {
             Start-Sleep -Milliseconds 800
             continue
         }
