@@ -58,7 +58,7 @@ fun CameraConnectorApp(
                 accountCount = 0,
                 host = "0.0.0.0",
                 port = 2121,
-                outputLabel = "Not configured",
+                outputLabel = "未配置",
                 message = null,
             ),
             accounts = emptyList(),
@@ -113,13 +113,13 @@ fun CameraConnectorApp(
                         onClearActionError = { actionError = null },
                         selectedInboxLabel = selectedInbox,
                         onChooseInboxDirectory = onChooseInboxDirectory,
-                        onStart = { runAction("Starting receiver") { coreGateway.startReceiver() } },
-                        onStop = { runAction("Stopping receiver") { coreGateway.stopReceiver() } },
+                        onStart = { runAction("正在启动接收服务") { coreGateway.startReceiver() } },
+                        onStop = { runAction("正在停止接收服务") { coreGateway.stopReceiver() } },
                         onSaveReceiverSettings = { settings ->
-                            runAction("Saving receiver settings") { coreGateway.saveReceiverSettings(settings) }
+                            runAction("正在保存接收设置") { coreGateway.saveReceiverSettings(settings) }
                         },
                         onSaveDeviceAccount = { account, password ->
-                            runAction("Saving account") { coreGateway.saveDeviceAccount(account, password) }
+                            runAction("正在保存账号") { coreGateway.saveDeviceAccount(account, password) }
                         },
                         modifier = Modifier.padding(padding),
                     )
@@ -140,9 +140,9 @@ fun CameraConnectorApp(
 }
 
 private enum class MainTab(val label: String, val icon: String) {
-    Overview("Overview", "O"),
-    Inbox("Inbox", "I"),
-    Transfers("Transfers", "T"),
+    Overview("总览", "总"),
+    Inbox("收件箱", "箱"),
+    Transfers("传输", "传"),
 }
 
 @Composable
@@ -190,19 +190,19 @@ private fun OverviewScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Camera Connector", style = MaterialTheme.typography.headlineMedium)
+            Text("相机连接器", style = MaterialTheme.typography.headlineMedium)
         }
 
         actionError?.let { message ->
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Action failed", style = MaterialTheme.typography.titleMedium)
+                        Text("操作失败", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(message)
                         Spacer(Modifier.height(12.dp))
                         Button(onClick = onClearActionError) {
-                            Text("Dismiss")
+                            Text("关闭")
                         }
                     }
                 }
@@ -213,7 +213,7 @@ private fun OverviewScreen(
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Working", style = MaterialTheme.typography.titleMedium)
+                        Text("处理中", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(action)
                     }
@@ -224,10 +224,14 @@ private fun OverviewScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Receiver", style = MaterialTheme.typography.titleMedium)
+                    Text("接收服务", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     Text("${dashboard.receiver.protocol} ${dashboard.receiver.host}:${dashboard.receiver.port}")
-                    Text("${dashboard.receiver.phase} / ${dashboard.receiver.authMode} / accounts=${dashboard.receiver.accountCount}")
+                    Text(
+                        "${receiverPhaseLabel(dashboard.receiver.phase)} / " +
+                            "${authModeLabel(dashboard.receiver.authMode)} / " +
+                            "账号=${dashboard.receiver.accountCount}",
+                    )
                     dashboard.receiver.message?.let { Text(it) }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -235,14 +239,14 @@ private fun OverviewScreen(
                             onClick = onStart,
                             enabled = actionsEnabled && !dashboard.receiver.running && notificationPermissionGranted,
                         ) {
-                            Text("Start")
+                            Text("启动")
                         }
                         Button(onClick = onStop, enabled = actionsEnabled && dashboard.receiver.running) {
-                            Text("Stop")
+                            Text("停止")
                         }
                     }
                     Spacer(Modifier.height(16.dp))
-                    Text("Settings", style = MaterialTheme.typography.titleSmall)
+                    Text("接收设置", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
@@ -263,7 +267,7 @@ private fun OverviewScreen(
                         value = hostInput,
                         onValueChange = { hostInput = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Bind host") },
+                        label = { Text("监听地址") },
                         singleLine = true,
                         enabled = actionsEnabled && !dashboard.receiver.running,
                     )
@@ -273,7 +277,7 @@ private fun OverviewScreen(
                             value = ftpPortInput,
                             onValueChange = { ftpPortInput = it },
                             modifier = Modifier.weight(1f),
-                            label = { Text("FTP port") },
+                            label = { Text("FTP 端口") },
                             singleLine = true,
                             enabled = actionsEnabled && !dashboard.receiver.running,
                         )
@@ -281,14 +285,14 @@ private fun OverviewScreen(
                             value = sftpPortInput,
                             onValueChange = { sftpPortInput = it },
                             modifier = Modifier.weight(1f),
-                            label = { Text("SFTP port") },
+                            label = { Text("SFTP 端口") },
                             singleLine = true,
                             enabled = actionsEnabled && !dashboard.receiver.running,
                         )
                     }
                     if (dashboard.receiver.running) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Stop receiver before changing settings.")
+                        Text("修改设置前请先停止接收服务。")
                     }
                     Spacer(Modifier.height(12.dp))
                     Button(
@@ -305,7 +309,7 @@ private fun OverviewScreen(
                         },
                         enabled = actionsEnabled && !dashboard.receiver.running && receiverSettingsValid,
                     ) {
-                        Text("Save receiver settings")
+                        Text("保存接收设置")
                     }
                 }
             }
@@ -315,12 +319,12 @@ private fun OverviewScreen(
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("Notifications", style = MaterialTheme.typography.titleMedium)
+                        Text("通知权限", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
-                        Text("Allow notifications before starting the receiver.")
+                        Text("启动接收服务前需要允许通知。")
                         Spacer(Modifier.height(12.dp))
                         Button(onClick = onRequestNotificationPermission) {
-                            Text("Allow notifications")
+                            Text("允许通知")
                         }
                     }
                 }
@@ -330,10 +334,10 @@ private fun OverviewScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Accounts", style = MaterialTheme.typography.titleMedium)
+                    Text("设备账号", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     if (dashboard.accounts.isEmpty()) {
-                        Text("No camera accounts yet.")
+                        Text("还没有相机账号。")
                     } else {
                         dashboard.accounts.forEach { account ->
                             Text("${account.deviceName} / ${account.username}")
@@ -342,12 +346,12 @@ private fun OverviewScreen(
                                 account.latestPort?.toString(),
                             ).joinToString(":")
                             Text(
-                                "${if (account.online) "Online" else "Offline"} / " +
-                                    "connections=${account.activeConnections}" +
+                                "${if (account.online) "在线" else "离线"} / " +
+                                    "连接数=${account.activeConnections}" +
                                     endpoint.ifBlank { "" }.let { if (it.isBlank()) "" else " / $it" },
                             )
-                            account.lastSeenAtMs?.let { Text("Last seen: $it") }
-                            account.lastDisconnectedAtMs?.let { Text("Last disconnected: $it") }
+                            account.lastSeenAtMs?.let { Text("最近在线：$it") }
+                            account.lastDisconnectedAtMs?.let { Text("最近断开：$it") }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -355,7 +359,7 @@ private fun OverviewScreen(
                         value = deviceName,
                         onValueChange = { deviceName = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Device name") },
+                        label = { Text("设备名称") },
                         singleLine = true,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -363,7 +367,7 @@ private fun OverviewScreen(
                         value = username,
                         onValueChange = { username = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("FTP/SFTP username") },
+                        label = { Text("FTP/SFTP 用户名") },
                         singleLine = true,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -371,7 +375,7 @@ private fun OverviewScreen(
                         value = password,
                         onValueChange = { password = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Password") },
+                        label = { Text("密码") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                     )
@@ -398,7 +402,7 @@ private fun OverviewScreen(
                         },
                         enabled = actionsEnabled && username.trim().isNotBlank() && password.isNotBlank(),
                     ) {
-                        Text("Save account")
+                        Text("保存账号")
                     }
                 }
             }
@@ -407,14 +411,14 @@ private fun OverviewScreen(
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Output", style = MaterialTheme.typography.titleMedium)
+                    Text("导入位置", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    Text(selectedInboxLabel ?: "App-private inbox")
+                    Text(selectedInboxLabel ?: "应用私有收件箱")
                     Spacer(Modifier.height(4.dp))
-                    Text("Native inbox: ${dashboard.receiver.outputLabel}")
+                    Text("当前原生收件箱：${dashboard.receiver.outputLabel}")
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = onChooseInboxDirectory) {
-                        Text("Choose import folder")
+                        Text("选择导入文件夹")
                     }
                 }
             }
@@ -433,16 +437,16 @@ private fun InboxScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Inbox", style = MaterialTheme.typography.headlineMedium)
+            Text("收件箱", style = MaterialTheme.typography.headlineMedium)
         }
         if (dashboard.inbox.isEmpty()) {
-            item { Text("No imported assets yet.") }
+            item { Text("还没有导入文件。") }
         } else {
             items(dashboard.inbox) { asset ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(asset.displayPath, style = MaterialTheme.typography.titleMedium)
-                        Text("${asset.format} / ${asset.receivedAt}")
+                        Text("${asset.format} / 接收时间：${asset.receivedAt}")
                     }
                 }
             }
@@ -461,20 +465,41 @@ private fun TransfersScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Transfers", style = MaterialTheme.typography.headlineMedium)
+            Text("传输记录", style = MaterialTheme.typography.headlineMedium)
         }
         if (dashboard.transfers.isEmpty()) {
-            item { Text("No transfer records yet.") }
+            item { Text("还没有传输记录。") }
         } else {
             items(dashboard.transfers) { transfer ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(transfer.displayPath, style = MaterialTheme.typography.titleMedium)
-                        Text("${transfer.status} / ${transfer.id}")
+                        Text("${transferStatusLabel(transfer.status)} / ${transfer.id}")
                         transfer.message?.let { Text(it) }
                     }
                 }
             }
         }
     }
+}
+
+private fun receiverPhaseLabel(value: String): String = when (value) {
+    "Running" -> "运行中"
+    "Stopped" -> "已停止"
+    "Unknown" -> "未知"
+    else -> value
+}
+
+private fun authModeLabel(value: String): String = when (value) {
+    "Accounts" -> "账号认证"
+    "Open" -> "开放"
+    "Unknown" -> "未知"
+    else -> value
+}
+
+private fun transferStatusLabel(value: String): String = when (value) {
+    "Completed" -> "已完成"
+    "Failed" -> "失败"
+    "Pending" -> "等待中"
+    else -> value
 }

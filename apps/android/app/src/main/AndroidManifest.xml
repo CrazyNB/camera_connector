@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Camera Connector"
+        android:label="相机连接器"
         android:theme="@style/Theme.CameraConnector">
 
         <activity

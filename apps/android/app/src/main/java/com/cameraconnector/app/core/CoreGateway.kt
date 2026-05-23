@@ -75,13 +75,13 @@ class PreviewCoreGateway : CoreGateway {
                 accountCount = 1,
                 host = "192.168.137.1",
                 port = 2121,
-                outputLabel = "Choose inbox folder",
+                outputLabel = "选择收件箱文件夹",
                 message = null,
             ),
             accounts = listOf(
                 DeviceAccount(
                     username = "camera01",
-                    deviceName = "Camera 01",
+                    deviceName = "相机 01",
                     passwordConfigured = true,
                     latestIp = null,
                     latestPort = null,

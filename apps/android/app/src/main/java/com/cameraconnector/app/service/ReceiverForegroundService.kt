@@ -40,7 +40,7 @@ class ReceiverForegroundService : Service() {
             }
 
             else -> {
-                startForeground(NOTIFICATION_ID, notification("Starting receiver"))
+                startForeground(NOTIFICATION_ID, notification("正在启动接收服务"))
                 val configPath = intent?.getStringExtra(EXTRA_CONFIG_PATH)
                 Log.i(LOG_TAG, "receiver start requested configPath=$configPath")
                 serviceScope.launch {
@@ -63,17 +63,17 @@ class ReceiverForegroundService : Service() {
         runCatching {
             if (nativeCore != null) {
                 Log.i(LOG_TAG, "receiver start ignored because native core is already running")
-                startForeground(NOTIFICATION_ID, notification("Receiver is already running"))
+                startForeground(NOTIFICATION_ID, notification("接收服务已在运行"))
                 return
             }
             val core = nativeCore ?: NativeMobileCore(configPath).also { nativeCore = it }
             val status = core.startReceiver()
-            val localAddr = status.optString("local_addr").ifBlank { "ready" }
+            val localAddr = status.optString("local_addr").ifBlank { "就绪" }
             Log.i(LOG_TAG, "receiver started localAddr=$localAddr")
-            startForeground(NOTIFICATION_ID, notification("Receiver running at $localAddr"))
+            startForeground(NOTIFICATION_ID, notification("接收服务运行中：$localAddr"))
         }.onFailure { error ->
             Log.e(LOG_TAG, "receiver start failed", error)
-            startForeground(NOTIFICATION_ID, notification("Receiver failed: ${error.message}"))
+            startForeground(NOTIFICATION_ID, notification("接收服务失败：${error.message}"))
         }
     }
 
@@ -91,14 +91,14 @@ class ReceiverForegroundService : Service() {
     private fun notification(message: String) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("Camera Connector")
+            .setContentTitle("相机连接器")
             .setContentText(message)
             .setContentIntent(openAppPendingIntent())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, "Stop", stopReceiverPendingIntent())
+            .addAction(0, "停止", stopReceiverPendingIntent())
             .build()
 
     private fun openAppPendingIntent(): PendingIntent =
@@ -125,7 +125,7 @@ class ReceiverForegroundService : Service() {
 
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Receiver status",
+            "接收服务状态",
             NotificationManager.IMPORTANCE_LOW,
         )
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
