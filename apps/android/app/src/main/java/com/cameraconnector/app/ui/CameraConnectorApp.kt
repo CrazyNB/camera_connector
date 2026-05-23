@@ -1,6 +1,8 @@
 package com.cameraconnector.app.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -58,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -73,6 +76,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -81,6 +85,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.exifinterface.media.ExifInterface
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
@@ -1197,6 +1206,13 @@ private fun PhotoDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var fullScreenPreview by remember { mutableStateOf(false) }
+    if (fullScreenPreview) {
+        FullScreenPhotoPreview(
+            asset = asset,
+            onDismiss = { fullScreenPreview = false },
+        )
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1212,9 +1228,12 @@ private fun PhotoDetailScreen(
         item {
             PhotoPreview(
                 asset = asset,
+                contentScale = ContentScale.Fit,
+                backgroundColor = Color.Black,
+                onClick = { fullScreenPreview = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f),
+                    .aspectRatio(3f / 4f),
             )
         }
         item {
@@ -1246,10 +1265,69 @@ private fun PhotoDetailScreen(
 }
 
 @Composable
+private fun FullScreenPhotoPreview(
+    asset: InboxAsset,
+    onDismiss: () -> Unit,
+) {
+    BackHandler(onBack = onDismiss)
+    ImmersiveSystemBars()
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            PhotoPreview(
+                asset = asset,
+                contentScale = ContentScale.Fit,
+                backgroundColor = Color.Black,
+                clipPreview = false,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImmersiveSystemBars() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = view.context.findActivity()?.window
+        if (window == null) {
+            onDispose { }
+        } else {
+            val controller = WindowCompat.getInsetsController(window, view)
+            val previousBehavior = controller.systemBarsBehavior
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior = previousBehavior
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
+        }
+    }
+}
+
+@Composable
 private fun PhotoPreview(
     asset: InboxAsset,
     modifier: Modifier = Modifier,
     compactFallback: Boolean = false,
+    contentScale: ContentScale = ContentScale.Crop,
+    backgroundColor: Color = Color(0xFFE4E7ED),
+    clipPreview: Boolean = true,
+    onClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val previewLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
@@ -1263,10 +1341,18 @@ private fun PhotoPreview(
         }
     }
 
+    val previewModifier = if (clipPreview) {
+        modifier.clip(elementShape)
+    } else {
+        modifier
+    }
+    val clickableModifier = if (onClick == null) {
+        previewModifier
+    } else {
+        previewModifier.clickable(onClick = onClick)
+    }
     Box(
-        modifier = modifier
-            .clip(elementShape)
-            .background(Color(0xFFE4E7ED)),
+        modifier = clickableModifier.background(backgroundColor),
         contentAlignment = Alignment.Center,
     ) {
         val loadedBitmap = bitmap
@@ -1275,7 +1361,7 @@ private fun PhotoPreview(
                 bitmap = loadedBitmap.asImageBitmap(),
                 contentDescription = asset.groupTitle(),
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                contentScale = contentScale,
             )
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1297,6 +1383,14 @@ private fun PhotoPreview(
                 }
             }
         }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 }
 
