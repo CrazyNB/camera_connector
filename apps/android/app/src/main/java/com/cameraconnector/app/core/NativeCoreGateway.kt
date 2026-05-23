@@ -108,7 +108,7 @@ class NativeCoreGateway(
                 host = host,
                 port = port,
                 outputLabel = paths?.optString("output_dir").orEmpty()
-                    .ifBlank { "Choose inbox folder" },
+                    .ifBlank { "选择收件箱文件夹" },
                 message = receiverStatus?.takeIf { !it.isNull("message") }
                     ?.optString("message")
                     .orEmpty()
@@ -237,7 +237,7 @@ class NativeCoreGateway(
                 accountCount = 0,
                 host = "0.0.0.0",
                 port = 2121,
-                outputLabel = "Choose inbox folder",
+                outputLabel = "选择收件箱文件夹",
                 message = null,
             ),
             accounts = emptyList(),

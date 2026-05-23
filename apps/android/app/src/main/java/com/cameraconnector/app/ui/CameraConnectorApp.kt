@@ -350,8 +350,8 @@ private fun OverviewScreen(
                                     "连接数=${account.activeConnections}" +
                                     endpoint.ifBlank { "" }.let { if (it.isBlank()) "" else " / $it" },
                             )
-                            account.lastSeenAtMs?.let { Text("最近在线：$it") }
-                            account.lastDisconnectedAtMs?.let { Text("最近断开：$it") }
+                            account.lastSeenAtMs?.let { Text("最近在线：${formatEpochMillisForDisplay(it)}") }
+                            account.lastDisconnectedAtMs?.let { Text("最近断开：${formatEpochMillisForDisplay(it)}") }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -446,7 +446,7 @@ private fun InboxScreen(
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(asset.displayPath, style = MaterialTheme.typography.titleMedium)
-                        Text("${asset.format} / 接收时间：${asset.receivedAt}")
+                        Text("${asset.format} / 接收时间：${formatEpochMillisTextForDisplay(asset.receivedAt)}")
                     }
                 }
             }
