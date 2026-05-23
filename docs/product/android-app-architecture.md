@@ -112,13 +112,13 @@ The Android source now has the Kotlin side of that bridge:
 
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
-- `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`.
+- `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`; release-facing verification builds use the native gateway.
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
 - The foreground notification deep-links back into `MainActivity` and exposes a Stop action backed by an immutable service `PendingIntent`.
 - Receiver service lifecycle events are logged through the `CameraConnectorReceiver` tag so adb diagnostics can separate app receiver failures from generic Android runtime crashes.
 - Connected-device smoke testing builds, installs, launches, verifies package presence, and collects adb diagnostics through `scripts\smoke_android_device.ps1`.
-- `PreviewCoreGateway` remains the default app entry until native service smoke testing is complete.
+- Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, inbox photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
 - Device account setup flows through the same gateway: Compose collects device name, FTP/SFTP username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
 - Receiver setup also flows through the gateway: Compose can save protocol, bind host, FTP port, and SFTP port while leaving Android output storage on the current app-private inbox until SAF or MediaStore selection is wired.
 - Transfer diagnostics are mapped from the native dashboard into Compose: transfer counts remain visible and recent failed transfers show the core-provided virtual display path plus error text.
@@ -127,6 +127,7 @@ The Android source now has the Kotlin side of that bridge:
 - Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. This is not yet treated as a filesystem `output_dir`; the native smoke inbox remains app-private until the storage backend writes through SAF or MediaStore.
 - UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible Overview error card.
 - UI actions also publish an in-flight label while native gateway calls are running. Related controls are disabled during that window to avoid duplicate start, stop, settings, or account operations.
+- The Inbox UI is photo-first: it defaults to a persisted 3-column grid, allows a 2-column switch, keeps tile metadata compact, uses JPEG previews when available, and moves full path/source/RAW-JPEG detail into the photo detail screen.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 

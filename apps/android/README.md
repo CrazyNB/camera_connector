@@ -10,9 +10,7 @@ The app is intentionally thin:
 
 ## Current State
 
-This directory is a scaffold. It establishes the project layout and Android boundaries before wiring the Rust core into the APK.
-
-The next implementation step is a `core-ffi` bridge that exposes the current Rust service API to Kotlin through UniFFI or JNI.
+This directory now contains the working native Android shell. The debug APK can be built with the Rust native receiver packaged for `arm64-v8a` and `x86_64`, installed on a device or emulator, and verified through the automated FTP account/login/upload smoke path.
 
 The Android source now has a native gateway boundary:
 
@@ -32,8 +30,9 @@ The Android source now has a native gateway boundary:
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
+- The Inbox screen uses a photo-first grid with persisted 2-column/3-column preference, compact tile labels, image previews when JPEG data is available, and a detail screen for full source/file metadata.
 
-`PreviewCoreGateway` remains the default entry point while native service smoke testing is still in progress. Build with `-PcameraConnector.useNativeCore=true` for native gateway smoke testing.
+The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation.
 
 ## Local Build Prerequisites
 
