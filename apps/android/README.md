@@ -84,6 +84,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_android_device
 
 The smoke pass builds and installs the debug APK, grants notification permission when available, verifies `pm path com.cameraconnector.app`, launches the app, and writes diagnostics to `target\android-diagnostics\smoke-latest`.
 
+To preflight a connected Android device before installing:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight_android_device.ps1
+```
+
+The preflight checks Android SDK level, arm64 ABI support, package notification permission state, and device IP interfaces, then writes `target\android-device-preflight.txt`. The full smoke script runs this automatically before install.
+
 To inspect an already built APK and write an auditable package report:
 
 ```powershell

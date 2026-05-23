@@ -55,6 +55,12 @@ if ($SkipBuild) {
     $installArgs += "-SkipBuild"
 }
 
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "preflight_android_device.ps1") @serialArgs
+if ($LASTEXITCODE -ne 0) {
+    Collect-Diagnostics "smoke-preflight-failed"
+    exit $LASTEXITCODE
+}
+
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "install_android_debug.ps1") @installArgs
 if ($LASTEXITCODE -ne 0) {
     Collect-Diagnostics "smoke-install-failed"
