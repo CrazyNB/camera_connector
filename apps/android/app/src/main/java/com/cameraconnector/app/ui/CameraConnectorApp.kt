@@ -121,6 +121,7 @@ fun CameraConnectorApp(
     var addingAccount by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var actionInFlight by remember { mutableStateOf<String?>(null) }
+    var inboxGridColumnCount by rememberSaveable { mutableStateOf(storageGateway.inboxGridColumnCount()) }
 
     fun runAction(actionName: String, action: suspend () -> Unit) {
         scope.launch {
@@ -244,6 +245,11 @@ fun CameraConnectorApp(
 
                     MainTab.Inbox -> InboxScreen(
                         dashboard = dashboard,
+                        gridColumnCount = inboxGridColumnCount,
+                        onGridColumnCountChange = { count ->
+                            inboxGridColumnCount = count
+                            storageGateway.persistInboxGridColumnCount(count)
+                        },
                         modifier = Modifier.padding(padding),
                     )
 
@@ -818,13 +824,14 @@ private fun AccountDetailScreen(
 @Composable
 private fun InboxScreen(
     dashboard: DashboardState,
+    gridColumnCount: Int,
+    onGridColumnCountChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedSource by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
     var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
     var filterExpanded by remember { mutableStateOf(false) }
-    var gridColumnCount by rememberSaveable { mutableStateOf(3) }
     val filteredAssets = remember(dashboard.inbox, selectedSource, selectedFilter) {
         dashboard.inbox
             .filter { asset -> selectedSource == null || asset.sourceLabel() == selectedSource }
@@ -858,7 +865,7 @@ private fun InboxScreen(
             Spacer(Modifier.width(12.dp))
             GridColumnToggle(
                 columnCount = gridColumnCount,
-                onColumnCountChange = { gridColumnCount = it },
+                onColumnCountChange = onGridColumnCountChange,
             )
         }
         Spacer(Modifier.height(10.dp))

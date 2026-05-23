@@ -32,6 +32,15 @@ class AndroidStorageGateway(private val context: Context) {
         return preferences.getString(KEY_INBOX_LABEL, null)
     }
 
+    fun inboxGridColumnCount(): Int =
+        preferences.getInt(KEY_INBOX_GRID_COLUMNS, DEFAULT_INBOX_GRID_COLUMNS).coerceIn(2, 3)
+
+    fun persistInboxGridColumnCount(columnCount: Int) {
+        preferences.edit()
+            .putInt(KEY_INBOX_GRID_COLUMNS, columnCount.coerceIn(2, 3))
+            .apply()
+    }
+
     fun createAppNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -40,5 +49,7 @@ class AndroidStorageGateway(private val context: Context) {
     private companion object {
         const val KEY_INBOX_URI = "inbox_uri"
         const val KEY_INBOX_LABEL = "inbox_label"
+        const val KEY_INBOX_GRID_COLUMNS = "inbox_grid_columns"
+        const val DEFAULT_INBOX_GRID_COLUMNS = 3
     }
 }

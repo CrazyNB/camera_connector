@@ -84,6 +84,9 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\permissi
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "selectedInboxLabel"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "SharedPreferences"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "inbox_uri"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "inbox_grid_columns"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "inboxGridColumnCount"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "persistInboxGridColumnCount"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "notificationPermissionGranted"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onRequestNotificationPermission"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "selectedInboxLabel"
@@ -109,6 +112,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "GridCells\.Fixed\(gridColumnCount\)"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "GridColumnToggle"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "CompactPhotoTile"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "storageGateway\.persistInboxGridColumnCount"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0032,0x5217))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0033,0x5217))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "PhotoInfoCard"
