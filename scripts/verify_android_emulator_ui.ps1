@@ -120,6 +120,46 @@ function Tap {
     Start-Sleep -Milliseconds 900
 }
 
+function Tap-UiNodeByText {
+    param([string]$Xml, [string]$Text, [string]$Label)
+    $escapedText = [System.Security.SecurityElement]::Escape($Text)
+    $pattern = "text=""$([regex]::Escape($escapedText))""[^>]*bounds=""\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""
+    $match = [regex]::Match($Xml, $pattern)
+    if (-not $match.Success) {
+        throw "Unable to find UI node by text '$Label'."
+    }
+    $left = [int]$match.Groups[1].Value
+    $top = [int]$match.Groups[2].Value
+    $right = [int]$match.Groups[3].Value
+    $bottom = [int]$match.Groups[4].Value
+    Tap ([int](($left + $right) / 2)) ([int](($top + $bottom) / 2))
+}
+
+function Use-EmulatorBindableReceiverConfig {
+    $remoteTempConfig = "/data/local/tmp/camera-connector-emulator-ui-config.json"
+    $localConfig = Join-Path $diagnosticsDir "camera-connector-emulator-ui-config.json"
+    New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+    $rawConfig = & $adb -s $Serial shell run-as $packageName cat files/camera-connector.json
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to read Android app config before emulator bind setup."
+    }
+    $config = ($rawConfig -join "`n") | ConvertFrom-Json
+    $config.receiver.protocol = "Ftp"
+    $config.receiver.bind_host = "0.0.0.0"
+    $config.receiver.ftp_port = 2121
+    $config.receiver.sftp_port = 2121
+    $json = $config | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($localConfig, $json, [System.Text.UTF8Encoding]::new($false))
+    & $adb -s $Serial push $localConfig $remoteTempConfig | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to push emulator bind config."
+    }
+    & $adb -s $Serial shell run-as $packageName cp $remoteTempConfig files/camera-connector.json
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to install emulator bind config."
+    }
+}
+
 $labels = @{
     AppTitle = "Camera Connector"
     ServiceControl = U @(0x670D,0x52A1,0x63A7,0x5236)
@@ -168,6 +208,16 @@ Assert-UiContains $xml $labels.Inbox "inbox tab"
 Assert-UiContains $xml $labels.Transfers "transfers tab"
 Assert-UiNotContains $xml $labels.DeviceAccounts "device accounts on overview"
 Assert-UiNotContains $xml $labels.ImportLocation "import location on overview"
+
+Tap-UiNodeByText $xml "SFTP" "SFTP protocol segment"
+$xml = Get-UiXml
+Tap-UiNodeByText $xml (U @(0x4FDD,0x5B58,0x63A5,0x6536,0x8BBE,0x7F6E)) "save receiver settings"
+$xml = Get-UiXml
+Assert-UiContains $xml "SFTP 192.168.137.1:2121" "SFTP unified endpoint after save"
+Use-EmulatorBindableReceiverConfig
+Start-App
+$xml = Wait-UiContains "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after config setup"
+Assert-UiContains $xml "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after save"
 
 if ($xml.Contains($labels.Running)) {
     Tap 540 760

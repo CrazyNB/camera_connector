@@ -93,18 +93,34 @@ class NativeCoreGateway(
 
     private fun mapDashboard(value: JSONObject): DashboardState {
         val receiverStatus = value.optJSONObject("receiver_status")
+        val receiverSettings = value.optJSONObject("receiver_settings")
         val paths = value.optJSONObject("paths")
         val assets = value.optJSONObject("assets")
         val transfers = value.optJSONObject("transfers")
-        val protocol = normalizeProtocol(receiverStatus?.optString("protocol"))
-        val (host, port) = splitHostAndPort(
-            receiverStatus?.optString("local_addr").orEmpty(),
-            defaultPort = if (protocol == "SFTP") 2222 else 2121,
-        )
+        val running = receiverStatus?.optString("phase") == "Running"
+        val settingsProtocol = normalizeProtocol(receiverSettings?.optString("protocol"))
+        val statusProtocol = receiverStatus?.optString("protocol")
+            ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            ?.let(::normalizeProtocol)
+        val protocol = if (running) statusProtocol ?: settingsProtocol else settingsProtocol
+        val configuredHost = receiverSettings?.optString("bind_host")
+            ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            ?: DEFAULT_LISTEN_HOST
+        val configuredPort = when (protocol) {
+            "SFTP" -> receiverSettings?.optInt("sftp_port")?.takeIf { it in 1..65_535 } ?: 2222
+            else -> receiverSettings?.optInt("ftp_port")?.takeIf { it in 1..65_535 } ?: 2121
+        }
+        val localAddr = receiverStatus?.optString("local_addr").orEmpty()
+        val (statusHost, statusPort) = splitHostAndPort(localAddr, defaultPort = configuredPort)
+        val (host, port) = if (localAddr.isBlank() || localAddr.equals("null", ignoreCase = true)) {
+            configuredHost to configuredPort
+        } else {
+            statusHost to statusPort
+        }
 
         return DashboardState(
             receiver = ReceiverState(
-                running = receiverStatus?.optString("phase") == "Running",
+                running = running,
                 phase = receiverStatus?.optString("phase").orEmpty()
                     .ifBlank { "Unknown" },
                 protocol = protocol,

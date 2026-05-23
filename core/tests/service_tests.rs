@@ -888,6 +888,10 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     let state_dir = unique_temp_dir("service-dashboard-state");
     std::fs::create_dir_all(&state_dir).expect("state dir should create");
     let mut app_config = CameraConnectorConfig::default();
+    app_config.receiver.protocol = PushProtocol::Sftp;
+    app_config.receiver.bind_host = "192.168.137.1".to_string();
+    app_config.receiver.ftp_port = 2121;
+    app_config.receiver.sftp_port = 2121;
     app_config
         .set_account("z5", Some("secret"), "Studio Z5")
         .expect("account should save");
@@ -976,6 +980,9 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
             .phase,
         ReceiverRuntimePhase::Stopped
     );
+    assert_eq!(dashboard.receiver_settings.protocol, PushProtocol::Sftp);
+    assert_eq!(dashboard.receiver_settings.bind_host, "192.168.137.1");
+    assert_eq!(dashboard.receiver_settings.sftp_port, 2121);
     assert_eq!(dashboard.devices.len(), 1);
     assert_eq!(dashboard.devices[0].display_source, "Studio Z5");
     assert_eq!(dashboard.accounts.len(), 1);

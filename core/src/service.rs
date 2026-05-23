@@ -138,6 +138,7 @@ pub struct SystemPathsView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
+    pub receiver_settings: ReceiverSettingsConfig,
     pub paths: SystemPathsView,
     pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
@@ -438,6 +439,8 @@ impl CameraConnectorService {
         online_devices_only: bool,
     ) -> Result<CameraConnectorDashboard> {
         let state_dir = state_dir.as_ref();
+        let config = self.load_config()?;
+        let receiver_settings = config.receiver.clone();
         let receiver_status = self.receiver_status(state_dir)?;
         let devices = self.connected_devices(
             state_dir,
@@ -446,6 +449,7 @@ impl CameraConnectorService {
         )?;
         let accounts = accounts_with_devices(self.accounts()?, &devices);
         Ok(CameraConnectorDashboard {
+            receiver_settings,
             paths: SystemPathsView {
                 config_path: self.config_path(),
                 state_dir: state_dir.to_path_buf(),

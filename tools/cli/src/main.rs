@@ -6,9 +6,9 @@ use camera_connector_core::{
     append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
-    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
-    TransferStatus,
+    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsConfig,
+    ReceiverSettingsUpdate, Result, StoredObjectLocation, TransferQuery, TransferRecord,
+    TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -1313,6 +1313,7 @@ mod tests {
                 account_count: 1,
                 message: None,
             }),
+            receiver_settings: ReceiverSettingsConfig::default(),
             paths: camera_connector_core::SystemPathsView {
                 config_path: PathBuf::from("C:\\CameraConnector\\config.json"),
                 state_dir: PathBuf::from("C:\\CameraConnector\\state"),

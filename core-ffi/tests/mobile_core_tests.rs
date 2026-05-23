@@ -89,7 +89,11 @@ fn mobile_core_removes_account_as_json() {
     assert_eq!(value["removed"], true);
     let dashboard: Value = serde_json::from_str(
         &core
-            .dashboard_json(Some(temp.path().join("state").to_string_lossy().into_owned()), 0, 25)
+            .dashboard_json(
+                Some(temp.path().join("state").to_string_lossy().into_owned()),
+                0,
+                25,
+            )
             .unwrap(),
     )
     .unwrap();
@@ -115,6 +119,7 @@ fn mobile_core_returns_dashboard_json() {
         .unwrap();
 
     let value: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["receiver_settings"]["protocol"], "Ftp");
     assert_eq!(value["accounts"][0]["username"], "camera01");
     assert_eq!(value["accounts"][0]["device_name"], "Camera 01");
     assert_eq!(value["assets"]["limit"], 25);
