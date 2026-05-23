@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,7 +84,7 @@ fun CameraConnectorApp(
                 protocol = "FTP",
                 authMode = "Unknown",
                 accountCount = 0,
-                host = "0.0.0.0",
+                host = DEFAULT_LISTEN_HOST,
                 port = 2121,
                 outputLabel = "未配置",
                 message = null,
@@ -258,6 +259,7 @@ private val ElementWarning = Color(0xFFE6A23C)
 private val ElementDanger = Color(0xFFF56C6C)
 private val ElementInfo = Color(0xFF909399)
 private val ElementBorder = Color(0xFFDCDFE6)
+private const val DEFAULT_LISTEN_HOST = "192.168.137.1"
 
 private val elementColorScheme = lightColorScheme(
     primary = ElementBlue,
@@ -780,9 +782,22 @@ private fun InboxScreen(
     dashboard: DashboardState,
     modifier: Modifier = Modifier,
 ) {
+    var selectedSource by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
-    val filteredAssets = remember(dashboard.inbox, selectedFilter) {
-        dashboard.inbox.filter { asset -> selectedFilter.matches(asset) }
+    var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
+    val filteredAssets = remember(dashboard.inbox, selectedSource, selectedFilter) {
+        dashboard.inbox
+            .filter { asset -> selectedSource == null || asset.sourceLabel() == selectedSource }
+            .filter { asset -> selectedFilter.matches(asset) }
+    }
+
+    selectedPhoto?.let { photo ->
+        PhotoDetailScreen(
+            asset = photo,
+            onBack = { selectedPhoto = null },
+            modifier = modifier,
+        )
+        return
     }
 
     LazyColumn(
@@ -794,14 +809,21 @@ private fun InboxScreen(
             Column {
                 Text("收件箱", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
-                Text("按照片信息流查看，可用标签快速筛选。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("按账号、来源和路径标签筛选照片信息流。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+        item {
+            SourceFilterBar(
+                selectedSource = selectedSource,
+                onSourceChange = { selectedSource = it },
+                assets = dashboard.inbox,
+            )
         }
         item {
             InboxFilterBar(
                 selectedFilter = selectedFilter,
                 onFilterChange = { selectedFilter = it },
-                assets = dashboard.inbox,
+                assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
             )
         }
         if (filteredAssets.isEmpty()) {
@@ -815,9 +837,44 @@ private fun InboxScreen(
                 }
             }
         } else {
-            items(filteredAssets) { asset ->
-                PhotoInfoCard(asset = asset)
-            }
+            filteredAssets
+                .groupBy { it.formatGroupLabel() }
+                .forEach { (groupLabel, assets) ->
+                    item {
+                        FormatGroupSection(title = groupLabel, count = assets.size)
+                    }
+                    items(assets) { asset ->
+                        PhotoInfoCard(asset = asset, onClick = { selectedPhoto = asset })
+                    }
+                }
+        }
+    }
+}
+
+@Composable
+private fun SourceFilterBar(
+    selectedSource: String?,
+    onSourceChange: (String?) -> Unit,
+    assets: List<InboxAsset>,
+) {
+    val sources = remember(assets) {
+        assets.map { it.sourceLabel() }.distinct().sorted()
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            FilterChipButton(
+                label = "全部来源 ${assets.size}",
+                selected = selectedSource == null,
+                onClick = { onSourceChange(null) },
+            )
+        }
+        items(sources) { source ->
+            val count = assets.count { it.sourceLabel() == source }
+            FilterChipButton(
+                label = "$source $count",
+                selected = selectedSource == source,
+                onClick = { onSourceChange(source) },
+            )
         }
     }
 }
@@ -828,23 +885,56 @@ private fun InboxFilterBar(
     onFilterChange: (InboxFilter) -> Unit,
     assets: List<InboxAsset>,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        InboxFilter.entries.forEach { filter ->
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(InboxFilter.entries) { filter ->
             val count = assets.count { filter.matches(it) }
-            ProtocolSegment(
+            FilterChipButton(
                 label = "${filter.label} $count",
                 selected = selectedFilter == filter,
-                enabled = true,
                 onClick = { onFilterChange(filter) },
-                modifier = Modifier.weight(1f),
             )
         }
     }
 }
 
 @Composable
-private fun PhotoInfoCard(asset: InboxAsset) {
-    ElementCard(modifier = Modifier.fillMaxWidth()) {
+private fun FilterChipButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        border = BorderStroke(1.dp, if (selected) ElementBlue else ElementBorder),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) ElementBlue else Color.White,
+            contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+        ),
+        shape = elementShape,
+    ) {
+        Text(label)
+    }
+}
+
+@Composable
+private fun FormatGroupSection(title: String, count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        ElementTag("$count 组", ElementInfo)
+    }
+}
+
+@Composable
+private fun PhotoInfoCard(asset: InboxAsset, onClick: () -> Unit) {
+    ElementCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
         Column(Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -853,7 +943,7 @@ private fun PhotoInfoCard(asset: InboxAsset) {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        asset.filename(),
+                        asset.groupTitle(),
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -871,10 +961,72 @@ private fun PhotoInfoCard(asset: InboxAsset) {
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ElementTag(asset.sourceLabel(), ElementBlue)
+                asset.username?.let { ElementTag("账号：$it", ElementInfo) }
+                ElementTag("详情 >", ElementInfo)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                asset.jpegPath?.let { ElementTag("JPEG", ElementSuccess) }
+                asset.rawPath?.let { ElementTag("RAW", ElementWarning) }
+                asset.videoPath?.let { ElementTag("视频", ElementBlue) }
                 ElementTag("接收 ${formatEpochMillisTextForDisplay(asset.receivedAt)}", ElementInfo)
-                ElementTag(sourceGroupLabel(asset.displayPath), ElementBlue)
             }
         }
+    }
+}
+
+@Composable
+private fun PhotoDetailScreen(
+    asset: InboxAsset,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            HeaderWithBack(
+                title = asset.groupTitle(),
+                subtitle = "照片详情",
+                onBack = onBack,
+            )
+        }
+        item {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("来源信息", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    DetailLine("来源", asset.sourceLabel())
+                    DetailLine("账号", asset.username ?: "未记录")
+                    DetailLine("原始路径", asset.originalPath ?: asset.displayPath)
+                    DetailLine("接收时间", formatEpochMillisTextForDisplay(asset.receivedAt))
+                    DetailLine("文件大小", asset.sizeBytes?.let { "$it bytes" } ?: "未记录")
+                }
+            }
+        }
+        item {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("文件组", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(8.dp))
+                    DetailLine("主文件", asset.displayPath)
+                    DetailLine("RAW", asset.rawPath ?: "无")
+                    DetailLine("JPEG", asset.jpegPath ?: "无")
+                    DetailLine("视频", asset.videoPath ?: "无")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -1034,7 +1186,7 @@ private fun transferStatusLabel(value: String): String = when (value) {
 private fun normalizeListenHost(value: String?): String {
     val trimmed = value?.trim().orEmpty()
     return if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true)) {
-        "0.0.0.0"
+        DEFAULT_LISTEN_HOST
     } else {
         trimmed
     }
@@ -1048,13 +1200,32 @@ private fun formatEndpoint(account: DeviceAccount): String {
 
 private fun InboxFilter.matches(asset: InboxAsset): Boolean = when (this) {
     InboxFilter.All -> true
-    InboxFilter.Raw -> asset.format.lowercase() in setOf("raw", "nef", "cr3", "cr2", "arw", "raf", "orf", "rw2", "dng")
-    InboxFilter.Jpeg -> asset.format.lowercase() in setOf("jpeg", "jpg")
-    InboxFilter.Video -> asset.format.lowercase() in setOf("mov", "mp4")
+    InboxFilter.Raw -> asset.rawPath != null || asset.format.isRawFormat()
+    InboxFilter.Jpeg -> asset.jpegPath != null || asset.format.lowercase() in setOf("jpeg", "jpg")
+    InboxFilter.Video -> asset.videoPath != null || asset.format.lowercase() in setOf("mov", "mp4")
 }
 
 private fun InboxAsset.filename(): String =
     displayPath.substringAfterLast('/').substringAfterLast('\\').ifBlank { displayPath }
+
+private fun InboxAsset.groupTitle(): String =
+    groupKey.ifBlank { filename().substringBeforeLast('.', filename()) }
+
+private fun InboxAsset.sourceLabel(): String =
+    displaySource?.takeIf { it.isNotBlank() }
+        ?: username?.takeIf { it.isNotBlank() }?.let { "账号：$it" }
+        ?: sourceGroupLabel(displayPath)
+
+private fun InboxAsset.formatGroupLabel(): String = when {
+    videoPath != null || format.lowercase() in setOf("mov", "mp4") -> "视频"
+    rawPath != null && jpegPath != null -> "RAW + JPEG"
+    rawPath != null || format.isRawFormat() -> "RAW"
+    jpegPath != null || format.lowercase() in setOf("jpeg", "jpg") -> "JPEG"
+    else -> "其他"
+}
+
+private fun String.isRawFormat(): Boolean =
+    lowercase() in setOf("raw", "nef", "nrw", "cr3", "cr2", "arw", "raf", "orf", "rw2", "pef", "dng")
 
 private fun formatColor(format: String): Color = when (format.lowercase()) {
     "raw", "nef", "cr3", "cr2", "arw", "raf", "orf", "rw2", "dng" -> ElementWarning

@@ -129,7 +129,7 @@ class NativeCoreGateway(
     private fun splitHostAndPort(localAddr: String, defaultPort: Int): Pair<String, Int> {
         val trimmed = localAddr.trim()
         if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true)) {
-            return "0.0.0.0" to defaultPort
+            return DEFAULT_LISTEN_HOST to defaultPort
         }
 
         if (trimmed.startsWith("[")) {
@@ -190,17 +190,33 @@ class NativeCoreGateway(
             for (index in 0 until groups.length()) {
                 val group = groups.optJSONObject(index) ?: continue
                 val primary = group.optJSONObject("primary") ?: continue
+                val raw = group.optJSONObject("raw")
+                val jpeg = group.optJSONObject("jpeg")
+                val video = group.optJSONObject("video")
                 add(
                     InboxAsset(
+                        id = primary.optString("id"),
+                        groupKey = group.optString("group_key")
+                            .ifBlank { primary.optString("id") },
                         displayPath = primary.optString("virtual_display_path")
                             .ifBlank { primary.optString("filename") },
                         format = primary.optString("format"),
                         receivedAt = primary.optLong("received_time_ms").toString(),
+                        username = primary.optString("username").takeIf { it.isNotBlank() },
+                        displaySource = primary.optString("display_source").takeIf { it.isNotBlank() },
+                        originalPath = primary.optString("original_path").takeIf { it.isNotBlank() },
+                        sizeBytes = primary.optLong("size_bytes").takeIf { !primary.isNull("size_bytes") },
+                        rawPath = raw?.assetDisplayPath(),
+                        jpegPath = jpeg?.assetDisplayPath(),
+                        videoPath = video?.assetDisplayPath(),
                     ),
                 )
             }
         }
     }
+
+    private fun JSONObject.assetDisplayPath(): String =
+        optString("virtual_display_path").ifBlank { optString("filename") }
 
     private fun mapTransfers(
         transfers: JSONObject?,
@@ -226,22 +242,29 @@ class NativeCoreGateway(
             val groups = assets?.optJSONArray("groups")
             if (groups != null) {
                 for (index in 0 until groups.length()) {
-                    val primary = groups.optJSONObject(index)?.optJSONObject("primary") ?: continue
-                    val id = primary.optString("id")
-                    val displayPath = primary.optString("virtual_display_path")
-                        .ifBlank { primary.optString("filename") }
-                    if (id.isBlank() || displayPath.isBlank()) {
-                        continue
-                    }
-                    add(
-                        TransferRow(
-                            id = id,
-                            status = "Completed",
-                            displayPath = displayPath,
-                            message = primary.optString("size_bytes").takeIf { it.isNotBlank() }
-                                ?.let { "$it bytes" },
-                        ),
-                    )
+                    val group = groups.optJSONObject(index) ?: continue
+                    val seenIds = mutableSetOf<String>()
+                    listOf("primary", "jpeg", "raw", "video")
+                        .mapNotNull { group.optJSONObject(it) }
+                        .forEach { asset ->
+                            val id = asset.optString("id")
+                            if (id.isBlank() || !seenIds.add(id)) {
+                                return@forEach
+                            }
+                            val displayPath = asset.assetDisplayPath()
+                            if (displayPath.isBlank()) {
+                                return@forEach
+                            }
+                            add(
+                                TransferRow(
+                                    id = id,
+                                    status = "Completed",
+                                    displayPath = displayPath,
+                                    message = asset.optString("size_bytes").takeIf { it.isNotBlank() }
+                                        ?.let { "$it bytes" },
+                                ),
+                            )
+                        }
                 }
             }
 
@@ -276,7 +299,7 @@ class NativeCoreGateway(
                 protocol = "FTP",
                 authMode = "Unknown",
                 accountCount = 0,
-                host = "0.0.0.0",
+                host = DEFAULT_LISTEN_HOST,
                 port = 2121,
                 outputLabel = "选择收件箱文件夹",
                 message = null,
@@ -287,6 +310,7 @@ class NativeCoreGateway(
         )
 
     private companion object {
+        const val DEFAULT_LISTEN_HOST = "192.168.137.1"
         const val DASHBOARD_POLL_INTERVAL_MS = 2_000L
     }
 }

@@ -18,8 +18,10 @@ $deviceControl = "tcp:2121"
 $androidConfig = "/data/user/0/$packageName/files/camera-connector.json"
 $androidInbox = "/data/user/0/$packageName/files/inbox"
 $androidState = "/data/user/0/$packageName/files/state"
-$sampleName = "VERIFY_9001.NEF"
-$sampleBytes = [byte[]](0x4E, 0x45, 0x46, 0x21, 0x01, 0x02, 0x03, 0x04)
+$sampleRawName = "VERIFY_9001.NEF"
+$sampleJpegName = "VERIFY_9001.JPG"
+$sampleRawBytes = [byte[]](0x4E, 0x45, 0x46, 0x21, 0x01, 0x02, 0x03, 0x04)
+$sampleJpegBytes = [byte[]](0xFF, 0xD8, 0xFF, 0xE1, 0x43, 0x43, 0x01, 0x02)
 $dumpPath = "/sdcard/camera_connector_ftp_verify_window.xml"
 $localDumpPath = Join-Path $root "target\android-diagnostics\emulator-ftp-upload-window.xml"
 
@@ -33,6 +35,11 @@ function Invoke-Adb {
     if ($LASTEXITCODE -ne 0) {
         throw "adb command failed: adb -s $Serial $($Arguments -join ' ')"
     }
+}
+
+function U {
+    param([int[]]$Codes)
+    return -join ($Codes | ForEach-Object { [char]$_ })
 }
 
 function Remove-AdbForward {
@@ -151,6 +158,39 @@ function Tap-UntilUiContains {
     throw "Expected UI to contain '$Label' after tapping $X,$Y."
 }
 
+function Send-FtpFile {
+    param(
+        [System.IO.StreamWriter]$Writer,
+        [System.IO.StreamReader]$Reader,
+        [string]$Filename,
+        [byte[]]$Bytes
+    )
+    $epsv = Send-FtpCommand $Writer $Reader "EPSV" "229"
+    if ($epsv -notmatch "\(\|\|\|(\d+)\|\)") {
+        throw "EPSV reply was not parseable: $epsv"
+    }
+    $deviceDataPort = [int]$Matches[1]
+    $hostDataPort = $deviceDataPort
+    $dataForward = "tcp:$hostDataPort"
+    Remove-AdbForward $dataForward
+    Invoke-Adb @("forward", $dataForward, "tcp:$deviceDataPort") | Out-Null
+
+    $data = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $hostDataPort)
+    try {
+        $Writer.WriteLine("STOR $Filename")
+        $stor = Read-FtpReply $Reader
+        if (-not $stor.StartsWith("150")) { throw "STOR expected 150, got '$stor'" }
+        $dataStream = $data.GetStream()
+        $dataStream.Write($Bytes, 0, $Bytes.Length)
+        $dataStream.Close()
+        $complete = Read-FtpReply $Reader
+        if (-not $complete.StartsWith("226")) { throw "STOR expected 226, got '$complete'" }
+    } finally {
+        $data.Dispose()
+        Remove-AdbForward $dataForward
+    }
+}
+
 New-Item -ItemType Directory -Force -Path (Join-Path $root "target") | Out-Null
 
 & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username $Username --password $Password --device-name $DeviceName | Out-Host
@@ -203,46 +243,26 @@ try {
     Send-FtpCommand $writer $reader "PASS $Password" "230" | Out-Null
     Send-FtpCommand $writer $reader "TYPE I" "200" | Out-Null
     Send-FtpCommand $writer $reader "CWD DCIM/100VERIFY" "250" | Out-Null
-    $epsv = Send-FtpCommand $writer $reader "EPSV" "229"
-    if ($epsv -notmatch "\(\|\|\|(\d+)\|\)") {
-        throw "EPSV reply was not parseable: $epsv"
-    }
-    $deviceDataPort = [int]$Matches[1]
-    $hostDataPort = $deviceDataPort
-    $dataForward = "tcp:$hostDataPort"
-    Remove-AdbForward $dataForward
-    Invoke-Adb @("forward", $dataForward, "tcp:$deviceDataPort") | Out-Null
-
-    $data = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $hostDataPort)
-    try {
-        $writer.WriteLine("STOR $sampleName")
-        $stor = Read-FtpReply $reader
-        if (-not $stor.StartsWith("150")) { throw "STOR expected 150, got '$stor'" }
-        $dataStream = $data.GetStream()
-        $dataStream.Write($sampleBytes, 0, $sampleBytes.Length)
-        $dataStream.Close()
-        $complete = Read-FtpReply $reader
-        if (-not $complete.StartsWith("226")) { throw "STOR expected 226, got '$complete'" }
-    } finally {
-        $data.Dispose()
-    }
+    Send-FtpFile $writer $reader $sampleRawName $sampleRawBytes
+    Send-FtpFile $writer $reader $sampleJpegName $sampleJpegBytes
     Send-FtpCommand $writer $reader "QUIT" "221" | Out-Null
 } finally {
     $control.Dispose()
-    if ($dataForward) {
-        Remove-AdbForward $dataForward
-    }
     Remove-AdbForward $controlForward
 }
 
-$uploadedSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$sampleName") -join "`n").Trim()
-if ([int64]$uploadedSize -ne $sampleBytes.Length) {
-    throw "Uploaded file size mismatch. Expected $($sampleBytes.Length), got $uploadedSize."
+$uploadedRawSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$sampleRawName") -join "`n").Trim()
+if ([int64]$uploadedRawSize -ne $sampleRawBytes.Length) {
+    throw "Uploaded raw file size mismatch. Expected $($sampleRawBytes.Length), got $uploadedRawSize."
+}
+$uploadedJpegSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$sampleJpegName") -join "`n").Trim()
+if ([int64]$uploadedJpegSize -ne $sampleJpegBytes.Length) {
+    throw "Uploaded jpeg file size mismatch. Expected $($sampleJpegBytes.Length), got $uploadedJpegSize."
 }
 
 $transferLog = Get-AndroidFileText "files/state/transfer-log.jsonl"
-if ($transferLog -notmatch $sampleName) {
-    throw "Android transfer log did not include uploaded sample."
+if ($transferLog -notmatch $sampleRawName -or $transferLog -notmatch $sampleJpegName) {
+    throw "Android transfer log did not include uploaded raw/jpeg pair."
 }
 if ($transferLog -notmatch $Username -or $transferLog -notmatch $DeviceName) {
     throw "Android transfer log did not include account identity."
@@ -255,13 +275,17 @@ if ($configAfter -like "*$Password*") {
 
 Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 3
-$inboxUi = Tap-UntilUiContains 540 2240 $sampleName "uploaded asset in inbox"
-$transferUi = Tap-UntilUiContains 900 2240 $sampleName "uploaded transfer row"
-Assert-UiContains $transferUi $sampleName "uploaded transfer row"
+$inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox"
+Assert-UiContains $inboxUi "RAW" "raw pair tag"
+Assert-UiContains $inboxUi "JPEG" "jpeg pair tag"
+Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
+$transferUi = Tap-UntilUiContains 900 2240 $sampleJpegName "uploaded transfer row"
+Assert-UiContains $transferUi $sampleRawName "uploaded raw transfer row"
+Assert-UiContains $transferUi $sampleJpegName "uploaded jpeg transfer row"
 Assert-UiContains $transferUi $DeviceName "transfer device name"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
 if ($LASTEXITCODE -ne 0) {
     throw "Android diagnostics collection failed after FTP upload verification."
 }
 
-Write-Host "Android emulator FTP account login, connection, and upload verification passed for $sampleName"
+Write-Host "Android emulator FTP account login, connection, and RAW/JPEG upload verification passed for $sampleRawName + $sampleJpegName"

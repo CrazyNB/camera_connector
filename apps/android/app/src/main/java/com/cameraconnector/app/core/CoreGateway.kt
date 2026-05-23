@@ -53,9 +53,18 @@ data class DeviceAccount(
 )
 
 data class InboxAsset(
+    val id: String = "",
+    val groupKey: String = "",
     val displayPath: String,
     val format: String,
     val receivedAt: String,
+    val username: String? = null,
+    val displaySource: String? = null,
+    val originalPath: String? = null,
+    val sizeBytes: Long? = null,
+    val rawPath: String? = null,
+    val jpegPath: String? = null,
+    val videoPath: String? = null,
 )
 
 data class TransferRow(
