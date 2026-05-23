@@ -45,6 +45,7 @@ Assert-File "apps\android\build.gradle.kts"
 Assert-File "apps\android\gradle.properties"
 Assert-File "apps\android\app\build.gradle.kts"
 Assert-File "apps\android\app\src\main\AndroidManifest.xml"
+Assert-File "apps\android\app\src\main\res\values\strings.xml"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt"
@@ -71,6 +72,8 @@ Assert-Contains "apps\android\app\build.gradle.kts" "USE_NATIVE_CORE"
 Assert-Contains "apps\android\app\build.gradle.kts" "androidx\.compose:compose-bom:2026\.05\.00"
 Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "android\.permission\.FOREGROUND_SERVICE_DATA_SYNC"
 Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "ReceiverForegroundService"
+Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "@string/app_name"
+Assert-Contains "apps\android\app\src\main\res\values\strings.xml" (U @(0x76F8,0x673A,0x8FDE,0x63A5,0x5668))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt" "CoreGatewayFactory\.create"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt" "ActivityResultContracts\.RequestPermission"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt" "ActivityResultContracts\.OpenDocumentTree"
@@ -93,6 +96,11 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onClearActionError"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "PasswordVisualTransformation"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "OutlinedTextField"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "Icons\.Outlined\.Settings"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "SettingsScreen"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onOpenSettings"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onCloseSettings"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x670D,0x52A1,0x63A7,0x5236))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "ReceiverSettings"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onSaveReceiverSettings"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onSaveDeviceAccount"
@@ -158,7 +166,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x505C,0x6B62))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x63A5,0x6536,0x670D,0x52A1,0x72B6,0x6001))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" '"Starting receiver"'
-Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" (U @(0x76F8,0x673A,0x8FDE,0x63A5,0x5668))
+Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "@string/app_name"
 Assert-Contains "scripts\install_android_debug.ps1" "verify_android_build\.ps1"
 Assert-Contains "scripts\install_android_debug.ps1" "adb"
 Assert-Contains "scripts\install_android_debug.ps1" "install"

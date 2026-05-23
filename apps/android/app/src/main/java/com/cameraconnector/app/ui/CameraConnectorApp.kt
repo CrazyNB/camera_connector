@@ -14,13 +14,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -84,6 +87,7 @@ fun CameraConnectorApp(
     val selectedInbox by selectedInboxLabel.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(MainTab.Overview) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var actionInFlight by remember { mutableStateOf<String?>(null) }
     fun runAction(actionName: String, action: suspend () -> Unit) {
@@ -111,25 +115,27 @@ fun CameraConnectorApp(
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                        MainTab.entries.forEach { item ->
-                            NavigationBarItem(
-                                selected = tab == item,
-                                onClick = { tab = item },
-                                label = { Text(item.label) },
-                                icon = { Icon(item.icon, contentDescription = item.label) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = ElementBlueSoft,
-                                ),
-                            )
+                    if (!settingsOpen) {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                            MainTab.entries.forEach { item ->
+                                NavigationBarItem(
+                                    selected = tab == item,
+                                    onClick = { tab = item },
+                                    label = { Text(item.label) },
+                                    icon = { Icon(item.icon, contentDescription = item.label) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                                        indicatorColor = ElementBlueSoft,
+                                    ),
+                                )
+                            }
                         }
                     }
                 },
             ) { padding ->
-                when (tab) {
-                    MainTab.Overview -> OverviewScreen(
+                if (settingsOpen) {
+                    SettingsScreen(
                         dashboard = dashboard,
                         notificationPermissionRequired = notificationPermissionRequired,
                         notificationPermissionGranted = notificationsGranted,
@@ -139,13 +145,24 @@ fun CameraConnectorApp(
                         onClearActionError = { actionError = null },
                         selectedInboxLabel = selectedInbox,
                         onChooseInboxDirectory = onChooseInboxDirectory,
+                        onCloseSettings = { settingsOpen = false },
+                        onSaveDeviceAccount = { account, password ->
+                            runAction("正在保存账号") { coreGateway.saveDeviceAccount(account, password) }
+                        },
+                        modifier = Modifier.padding(padding),
+                    )
+                } else when (tab) {
+                    MainTab.Overview -> OverviewScreen(
+                        dashboard = dashboard,
+                        notificationPermissionGranted = notificationsGranted,
+                        actionError = actionError,
+                        actionInFlight = actionInFlight,
+                        onClearActionError = { actionError = null },
+                        onOpenSettings = { settingsOpen = true },
                         onStart = { runAction("正在启动接收服务") { coreGateway.startReceiver() } },
                         onStop = { runAction("正在停止接收服务") { coreGateway.stopReceiver() } },
                         onSaveReceiverSettings = { settings ->
                             runAction("正在保存接收设置") { coreGateway.saveReceiverSettings(settings) }
-                        },
-                        onSaveDeviceAccount = { account, password ->
-                            runAction("正在保存账号") { coreGateway.saveDeviceAccount(account, password) }
                         },
                         modifier = Modifier.padding(padding),
                     )
@@ -229,18 +246,14 @@ private fun ElementTag(text: String, color: Color) {
 @Composable
 private fun OverviewScreen(
     dashboard: DashboardState,
-    notificationPermissionRequired: Boolean,
     notificationPermissionGranted: Boolean,
-    onRequestNotificationPermission: () -> Unit,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
-    selectedInboxLabel: String?,
-    onChooseInboxDirectory: () -> Unit,
+    onOpenSettings: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onSaveReceiverSettings: (ReceiverSettings) -> Unit,
-    onSaveDeviceAccount: (DeviceAccount, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var protocol by remember(dashboard.receiver.protocol) {
@@ -255,9 +268,6 @@ private fun OverviewScreen(
     var sftpPortInput by remember(dashboard.receiver.protocol, dashboard.receiver.port) {
         mutableStateOf(if (dashboard.receiver.protocol == "SFTP") dashboard.receiver.port.toString() else "2222")
     }
-    var deviceName by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
     val ftpPort = ftpPortInput.toIntOrNull()
     val sftpPort = sftpPortInput.toIntOrNull()
     val receiverSettingsValid = hostInput.trim().isNotBlank() &&
@@ -271,7 +281,19 @@ private fun OverviewScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("相机连接器", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text("相机连接器", style = MaterialTheme.typography.headlineMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text("服务控制", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "设置")
+                }
+            }
         }
 
         actionError?.let { message ->
@@ -395,6 +417,80 @@ private fun OverviewScreen(
                         enabled = actionsEnabled && !dashboard.receiver.running && receiverSettingsValid,
                     ) {
                         Text("保存接收设置")
+                    }
+                }
+            }
+        }
+
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    dashboard: DashboardState,
+    notificationPermissionRequired: Boolean,
+    notificationPermissionGranted: Boolean,
+    onRequestNotificationPermission: () -> Unit,
+    actionError: String?,
+    actionInFlight: String?,
+    onClearActionError: () -> Unit,
+    selectedInboxLabel: String?,
+    onChooseInboxDirectory: () -> Unit,
+    onCloseSettings: () -> Unit,
+    onSaveDeviceAccount: (DeviceAccount, String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var deviceName by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val actionsEnabled = actionInFlight == null
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = onCloseSettings) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+                    }
+                    Column {
+                        Text("设置", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("账号、目录、通知权限", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        actionError?.let { message ->
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("操作失败", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(message)
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = onClearActionError) {
+                            Text("关闭")
+                        }
+                    }
+                }
+            }
+        }
+
+        actionInFlight?.let { action ->
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("处理中", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(action)
                     }
                 }
             }

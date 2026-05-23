@@ -1,0 +1,191 @@
+param(
+    [string]$Serial = "emulator-5554",
+    [switch]$SkipInstall
+)
+
+$ErrorActionPreference = "Stop"
+
+$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+$adb = Join-Path $sdkRoot "platform-tools\adb.exe"
+$packageName = "com.cameraconnector.app"
+$dumpPath = "/sdcard/camera_connector_window.xml"
+$diagnosticsDir = Join-Path $root "target\android-diagnostics\emulator-ui-latest"
+$localDumpPath = Join-Path $root "target\android-diagnostics\emulator-ui-window.xml"
+
+if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) {
+    throw "adb not found at $adb. Set ANDROID_SDK_ROOT or install Android platform-tools."
+}
+
+function U {
+    param([int[]]$Codes)
+    return -join ($Codes | ForEach-Object { [char]$_ })
+}
+
+function Invoke-Adb {
+    param([string[]]$Arguments)
+    & $adb @("-s", $Serial) @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "adb command failed: adb -s $Serial $($Arguments -join ' ')"
+    }
+}
+
+function Start-App {
+    Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Host
+    Start-Sleep -Milliseconds 2000
+}
+
+function Get-UiXml {
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        & $adb -s $Serial shell uiautomator dump $dumpPath | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
+        & $adb -s $Serial pull $dumpPath $localDumpPath | Out-Null
+        $xml = [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
+        if ($xml.Contains("<hierarchy") -and $xml.Contains($packageName)) {
+            return $xml
+        }
+        Start-Sleep -Milliseconds 800
+    }
+    throw "Unable to read a stable UI hierarchy from $Serial."
+}
+
+function Assert-UiContains {
+    param([string]$Xml, [string]$Needle, [string]$Label)
+    if (-not $Xml.Contains($Needle)) {
+        throw "Expected UI to contain '$Label'."
+    }
+}
+
+function Assert-UiNotContains {
+    param([string]$Xml, [string]$Needle, [string]$Label)
+    if ($Xml.Contains($Needle)) {
+        throw "Expected UI not to contain '$Label'."
+    }
+}
+
+function Wait-UiContains {
+    param([string]$Needle, [string]$Label)
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        $xml = Get-UiXml
+        if ($xml.Contains($Needle)) {
+            return $xml
+        }
+        Start-Sleep -Milliseconds 700
+    }
+    throw "Expected UI to contain '$Label' within timeout."
+}
+
+function Tap-UntilUiContains {
+    param([int]$X, [int]$Y, [string]$Needle, [string]$Label)
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        Tap $X $Y
+        for ($inner = 1; $inner -le 4; $inner++) {
+            $xml = Get-UiXml
+            if ($xml.Contains($Needle)) {
+                return $xml
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "Expected UI to contain '$Label' after tapping $X,$Y."
+}
+
+function Tap {
+    param([int]$X, [int]$Y)
+    Invoke-Adb @("shell", "input", "tap", "$X", "$Y") | Out-Null
+    Start-Sleep -Milliseconds 900
+}
+
+$labels = @{
+    AppTitle = U @(0x76F8,0x673A,0x8FDE,0x63A5,0x5668)
+    ServiceControl = U @(0x670D,0x52A1,0x63A7,0x5236)
+    ReceiverService = U @(0x63A5,0x6536,0x670D,0x52A1)
+    ReceiverSettings = U @(0x63A5,0x6536,0x8BBE,0x7F6E)
+    ListenAddress = U @(0x76D1,0x542C,0x5730,0x5740)
+    Start = U @(0x542F,0x52A8)
+    Stop = U @(0x505C,0x6B62)
+    Running = U @(0x8FD0,0x884C,0x4E2D)
+    Stopped = U @(0x5DF2,0x505C,0x6B62)
+    Settings = U @(0x8BBE,0x7F6E)
+    SettingsSubtitle = U @(0x8D26,0x53F7,0x3001,0x76EE,0x5F55,0x3001,0x901A,0x77E5,0x6743,0x9650)
+    DeviceAccounts = U @(0x8BBE,0x5907,0x8D26,0x53F7)
+    ImportLocation = U @(0x5BFC,0x5165,0x4F4D,0x7F6E)
+    Inbox = U @(0x6536,0x4EF6,0x7BB1)
+    Transfers = U @(0x4F20,0x8F93)
+    TransferLog = U @(0x4F20,0x8F93,0x8BB0,0x5F55)
+    Overview = U @(0x603B,0x89C8)
+    EmptyInbox = U @(0x8FD8,0x6CA1,0x6709,0x5BFC,0x5165,0x6587,0x4EF6,0x3002)
+}
+
+if (-not $SkipInstall) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "smoke_android_device.ps1") -Serial $Serial
+    if ($LASTEXITCODE -ne 0) {
+        throw "Smoke install failed before emulator UI verification."
+    }
+}
+
+Start-App
+
+$xml = Get-UiXml
+if ($xml.Contains($labels.SettingsSubtitle)) {
+    Tap 75 240
+    $xml = Get-UiXml
+}
+Assert-UiContains $xml $labels.AppTitle "app title"
+Assert-UiContains $xml $labels.ServiceControl "service control subtitle"
+Assert-UiContains $xml $labels.ReceiverService "receiver service card"
+Assert-UiContains $xml $labels.ReceiverSettings "receiver settings card"
+Assert-UiContains $xml $labels.ListenAddress "listen address field"
+Assert-UiContains $xml $labels.Start "start button"
+Assert-UiContains $xml $labels.Stop "stop button"
+Assert-UiContains $xml "FTP" "FTP protocol"
+Assert-UiContains $xml "SFTP" "SFTP protocol"
+Assert-UiContains $xml $labels.Overview "overview tab"
+Assert-UiContains $xml $labels.Inbox "inbox tab"
+Assert-UiContains $xml $labels.Transfers "transfers tab"
+Assert-UiNotContains $xml $labels.DeviceAccounts "device accounts on overview"
+Assert-UiNotContains $xml $labels.ImportLocation "import location on overview"
+
+if ($xml.Contains($labels.Running)) {
+    Tap 405 765
+    $xml = Wait-UiContains $labels.Stopped "receiver stopped state"
+}
+
+$xml = Tap-UntilUiContains 180 765 $labels.Running "receiver running state"
+$xml = Tap-UntilUiContains 405 765 $labels.Stopped "receiver stopped state"
+
+Tap 975 240
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.Settings "settings title"
+Assert-UiContains $xml $labels.SettingsSubtitle "settings subtitle"
+Assert-UiContains $xml $labels.DeviceAccounts "device accounts section"
+Assert-UiNotContains $xml $labels.Overview "bottom overview tab on settings"
+Assert-UiNotContains $xml $labels.Transfers "bottom transfers tab on settings"
+
+Invoke-Adb @("shell", "input", "swipe", "540", "1700", "540", "850", "500") | Out-Null
+Start-Sleep -Milliseconds 900
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.ImportLocation "import location section"
+
+Tap 75 240
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.ServiceControl "overview after back"
+
+Tap 540 2240
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.Inbox "inbox screen title"
+
+Tap 900 2240
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.TransferLog "transfer log screen title"
+
+Tap 170 2240
+$xml = Get-UiXml
+Assert-UiContains $xml $labels.ServiceControl "overview after tab navigation"
+
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir $diagnosticsDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Android diagnostics collection failed for emulator UI verification."
+}
+
+Write-Host "Android emulator UI verification passed for $packageName on $Serial"
