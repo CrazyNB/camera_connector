@@ -160,6 +160,13 @@ function Assert-UiContains {
     }
 }
 
+function Assert-UiNotContains {
+    param([string]$Xml, [string]$Needle, [string]$Label)
+    if ($Xml.Contains($Needle)) {
+        throw "Expected UI not to contain '$Label'."
+    }
+}
+
 function Tap-UntilUiContains {
     param([int]$X, [int]$Y, [string]$Needle, [string]$Label)
     for ($attempt = 1; $attempt -le 5; $attempt++) {
@@ -294,6 +301,7 @@ $inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox
 Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
+Assert-UiNotContains $inboxUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder"
 $transferUi = Tap-UntilUiContains 900 2240 $sampleJpegName "uploaded transfer row"
 Assert-UiContains $transferUi $sampleRawName "uploaded raw transfer row"
 Assert-UiContains $transferUi $sampleJpegName "uploaded jpeg transfer row"
