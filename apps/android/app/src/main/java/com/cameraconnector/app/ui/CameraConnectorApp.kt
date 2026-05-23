@@ -1,6 +1,7 @@
 package com.cameraconnector.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,17 +10,27 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +39,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.CoreGateway
@@ -86,17 +100,29 @@ fun CameraConnectorApp(
         }
     }
 
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+    MaterialTheme(
+        colorScheme = elementColorScheme,
+        shapes = Shapes(small = elementShape, medium = elementShape, large = elementShape),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
             Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    NavigationBar {
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                         MainTab.entries.forEach { item ->
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = { tab = item },
                                 label = { Text(item.label) },
-                                icon = { Text(item.icon) },
+                                icon = { Icon(item.icon, contentDescription = item.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                                    indicatorColor = ElementBlueSoft,
+                                ),
                             )
                         }
                     }
@@ -139,10 +165,65 @@ fun CameraConnectorApp(
     }
 }
 
-private enum class MainTab(val label: String, val icon: String) {
-    Overview("总览", "总"),
-    Inbox("收件箱", "箱"),
-    Transfers("传输", "传"),
+private enum class MainTab(val label: String, val icon: ImageVector) {
+    Overview("总览", Icons.Outlined.Home),
+    Inbox("收件箱", Icons.Outlined.PhotoLibrary),
+    Transfers("传输", Icons.Outlined.SyncAlt),
+}
+
+private val ElementBlue = Color(0xFF409EFF)
+private val ElementBlueSoft = Color(0xFFEcf5ff)
+private val ElementSuccess = Color(0xFF67C23A)
+private val ElementWarning = Color(0xFFE6A23C)
+private val ElementDanger = Color(0xFFF56C6C)
+private val ElementInfo = Color(0xFF909399)
+private val ElementBorder = Color(0xFFDCDFE6)
+
+private val elementColorScheme = lightColorScheme(
+    primary = ElementBlue,
+    secondary = ElementInfo,
+    tertiary = ElementSuccess,
+    error = ElementDanger,
+    background = Color(0xFFF5F7FA),
+    surface = Color.White,
+    outline = ElementBorder,
+    onSurface = Color(0xFF303133),
+    onSurfaceVariant = Color(0xFF606266),
+)
+
+private val elementShape = RoundedCornerShape(4.dp)
+
+@Composable
+private fun ElementCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = modifier,
+        shape = elementShape,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun ElementTag(text: String, color: Color) {
+    Surface(
+        color = color.copy(alpha = 0.12f),
+        contentColor = color,
+        shape = elementShape,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.35f)),
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable
@@ -195,7 +276,7 @@ private fun OverviewScreen(
 
         actionError?.let { message ->
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text("操作失败", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
@@ -211,7 +292,7 @@ private fun OverviewScreen(
 
         actionInFlight?.let { action ->
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text("处理中", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
@@ -222,16 +303,20 @@ private fun OverviewScreen(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("接收服务", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     Text("${dashboard.receiver.protocol} ${dashboard.receiver.host}:${dashboard.receiver.port}")
-                    Text(
-                        "${receiverPhaseLabel(dashboard.receiver.phase)} / " +
-                            "${authModeLabel(dashboard.receiver.authMode)} / " +
-                            "账号=${dashboard.receiver.accountCount}",
-                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ElementTag(
+                            text = receiverPhaseLabel(dashboard.receiver.phase),
+                            color = if (dashboard.receiver.running) ElementSuccess else ElementInfo,
+                        )
+                        ElementTag(text = authModeLabel(dashboard.receiver.authMode), color = ElementBlue)
+                        ElementTag(text = "账号=${dashboard.receiver.accountCount}", color = ElementInfo)
+                    }
                     dashboard.receiver.message?.let { Text(it) }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -317,7 +402,7 @@ private fun OverviewScreen(
 
         if (notificationPermissionRequired && !notificationPermissionGranted) {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text("通知权限", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
@@ -332,7 +417,7 @@ private fun OverviewScreen(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("设备账号", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
@@ -409,7 +494,7 @@ private fun OverviewScreen(
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("导入位置", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
@@ -443,7 +528,7 @@ private fun InboxScreen(
             item { Text("还没有导入文件。") }
         } else {
             items(dashboard.inbox) { asset ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(asset.displayPath, style = MaterialTheme.typography.titleMedium)
                         Text("${asset.format} / 接收时间：${formatEpochMillisTextForDisplay(asset.receivedAt)}")
@@ -471,10 +556,16 @@ private fun TransfersScreen(
             item { Text("还没有传输记录。") }
         } else {
             items(dashboard.transfers) { transfer ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(transfer.displayPath, style = MaterialTheme.typography.titleMedium)
-                        Text("${transferStatusLabel(transfer.status)} / ${transfer.id}")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ElementTag(
+                                text = transferStatusLabel(transfer.status),
+                                color = if (transfer.status == "Failed") ElementDanger else ElementSuccess,
+                            )
+                            Text(transfer.id)
+                        }
                         transfer.message?.let { Text(it) }
                     }
                 }
