@@ -22,7 +22,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $requiredEntries = @(
     "AndroidManifest.xml",
     "classes.dex",
-    "lib/arm64-v8a/libcamera_connector_ffi.so"
+    "lib/arm64-v8a/libcamera_connector_ffi.so",
+    "lib/x86_64/libcamera_connector_ffi.so"
 )
 
 $apkItem = Get-Item -LiteralPath $ApkPath

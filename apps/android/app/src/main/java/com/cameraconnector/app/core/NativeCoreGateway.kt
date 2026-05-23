@@ -116,7 +116,7 @@ class NativeCoreGateway(
             ),
             accounts = mapAccounts(value),
             inbox = mapInbox(assets),
-            transfers = mapTransfers(transfers, value.optJSONArray("recent_failures")),
+            transfers = mapTransfers(transfers, assets, value.optJSONArray("recent_failures")),
         )
     }
 
@@ -187,8 +187,12 @@ class NativeCoreGateway(
         }
     }
 
-    private fun mapTransfers(transfers: JSONObject?, recentFailures: JSONArray?): List<TransferRow> {
-        if (transfers == null && recentFailures == null) {
+    private fun mapTransfers(
+        transfers: JSONObject?,
+        assets: JSONObject?,
+        recentFailures: JSONArray?,
+    ): List<TransferRow> {
+        if (transfers == null && assets == null && recentFailures == null) {
             return emptyList()
         }
 
@@ -202,6 +206,28 @@ class NativeCoreGateway(
                         message = "total=${it.optInt("total_count")}",
                     ),
                 )
+            }
+
+            val groups = assets?.optJSONArray("groups")
+            if (groups != null) {
+                for (index in 0 until groups.length()) {
+                    val primary = groups.optJSONObject(index)?.optJSONObject("primary") ?: continue
+                    val id = primary.optString("id")
+                    val displayPath = primary.optString("virtual_display_path")
+                        .ifBlank { primary.optString("filename") }
+                    if (id.isBlank() || displayPath.isBlank()) {
+                        continue
+                    }
+                    add(
+                        TransferRow(
+                            id = id,
+                            status = "Completed",
+                            displayPath = displayPath,
+                            message = primary.optString("size_bytes").takeIf { it.isNotBlank() }
+                                ?.let { "$it bytes" },
+                        ),
+                    )
+                }
             }
 
             if (recentFailures != null) {

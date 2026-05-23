@@ -45,8 +45,8 @@ $notificationPermission = ((& $adb @adbArgs shell dumpsys package $packageName 2
 if ([int]$sdk -lt $minimumSdk) {
     throw "Android SDK $sdk is below Camera Connector minimum SDK $minimumSdk."
 }
-if ($abis -notmatch "arm64-v8a") {
-    throw "Connected Android device does not advertise arm64-v8a ABI. ABI list: $abis"
+if ($abis -notmatch "arm64-v8a" -and $abis -notmatch "x86_64") {
+    throw "Connected Android device does not advertise a packaged Camera Connector ABI (arm64-v8a or x86_64). ABI list: $abis"
 }
 
 $report = @(

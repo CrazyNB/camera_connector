@@ -44,7 +44,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location $androidRoot
 try {
-    & $gradle ":app:assembleDebug" "--no-daemon"
+    & $gradle ":app:assembleDebug" "--no-daemon" "-PcameraConnector.useNativeCore=true"
     if ($LASTEXITCODE -ne 0) {
         throw "Android debug build failed"
     }
@@ -62,4 +62,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Android APK inspection failed"
 }
 
-Write-Host "Android debug build passed with arm64 native core packaged."
+Write-Host "Android debug build passed with Android native core packaged."

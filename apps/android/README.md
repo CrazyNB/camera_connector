@@ -47,7 +47,7 @@ This machine currently uses:
 - Android SDK: `%LOCALAPPDATA%\Android\Sdk`
 - Gradle: `%LOCALAPPDATA%\CameraConnectorToolchains\gradle-9.5.1`
 
-Run the Android build check from the repository root. It builds the Rust native library for Android arm64, assembles the debug APK, and verifies the APK contains `lib/arm64-v8a/libcamera_connector_ffi.so`.
+Run the Android build check from the repository root. It builds the Rust native library for Android arm64 and x86_64, assembles the debug APK with native core enabled, and verifies the APK contains both `lib/arm64-v8a/libcamera_connector_ffi.so` and `lib/x86_64/libcamera_connector_ffi.so`.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
@@ -92,7 +92,7 @@ To preflight a connected Android device before installing:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\preflight_android_device.ps1
 ```
 
-The preflight checks Android SDK level, arm64 ABI support, package notification permission state, and device IP interfaces, then writes `target\android-device-preflight.txt`. The full smoke script runs this automatically before install.
+The preflight checks Android SDK level, packaged ABI support (`arm64-v8a` or `x86_64`), package notification permission state, and device IP interfaces, then writes `target\android-device-preflight.txt`. The full smoke script runs this automatically before install.
 
 To inspect an already built APK and write an auditable package report:
 
@@ -100,7 +100,7 @@ To inspect an already built APK and write an auditable package report:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\inspect_android_apk.ps1
 ```
 
-The build verification script runs this automatically and writes `target\android-apk-report.txt` with the APK size, SHA-256 hash, manifest/classes entries, and packaged `lib/arm64-v8a/libcamera_connector_ffi.so` size.
+The build verification script runs this automatically and writes `target\android-apk-report.txt` with the APK size, SHA-256 hash, manifest/classes entries, and packaged native library sizes for `arm64-v8a` and `x86_64`.
 
 To rebuild only the Rust native library and copy it into the APK source tree:
 
