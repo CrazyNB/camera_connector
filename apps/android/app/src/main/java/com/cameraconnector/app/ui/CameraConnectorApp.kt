@@ -1050,6 +1050,7 @@ private fun CompactPhotoTile(asset: InboxAsset, onClick: () -> Unit) {
     ) {
         PhotoPreview(
             asset = asset,
+            compactFallback = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
@@ -1133,6 +1134,7 @@ private fun PhotoDetailScreen(
 private fun PhotoPreview(
     asset: InboxAsset,
     modifier: Modifier = Modifier,
+    compactFallback: Boolean = false,
 ) {
     val context = LocalContext.current
     val previewLocation = asset.previewLocation
@@ -1155,13 +1157,22 @@ private fun PhotoPreview(
             )
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    if (asset.rawPath != null) "RAW 预览待生成" else "暂无预览",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(asset.formatBadges(), color = ElementInfo)
+                if (compactFallback) {
+                    Text(
+                        asset.formatBadges(),
+                        color = ElementInfo,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                } else {
+                    Text(
+                        if (asset.rawPath != null) "RAW 预览待生成" else "暂无预览",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(asset.formatBadges(), color = ElementInfo)
+                }
             }
         }
     }

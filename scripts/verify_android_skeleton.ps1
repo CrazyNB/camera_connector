@@ -113,6 +113,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "GridColumnToggle"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "CompactPhotoTile"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "storageGateway\.persistInboxGridColumnCount"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "compactFallback"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0032,0x5217))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0033,0x5217))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "PhotoInfoCard"
