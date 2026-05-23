@@ -70,6 +70,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -933,7 +936,11 @@ private fun GridColumnToggle(
                 onClick = { onColumnCountChange(count) },
                 modifier = Modifier
                     .height(30.dp)
-                    .defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                    .defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
+                    .semantics {
+                        contentDescription = "收件箱${label}视图"
+                        stateDescription = if (columnCount == count) "已选中" else "未选中"
+                    },
                 border = BorderStroke(1.dp, if (columnCount == count) ElementBlue else ElementBorder),
                 colors = ButtonDefaults.outlinedButtonColors(
                     containerColor = if (columnCount == count) ElementBlue else Color.White,
@@ -1050,6 +1057,9 @@ private fun CompactPhotoTile(asset: InboxAsset, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics {
+                contentDescription = "照片 ${asset.filename()} ${asset.sourceLabel()} ${asset.formatBadges()}"
+            }
             .clickable(onClick = onClick),
     ) {
         PhotoPreview(

@@ -115,6 +115,9 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "storageGateway\.persistInboxGridColumnCount"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "compactFallback"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "BackHandler"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "stateDescription"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "contentDescription = `"收件箱"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "contentDescription = `"照片"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0032,0x5217))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x0033,0x5217))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "PhotoInfoCard"
