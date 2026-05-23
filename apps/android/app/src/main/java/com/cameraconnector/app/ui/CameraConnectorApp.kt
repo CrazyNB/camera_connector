@@ -833,12 +833,16 @@ private fun InboxScreen(
     modifier: Modifier = Modifier,
 ) {
     var selectedSource by remember { mutableStateOf<String?>(null) }
+    var selectedAccount by remember { mutableStateOf<String?>(null) }
+    var selectedPath by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
     var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
     var filterExpanded by remember { mutableStateOf(false) }
-    val filteredAssets = remember(dashboard.inbox, selectedSource, selectedFilter) {
+    val filteredAssets = remember(dashboard.inbox, selectedSource, selectedAccount, selectedPath, selectedFilter) {
         dashboard.inbox
             .filter { asset -> selectedSource == null || asset.sourceLabel() == selectedSource }
+            .filter { asset -> selectedAccount == null || asset.accountFilterLabel() == selectedAccount }
+            .filter { asset -> selectedPath == null || asset.originalPathFilterLabel() == selectedPath }
             .filter { asset -> selectedFilter.matches(asset) }
     }
 
@@ -878,6 +882,8 @@ private fun InboxScreen(
         Spacer(Modifier.height(10.dp))
         FilterToggleRow(
             selectedSource = selectedSource,
+            selectedAccount = selectedAccount,
+            selectedPath = selectedPath,
             selectedFilter = selectedFilter,
             expanded = filterExpanded,
             onToggle = { filterExpanded = !filterExpanded },
@@ -886,14 +892,38 @@ private fun InboxScreen(
             Spacer(Modifier.height(8.dp))
             SourceFilterBar(
                 selectedSource = selectedSource,
-                onSourceChange = { selectedSource = it },
+                onSourceChange = {
+                    selectedSource = it
+                    selectedAccount = null
+                    selectedPath = null
+                },
                 assets = dashboard.inbox,
+            )
+            Spacer(Modifier.height(8.dp))
+            AccountFilterBar(
+                selectedAccount = selectedAccount,
+                onAccountChange = {
+                    selectedAccount = it
+                    selectedPath = null
+                },
+                assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
+            )
+            Spacer(Modifier.height(8.dp))
+            OriginalPathFilterBar(
+                selectedPath = selectedPath,
+                onPathChange = { selectedPath = it },
+                assets = dashboard.inbox
+                    .filter { selectedSource == null || it.sourceLabel() == selectedSource }
+                    .filter { selectedAccount == null || it.accountFilterLabel() == selectedAccount },
             )
             Spacer(Modifier.height(8.dp))
             InboxFilterBar(
                 selectedFilter = selectedFilter,
                 onFilterChange = { selectedFilter = it },
-                assets = dashboard.inbox.filter { selectedSource == null || it.sourceLabel() == selectedSource },
+                assets = dashboard.inbox
+                    .filter { selectedSource == null || it.sourceLabel() == selectedSource }
+                    .filter { selectedAccount == null || it.accountFilterLabel() == selectedAccount }
+                    .filter { selectedPath == null || it.originalPathFilterLabel() == selectedPath },
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -958,6 +988,8 @@ private fun GridColumnToggle(
 @Composable
 private fun FilterToggleRow(
     selectedSource: String?,
+    selectedAccount: String?,
+    selectedPath: String?,
     selectedFilter: InboxFilter,
     expanded: Boolean,
     onToggle: () -> Unit,
@@ -974,9 +1006,16 @@ private fun FilterToggleRow(
             Text("筛选", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(2.dp))
             Text(
-                listOf(selectedSource ?: "全部来源", selectedFilter.label).joinToString(" / "),
+                listOf(
+                    selectedSource ?: "全部来源",
+                    selectedAccount ?: "全部账号",
+                    selectedPath ?: "全部路径",
+                    selectedFilter.label,
+                ).joinToString(" / "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Text(if (expanded) "收起 ▲" else "展开 ▼", color = ElementBlue, fontWeight = FontWeight.SemiBold)
@@ -1006,6 +1045,62 @@ private fun SourceFilterBar(
                 label = "$source $count",
                 selected = selectedSource == source,
                 onClick = { onSourceChange(source) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountFilterBar(
+    selectedAccount: String?,
+    onAccountChange: (String?) -> Unit,
+    assets: List<InboxAsset>,
+) {
+    val accounts = remember(assets) {
+        assets.map { it.accountFilterLabel() }.distinct().sorted()
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            FilterChipButton(
+                label = "全部账号 ${assets.size}",
+                selected = selectedAccount == null,
+                onClick = { onAccountChange(null) },
+            )
+        }
+        items(accounts) { account ->
+            val count = assets.count { it.accountFilterLabel() == account }
+            FilterChipButton(
+                label = "$account $count",
+                selected = selectedAccount == account,
+                onClick = { onAccountChange(account) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun OriginalPathFilterBar(
+    selectedPath: String?,
+    onPathChange: (String?) -> Unit,
+    assets: List<InboxAsset>,
+) {
+    val paths = remember(assets) {
+        assets.map { it.originalPathFilterLabel() }.distinct().sorted()
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            FilterChipButton(
+                label = "全部路径 ${assets.size}",
+                selected = selectedPath == null,
+                onClick = { onPathChange(null) },
+            )
+        }
+        items(paths) { path ->
+            val count = assets.count { it.originalPathFilterLabel() == path }
+            FilterChipButton(
+                label = "$path $count",
+                selected = selectedPath == path,
+                onClick = { onPathChange(path) },
             )
         }
     }
@@ -1398,6 +1493,16 @@ private fun InboxAsset.sourceLabel(): String =
     displaySource?.takeIf { it.isNotBlank() }
         ?: username?.takeIf { it.isNotBlank() }?.let { "账号：$it" }
         ?: sourceGroupLabel(displayPath)
+
+private fun InboxAsset.accountFilterLabel(): String =
+    username?.takeIf { it.isNotBlank() }?.let { "账号：$it" } ?: "未记录账号"
+
+private fun InboxAsset.originalPathFilterLabel(): String {
+    val path = originalPath?.takeIf { it.isNotBlank() } ?: displayPath
+    val normalized = path.replace('\\', '/').trim('/')
+    val parent = normalized.substringBeforeLast('/', missingDelimiterValue = "")
+    return parent.ifBlank { "相机根目录" }
+}
 
 private fun InboxAsset.formatBadges(): String =
     buildList {
