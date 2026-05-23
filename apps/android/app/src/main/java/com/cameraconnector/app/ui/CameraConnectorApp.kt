@@ -3,6 +3,7 @@ package com.cameraconnector.app.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import java.io.File
 import java.io.InputStream
@@ -80,6 +81,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.exifinterface.media.ExifInterface
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
@@ -1305,14 +1307,40 @@ private fun loadPreviewBitmap(context: Context, location: String?): Bitmap? {
     return runCatching {
         if (location.startsWith("content://")) {
             val uri = Uri.parse(location)
-            decodeSampledBitmap(
-                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
-                openStream = { context.contentResolver.openInputStream(uri) },
-            )
+            loadCameraPreviewBitmap { context.contentResolver.openInputStream(uri) }
         } else {
-            decodeSampledBitmap(
-                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
-                openStream = { File(location).inputStream() },
+            loadCameraPreviewBitmap { File(location).inputStream() }
+        }
+    }.getOrNull()
+}
+
+private fun loadCameraPreviewBitmap(openStream: () -> InputStream?): Bitmap? {
+    val orientation = readExifOrientation(openStream)
+    return loadExifThumbnail(openStream, orientation)
+        ?: decodeSampledBitmap(
+            maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+            openStream = openStream,
+            orientation = orientation,
+        )
+}
+
+private fun readExifOrientation(openStream: () -> InputStream?): Int {
+    return runCatching {
+        openStream()?.use { stream ->
+            ExifInterface(stream).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+}
+
+private fun loadExifThumbnail(openStream: () -> InputStream?, orientation: Int): Bitmap? {
+    return runCatching {
+        openStream()?.use { stream ->
+            applyExifOrientation(
+                bitmap = ExifInterface(stream).thumbnailBitmap,
+                orientation = orientation,
             )
         }
     }.getOrNull()
@@ -1321,6 +1349,7 @@ private fun loadPreviewBitmap(context: Context, location: String?): Bitmap? {
 private fun decodeSampledBitmap(
     maxDimensionPx: Int,
     openStream: () -> InputStream?,
+    orientation: Int,
 ): Bitmap? {
     val bounds = BitmapFactory.Options().apply {
         inJustDecodeBounds = true
@@ -1341,9 +1370,33 @@ private fun decodeSampledBitmap(
         inSampleSize = sampleSize
         inPreferredConfig = Bitmap.Config.RGB_565
     }
-    return openStream()?.use { stream ->
+    val bitmap = openStream()?.use { stream ->
         BitmapFactory.decodeStream(stream, null, decodeOptions)
     }
+    return applyExifOrientation(bitmap, orientation)
+}
+
+private fun applyExifOrientation(bitmap: Bitmap?, orientation: Int): Bitmap? {
+    bitmap ?: return null
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.preScale(-1f, 1f)
+            matrix.postRotate(90f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.preScale(-1f, 1f)
+            matrix.postRotate(270f)
+        }
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        else -> return bitmap
+    }
+
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
 private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimensionPx: Int): Int {
