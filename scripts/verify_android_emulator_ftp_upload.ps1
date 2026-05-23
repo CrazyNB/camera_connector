@@ -149,8 +149,12 @@ function Get-AndroidFileText {
 function Get-UiXml {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
     for ($attempt = 1; $attempt -le 5; $attempt++) {
+        if (Test-Path -LiteralPath $localDumpPath) {
+            Remove-Item -LiteralPath $localDumpPath -Force
+        }
+        Invoke-Adb @("shell", "rm", "-f", $dumpPath) | Out-Null
         $dumpOutput = Invoke-Adb @("shell", "uiautomator", "dump", $dumpPath)
-        if (($dumpOutput -join "`n") -match "ERROR") {
+        if (($dumpOutput -join "`n") -notmatch "dumped to") {
             Start-Sleep -Milliseconds 400
             continue
         }
@@ -189,6 +193,19 @@ function Tap-UntilUiContains {
         }
     }
     throw "Expected UI to contain '$Label' after tapping $X,$Y."
+}
+
+function Tap-UiNodeByContentDescription {
+    param([string]$Xml, [string]$Needle, [string]$Label)
+    $pattern = 'content-desc="' + [regex]::Escape($Needle) + '[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+    $match = [regex]::Match($Xml, $pattern)
+    if (-not $match.Success) {
+        throw "Expected UI to contain tappable content description '$Label'."
+    }
+    $x = [int](([int]$match.Groups[1].Value + [int]$match.Groups[3].Value) / 2)
+    $y = [int](([int]$match.Groups[2].Value + [int]$match.Groups[4].Value) / 2)
+    Invoke-Adb @("shell", "input", "tap", "$x", "$y") | Out-Null
+    Start-Sleep -Milliseconds 900
 }
 
 function Send-FtpFile {
@@ -313,8 +330,18 @@ Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
 Assert-UiNotContains $inboxUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder"
-Invoke-Adb @("shell", "input", "tap", "170", "600") | Out-Null
-Start-Sleep -Milliseconds 900
+Assert-UiContains $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
+Tap-UiNodeByContentDescription $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
+$gridPrefs = Get-AndroidFileText "shared_prefs/camera_connector_storage.xml"
+if ($gridPrefs -notmatch 'name="inbox_grid_columns"\s+value="2"') {
+    throw "Android inbox grid preference did not persist 2-column selection."
+}
+Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
+Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
+Start-Sleep -Seconds 2
+$inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox after restart"
+Assert-UiContains $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "persisted 2-column grid control after restart"
+Tap-UiNodeByContentDescription $inboxUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile"
 $detailUi = Get-UiXml
 Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
 Assert-UiContains $detailUi (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
