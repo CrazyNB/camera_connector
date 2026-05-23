@@ -664,8 +664,8 @@ private fun SettingsScreen(
         }
         item {
             SettingsMenuRow(
-                title = "选择导入文件夹",
-                subtitle = selectedInboxLabel ?: "应用私有收件箱",
+                title = "外部文件夹授权",
+                subtitle = selectedInboxLabel ?: "未授权",
                 trailing = ">",
                 onClick = onChooseInboxDirectory,
             )
@@ -673,7 +673,7 @@ private fun SettingsScreen(
         item {
             ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("当前原生收件箱", style = MaterialTheme.typography.titleMedium)
+                    Text("当前接收目录", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(dashboard.receiver.outputLabel, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
