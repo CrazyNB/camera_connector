@@ -3,7 +3,8 @@ param(
     [string]$Username = "verify",
     [string]$Password = "secret",
     [string]$DeviceName = "Verify Camera",
-    [int]$HostControlPort = 12121
+    [int]$HostControlPort = 12121,
+    [string]$RealAssetDirectory
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,6 +25,8 @@ $sampleRawBytes = [byte[]](0x4E, 0x45, 0x46, 0x21, 0x01, 0x02, 0x03, 0x04)
 $sampleJpegBytes = $null
 $dumpPath = "/sdcard/camera_connector_ftp_verify_window.xml"
 $localDumpPath = Join-Path $root "target\android-diagnostics\emulator-ftp-upload-window.xml"
+$rawExtensions = @(".NEF", ".NRW", ".CR3", ".CR2", ".ARW", ".SRF", ".SR2", ".RAF", ".RW2", ".RWL", ".ORF", ".PEF", ".DNG")
+$jpegExtensions = @(".JPG", ".JPEG")
 
 if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) {
     throw "adb not found at $adb. Set ANDROID_SDK_ROOT or install Android platform-tools."
@@ -55,6 +58,53 @@ function Invoke-Adb {
 function U {
     param([int[]]$Codes)
     return -join ($Codes | ForEach-Object { [char]$_ })
+}
+
+function Find-RealRawJpegPair {
+    param([string]$Directory)
+    if ([string]::IsNullOrWhiteSpace($Directory)) {
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        throw "Real asset directory does not exist: $Directory"
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $Directory -Recurse -File)
+    $rawByStem = @{}
+    $jpegByStem = @{}
+    foreach ($file in $files) {
+        $extension = $file.Extension.ToUpperInvariant()
+        $stem = [System.IO.Path]::GetFileNameWithoutExtension($file.Name).ToUpperInvariant()
+        if ($rawExtensions -contains $extension) {
+            if (-not $rawByStem.ContainsKey($stem) -or $file.Length -lt $rawByStem[$stem].Length) {
+                $rawByStem[$stem] = $file
+            }
+        }
+        if ($jpegExtensions -contains $extension) {
+            if (-not $jpegByStem.ContainsKey($stem) -or $file.Length -lt $jpegByStem[$stem].Length) {
+                $jpegByStem[$stem] = $file
+            }
+        }
+    }
+
+    $pairs = @()
+    foreach ($stem in $rawByStem.Keys) {
+        if ($jpegByStem.ContainsKey($stem)) {
+            $raw = $rawByStem[$stem]
+            $jpeg = $jpegByStem[$stem]
+            $pairs += [pscustomobject]@{
+                Stem = $stem
+                Raw = $raw
+                Jpeg = $jpeg
+                TotalLength = $raw.Length + $jpeg.Length
+            }
+        }
+    }
+
+    if ($pairs.Count -eq 0) {
+        throw "No matching RAW/JPEG pair found under: $Directory"
+    }
+    return $pairs | Sort-Object TotalLength, Stem | Select-Object -First 1
 }
 
 function Remove-AdbForward {
@@ -257,6 +307,15 @@ function Send-FtpFile {
         $data.Dispose()
         Remove-AdbForward $dataForward
     }
+}
+
+$realPair = Find-RealRawJpegPair $RealAssetDirectory
+if ($realPair) {
+    $sampleRawName = $realPair.Raw.Name
+    $sampleJpegName = $realPair.Jpeg.Name
+    $sampleRawBytes = [System.IO.File]::ReadAllBytes($realPair.Raw.FullName)
+    $sampleJpegBytes = [System.IO.File]::ReadAllBytes($realPair.Jpeg.FullName)
+    Write-Host "Using real RAW/JPEG pair: $($realPair.Raw.FullName) + $($realPair.Jpeg.FullName)"
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $root "target") | Out-Null

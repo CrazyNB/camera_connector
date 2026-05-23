@@ -85,6 +85,14 @@ The smoke pass builds and installs the debug APK, grants notification permission
 
 If the APK was already installed manually after approving a phone-side USB install prompt, pass `-SkipInstall` to validate the installed app launch and diagnostics without reinstalling.
 
+To verify Android FTP import with a real RAW/JPEG folder, pass `-RealAssetDirectory` to the emulator upload script:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_emulator_ftp_upload.ps1 -Serial emulator-5554 -RealAssetDirectory "D:\ps\Photos\2026\5\5.4"
+```
+
+The script finds a matching RAW/JPEG filename stem, uploads the real bytes through the Android receiver, and verifies the transfer log, inbox grid, JPEG preview, photo detail, and transfer list. Without this parameter it still uses the small synthetic RAW/JPEG pair for quick smoke runs.
+
 To preflight a connected Android device before installing:
 
 ```powershell
