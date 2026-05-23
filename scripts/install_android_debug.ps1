@@ -61,6 +61,7 @@ if (-not $install.WaitForExit($InstallTimeoutSeconds * 1000)) {
     throw "adb install timed out after $InstallTimeoutSeconds seconds. Check the phone for USB install prompts, enable Install via USB if required, then retry."
 }
 $install.WaitForExit()
+$install.Refresh()
 Start-Sleep -Milliseconds 300
 $installOutput = ""
 if (Test-Path -LiteralPath $installOut) {
@@ -69,7 +70,7 @@ if (Test-Path -LiteralPath $installOut) {
 if (Test-Path -LiteralPath $installErr) {
     $installOutput += "`n" + (Get-Content -LiteralPath $installErr -Raw)
 }
-if ($install.ExitCode -ne 0 -or $installOutput -match "failed to install|INSTALL_FAILED|Failure \\[") {
+if (($install.ExitCode -ne $null -and $install.ExitCode -ne 0) -or $installOutput -match "failed to install|INSTALL_FAILED|Failure \[") {
     if (Test-Path -LiteralPath $installOut) { Get-Content -LiteralPath $installOut | ForEach-Object { Write-Host $_ } }
     if (Test-Path -LiteralPath $installErr) { Get-Content -LiteralPath $installErr | ForEach-Object { Write-Host $_ } }
     throw "adb install failed. Check the phone for USB install prompts or enable Install via USB, then retry."

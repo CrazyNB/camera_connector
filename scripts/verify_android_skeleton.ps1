@@ -163,6 +163,9 @@ Assert-Contains "scripts\install_android_debug.ps1" "adb"
 Assert-Contains "scripts\install_android_debug.ps1" "install"
 Assert-Contains "scripts\install_android_debug.ps1" "InstallTimeoutSeconds"
 Assert-Contains "scripts\install_android_debug.ps1" "WaitForExit"
+Assert-Contains "scripts\install_android_debug.ps1" '\$install\.Refresh\(\)'
+Assert-Contains "scripts\install_android_debug.ps1" '\$install\.ExitCode -ne \$null -and \$install\.ExitCode -ne 0'
+Assert-Contains "scripts\install_android_debug.ps1" 'Failure \\\['
 Assert-Contains "scripts\install_android_debug.ps1" "failed to install"
 Assert-Contains "scripts\install_android_debug.ps1" "INSTALL_FAILED"
 Assert-Contains "scripts\install_android_debug.ps1" "monkey"
