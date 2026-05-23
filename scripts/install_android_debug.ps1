@@ -1,7 +1,8 @@
 param(
     [string]$Serial,
     [switch]$SkipBuild,
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [int]$InstallTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,9 +43,36 @@ if ($Serial) {
     $deviceArgs = @("-s", (($devices[0] -split "\s+")[0]))
 }
 
-& $adb @deviceArgs install -r $apk
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+$installOut = Join-Path $root "target\android-install.out.txt"
+$installErr = Join-Path $root "target\android-install.err.txt"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $installOut) | Out-Null
+Remove-Item -LiteralPath $installOut, $installErr -ErrorAction SilentlyContinue
+
+$install = Start-Process `
+    -FilePath $adb `
+    -ArgumentList ($deviceArgs + @("install", "-r", $apk)) `
+    -RedirectStandardOutput $installOut `
+    -RedirectStandardError $installErr `
+    -NoNewWindow `
+    -PassThru
+
+if (-not $install.WaitForExit($InstallTimeoutSeconds * 1000)) {
+    Stop-Process -Id $install.Id -Force
+    throw "adb install timed out after $InstallTimeoutSeconds seconds. Check the phone for USB install prompts, enable Install via USB if required, then retry."
+}
+$install.WaitForExit()
+Start-Sleep -Milliseconds 300
+$installOutput = ""
+if (Test-Path -LiteralPath $installOut) {
+    $installOutput += (Get-Content -LiteralPath $installOut -Raw)
+}
+if (Test-Path -LiteralPath $installErr) {
+    $installOutput += "`n" + (Get-Content -LiteralPath $installErr -Raw)
+}
+if ($install.ExitCode -ne 0 -or $installOutput -match "failed to install|INSTALL_FAILED|Failure \\[") {
+    if (Test-Path -LiteralPath $installOut) { Get-Content -LiteralPath $installOut | ForEach-Object { Write-Host $_ } }
+    if (Test-Path -LiteralPath $installErr) { Get-Content -LiteralPath $installErr | ForEach-Object { Write-Host $_ } }
+    throw "adb install failed. Check the phone for USB install prompts or enable Install via USB, then retry."
 }
 
 if (-not $NoLaunch) {
