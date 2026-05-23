@@ -1,6 +1,7 @@
 param(
     [string]$Serial,
     [switch]$SkipBuild,
+    [switch]$SkipInstall,
     [switch]$NoDiagnostics
 )
 
@@ -55,16 +56,18 @@ if ($SkipBuild) {
     $installArgs += "-SkipBuild"
 }
 
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "preflight_android_device.ps1") @serialArgs
-if ($LASTEXITCODE -ne 0) {
-    Collect-Diagnostics "smoke-preflight-failed"
-    exit $LASTEXITCODE
-}
+if (-not $SkipInstall) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "preflight_android_device.ps1") @serialArgs
+    if ($LASTEXITCODE -ne 0) {
+        Collect-Diagnostics "smoke-preflight-failed"
+        exit $LASTEXITCODE
+    }
 
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "install_android_debug.ps1") @installArgs
-if ($LASTEXITCODE -ne 0) {
-    Collect-Diagnostics "smoke-install-failed"
-    exit $LASTEXITCODE
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "install_android_debug.ps1") @installArgs
+    if ($LASTEXITCODE -ne 0) {
+        Collect-Diagnostics "smoke-install-failed"
+        exit $LASTEXITCODE
+    }
 }
 
 & $adb @adbArgs shell pm grant $packageName android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
