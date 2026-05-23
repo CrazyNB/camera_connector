@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import java.io.File
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -839,6 +840,9 @@ private fun InboxScreen(
     }
 
     selectedPhoto?.let { photo ->
+        BackHandler {
+            selectedPhoto = null
+        }
         PhotoDetailScreen(
             asset = photo,
             onBack = { selectedPhoto = null },

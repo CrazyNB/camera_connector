@@ -148,9 +148,20 @@ function Get-AndroidFileText {
 
 function Get-UiXml {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
-    Invoke-Adb @("shell", "uiautomator", "dump", $dumpPath) | Out-Null
-    Invoke-Adb @("pull", $dumpPath, $localDumpPath) | Out-Null
-    return [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $dumpOutput = Invoke-Adb @("shell", "uiautomator", "dump", $dumpPath)
+        if (($dumpOutput -join "`n") -match "ERROR") {
+            Start-Sleep -Milliseconds 400
+            continue
+        }
+        Invoke-Adb @("pull", $dumpPath, $localDumpPath) | Out-Null
+        $xml = [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
+        if ($xml.Contains("<hierarchy")) {
+            return $xml
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    throw "Unable to dump Android UI hierarchy."
 }
 
 function Assert-UiContains {
@@ -302,6 +313,19 @@ Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
 Assert-UiNotContains $inboxUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder"
+Invoke-Adb @("shell", "input", "tap", "170", "600") | Out-Null
+Start-Sleep -Milliseconds 900
+$detailUi = Get-UiXml
+Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
+Assert-UiContains $detailUi (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
+Assert-UiContains $detailUi $sampleJpegName "photo detail jpeg file"
+Assert-UiNotContains $detailUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder in detail"
+Invoke-Adb @("shell", "input", "swipe", "540", "1900", "540", "900", "400") | Out-Null
+Start-Sleep -Milliseconds 700
+$detailFilesUi = Get-UiXml
+Assert-UiContains $detailFilesUi $sampleRawName "photo detail raw file"
+Invoke-Adb @("shell", "input", "keyevent", "4") | Out-Null
+Start-Sleep -Milliseconds 700
 $transferUi = Tap-UntilUiContains 900 2240 $sampleJpegName "uploaded transfer row"
 Assert-UiContains $transferUi $sampleRawName "uploaded raw transfer row"
 Assert-UiContains $transferUi $sampleJpegName "uploaded jpeg transfer row"
