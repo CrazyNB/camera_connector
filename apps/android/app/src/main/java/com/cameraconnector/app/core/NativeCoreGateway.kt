@@ -60,6 +60,13 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun removeDeviceAccount(username: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.removeDeviceAccount(username)
+        }
+        refresh()
+    }
+
     override fun close() {
         gatewayScope.cancel()
         nativeCore.close()
@@ -89,8 +96,7 @@ class NativeCoreGateway(
         val paths = value.optJSONObject("paths")
         val assets = value.optJSONObject("assets")
         val transfers = value.optJSONObject("transfers")
-        val protocol = receiverStatus?.optString("protocol")?.uppercase().orEmpty()
-            .ifBlank { "FTP" }
+        val protocol = normalizeProtocol(receiverStatus?.optString("protocol"))
         val (host, port) = splitHostAndPort(
             receiverStatus?.optString("local_addr").orEmpty(),
             defaultPort = if (protocol == "SFTP") 2222 else 2121,
@@ -122,7 +128,7 @@ class NativeCoreGateway(
 
     private fun splitHostAndPort(localAddr: String, defaultPort: Int): Pair<String, Int> {
         val trimmed = localAddr.trim()
-        if (trimmed.isBlank()) {
+        if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true)) {
             return "0.0.0.0" to defaultPort
         }
 
@@ -142,6 +148,15 @@ class NativeCoreGateway(
 
         return trimmed.substring(0, splitAt) to
             (trimmed.substring(splitAt + 1).toIntOrNull() ?: defaultPort)
+    }
+
+    private fun normalizeProtocol(value: String?): String {
+        val protocol = value.orEmpty().trim().uppercase()
+        return if (protocol.isBlank() || protocol == "NULL") {
+            "FTP"
+        } else {
+            protocol
+        }
     }
 
     private fun mapAccounts(value: JSONObject): List<DeviceAccount> {

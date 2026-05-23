@@ -69,6 +69,34 @@ fn mobile_core_saves_account_without_plaintext_password() {
 }
 
 #[test]
+fn mobile_core_removes_account_as_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    core.save_device_account_json(
+        "camera01".to_string(),
+        Some("secret".to_string()),
+        "Camera 01".to_string(),
+    )
+    .unwrap();
+
+    let json = core
+        .remove_device_account_json("camera01".to_string())
+        .unwrap();
+
+    let value: Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(value["username"], "camera01");
+    assert_eq!(value["removed"], true);
+    let dashboard: Value = serde_json::from_str(
+        &core
+            .dashboard_json(Some(temp.path().join("state").to_string_lossy().into_owned()), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(dashboard["accounts"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn mobile_core_returns_dashboard_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

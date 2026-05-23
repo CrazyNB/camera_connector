@@ -110,7 +110,7 @@ function Start-ReceiverFromUi {
     Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
     Start-Sleep -Seconds 3
     for ($attempt = 1; $attempt -le 5; $attempt++) {
-        Invoke-Adb @("shell", "input", "tap", "180", "765") | Out-Null
+        Invoke-Adb @("shell", "input", "tap", "540", "760") | Out-Null
         Start-Sleep -Seconds 2
         if (Test-FtpGreeting) {
             return

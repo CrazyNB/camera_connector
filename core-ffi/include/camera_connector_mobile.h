@@ -51,6 +51,11 @@ char *camera_connector_mobile_core_save_device_account_json(
     const char *device_name
 );
 
+char *camera_connector_mobile_core_remove_device_account_json(
+    const CameraConnectorMobileCore *core,
+    const char *username
+);
+
 char *camera_connector_mobile_core_start_receiver_json(const CameraConnectorMobileCore *core);
 
 char *camera_connector_mobile_core_stop_receiver_json(const CameraConnectorMobileCore *core);

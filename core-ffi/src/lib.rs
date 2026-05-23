@@ -62,6 +62,12 @@ pub struct MobileAccountView {
     pub password_configured: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MobileRemoveAccountView {
+    pub username: String,
+    pub removed: bool,
+}
+
 impl MobileCore {
     pub fn new(config_path: Option<String>) -> Self {
         let service = CameraConnectorService::new(config_path.map(PathBuf::from));
@@ -125,6 +131,14 @@ impl MobileCore {
             password_configured,
         };
         Ok(serde_json::to_string(&view)?)
+    }
+
+    pub fn remove_device_account_json(&self, username: String) -> MobileCoreResult<String> {
+        let (removed, _) = self.service.remove_account(&username)?;
+        Ok(serde_json::to_string(&MobileRemoveAccountView {
+            username,
+            removed,
+        })?)
     }
 
     pub fn start_receiver_json(&self) -> MobileCoreResult<String> {
@@ -286,6 +300,22 @@ pub unsafe extern "C" fn camera_connector_mobile_core_save_device_account_json(
         let device_name = required_c_string(device_name, "device_name")?;
         let account = core_ref(core)?.save_device_account_json(username, password, device_name)?;
         parse_json_value(&account)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `username` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_remove_device_account_json(
+    core: *const MobileCore,
+    username: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let username = required_c_string(username, "username")?;
+        let removed = core_ref(core)?.remove_device_account_json(username)?;
+        parse_json_value(&removed)
     })
 }
 
@@ -470,6 +500,23 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveDe
                 device_name?,
             )?;
             parse_json_value(&account)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_removeDeviceAccountJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    username: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let username = required_java_string(env, username, "username");
+        java_response(env, || {
+            let removed = mobile_core_from_handle(handle)?.remove_device_account_json(username?)?;
+            parse_json_value(&removed)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()

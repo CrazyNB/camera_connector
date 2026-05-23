@@ -37,9 +37,19 @@ function Start-App {
 
 function Get-UiXml {
     for ($attempt = 1; $attempt -le 6; $attempt++) {
+        Remove-Item -LiteralPath $localDumpPath -ErrorAction SilentlyContinue
+        & $adb -s $Serial shell rm -f $dumpPath 2>$null | Out-Null
         & $adb -s $Serial shell uiautomator dump $dumpPath | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Start-Sleep -Milliseconds 800
+            continue
+        }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
         & $adb -s $Serial pull $dumpPath $localDumpPath | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $localDumpPath -PathType Leaf)) {
+            Start-Sleep -Milliseconds 800
+            continue
+        }
         $xml = [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
         if ($xml.Contains("<hierarchy") -and $xml.Contains($packageName)) {
             return $xml
@@ -97,7 +107,7 @@ function Tap {
 }
 
 $labels = @{
-    AppTitle = U @(0x76F8,0x673A,0x8FDE,0x63A5,0x5668)
+    AppTitle = "Camera Connector"
     ServiceControl = U @(0x670D,0x52A1,0x63A7,0x5236)
     ReceiverService = U @(0x63A5,0x6536,0x670D,0x52A1)
     ReceiverSettings = U @(0x63A5,0x6536,0x8BBE,0x7F6E)
@@ -137,7 +147,6 @@ Assert-UiContains $xml $labels.ReceiverService "receiver service card"
 Assert-UiContains $xml $labels.ReceiverSettings "receiver settings card"
 Assert-UiContains $xml $labels.ListenAddress "listen address field"
 Assert-UiContains $xml $labels.Start "start button"
-Assert-UiContains $xml $labels.Stop "stop button"
 Assert-UiContains $xml "FTP" "FTP protocol"
 Assert-UiContains $xml "SFTP" "SFTP protocol"
 Assert-UiContains $xml $labels.Overview "overview tab"
@@ -147,12 +156,13 @@ Assert-UiNotContains $xml $labels.DeviceAccounts "device accounts on overview"
 Assert-UiNotContains $xml $labels.ImportLocation "import location on overview"
 
 if ($xml.Contains($labels.Running)) {
-    Tap 405 765
+    Tap 540 760
     $xml = Wait-UiContains $labels.Stopped "receiver stopped state"
 }
 
-$xml = Tap-UntilUiContains 180 765 $labels.Running "receiver running state"
-$xml = Tap-UntilUiContains 405 765 $labels.Stopped "receiver stopped state"
+$xml = Tap-UntilUiContains 540 760 $labels.Running "receiver running state"
+Assert-UiContains $xml $labels.Stop "stop button after running"
+$xml = Tap-UntilUiContains 540 760 $labels.Stopped "receiver stopped state"
 
 Tap 975 240
 $xml = Get-UiXml

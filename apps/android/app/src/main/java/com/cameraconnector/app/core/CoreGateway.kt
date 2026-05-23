@@ -10,6 +10,7 @@ interface CoreGateway {
     suspend fun stopReceiver()
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
     suspend fun saveDeviceAccount(account: DeviceAccount, password: String?)
+    suspend fun removeDeviceAccount(username: String)
 }
 
 data class DashboardState(
@@ -139,6 +140,17 @@ class PreviewCoreGateway : CoreGateway {
         )
         val nextAccounts = dashboard.value.accounts
             .filterNot { it.username == accountWithPasswordState.username } + accountWithPasswordState
-        dashboard.value = dashboard.value.copy(accounts = nextAccounts)
+        dashboard.value = dashboard.value.copy(
+            accounts = nextAccounts,
+            receiver = dashboard.value.receiver.copy(accountCount = nextAccounts.size),
+        )
+    }
+
+    override suspend fun removeDeviceAccount(username: String) {
+        val nextAccounts = dashboard.value.accounts.filterNot { it.username == username }
+        dashboard.value = dashboard.value.copy(
+            accounts = nextAccounts,
+            receiver = dashboard.value.receiver.copy(accountCount = nextAccounts.size),
+        )
     }
 }

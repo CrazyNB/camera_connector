@@ -36,6 +36,10 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         }
     }
 
+    fun removeDeviceAccount(username: String) {
+        call { removeDeviceAccountJson(handle, username) }
+    }
+
     fun startReceiver(): JSONObject =
         call { startReceiverJson(handle) }
 
@@ -69,6 +73,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         password: String?,
         deviceName: String,
     ): String
+    private external fun removeDeviceAccountJson(handle: Long, username: String): String
     private external fun startReceiverJson(handle: Long): String
     private external fun stopReceiverJson(handle: Long): String
 

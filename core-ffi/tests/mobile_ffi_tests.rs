@@ -5,6 +5,7 @@ use serde_json::Value;
 use camera_connector_ffi::{
     camera_connector_mobile_core_create, camera_connector_mobile_core_dashboard_json,
     camera_connector_mobile_core_destroy, camera_connector_mobile_core_free_string,
+    camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
     camera_connector_mobile_core_start_receiver_json,
@@ -40,6 +41,37 @@ fn ffi_saves_account_and_returns_success_envelope() {
     assert_eq!(value["value"]["device_name"], "Camera 01");
     assert_eq!(value["value"]["password_configured"], true);
     assert!(!response.contains("secret"));
+}
+
+#[test]
+fn ffi_removes_account_and_returns_success_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let username = CString::new("camera01").unwrap();
+    let password = CString::new("secret").unwrap();
+    let device_name = CString::new("Camera 01").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    assert!(!core.is_null());
+    take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_device_account_json(
+            core,
+            username.as_ptr(),
+            password.as_ptr(),
+            device_name.as_ptr(),
+        )
+    });
+
+    let response = take_ffi_string(unsafe {
+        camera_connector_mobile_core_remove_device_account_json(core, username.as_ptr())
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["username"], "camera01");
+    assert_eq!(value["value"]["removed"], true);
 }
 
 #[test]
