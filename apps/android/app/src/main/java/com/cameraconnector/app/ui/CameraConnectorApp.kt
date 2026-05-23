@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import java.io.File
+import java.io.InputStream
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -58,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -85,8 +87,10 @@ import com.cameraconnector.app.core.InboxAsset
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
 import com.cameraconnector.app.storage.AndroidStorageGateway
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun CameraConnectorApp(
@@ -1246,9 +1250,15 @@ private fun PhotoPreview(
     compactFallback: Boolean = false,
 ) {
     val context = LocalContext.current
-    val previewLocation = asset.previewLocation
-    val bitmap = remember(previewLocation) {
-        loadPreviewBitmap(context, previewLocation)
+    val previewLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
+    val bitmap by produceState<Bitmap?>(initialValue = null, previewLocation) {
+        value = if (previewLocation == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                loadPreviewBitmap(context, previewLocation)
+            }
+        }
     }
 
     Box(
@@ -1257,9 +1267,10 @@ private fun PhotoPreview(
             .background(Color(0xFFE4E7ED)),
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
+        val loadedBitmap = bitmap
+        if (loadedBitmap != null) {
             Image(
-                bitmap = bitmap.asImageBitmap(),
+                bitmap = loadedBitmap.asImageBitmap(),
                 contentDescription = asset.groupTitle(),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -1293,12 +1304,71 @@ private fun loadPreviewBitmap(context: Context, location: String?): Bitmap? {
     }
     return runCatching {
         if (location.startsWith("content://")) {
-            context.contentResolver.openInputStream(Uri.parse(location))?.use(BitmapFactory::decodeStream)
+            val uri = Uri.parse(location)
+            decodeSampledBitmap(
+                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+                openStream = { context.contentResolver.openInputStream(uri) },
+            )
         } else {
-            File(location).inputStream().use(BitmapFactory::decodeStream)
+            decodeSampledBitmap(
+                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+                openStream = { File(location).inputStream() },
+            )
         }
     }.getOrNull()
 }
+
+private fun decodeSampledBitmap(
+    maxDimensionPx: Int,
+    openStream: () -> InputStream?,
+): Bitmap? {
+    val bounds = BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+    }
+    openStream()?.use { stream ->
+        BitmapFactory.decodeStream(stream, null, bounds)
+    } ?: return null
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        return null
+    }
+
+    val sampleSize = calculateBitmapSampleSize(
+        width = bounds.outWidth,
+        height = bounds.outHeight,
+        maxDimensionPx = maxDimensionPx,
+    )
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
+    return openStream()?.use { stream ->
+        BitmapFactory.decodeStream(stream, null, decodeOptions)
+    }
+}
+
+private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimensionPx: Int): Int {
+    var sampleSize = 1
+    var sampledWidth = width
+    var sampledHeight = height
+    while (sampledWidth / 2 >= maxDimensionPx || sampledHeight / 2 >= maxDimensionPx) {
+        sampleSize *= 2
+        sampledWidth /= 2
+        sampledHeight /= 2
+    }
+    return sampleSize
+}
+
+private fun isDecodablePreviewLocation(location: String?): Boolean {
+    val normalized = location.orEmpty().substringBefore('?').lowercase()
+    return normalized.endsWith(".jpg") ||
+        normalized.endsWith(".jpeg") ||
+        normalized.endsWith(".png") ||
+        normalized.endsWith(".webp") ||
+        normalized.endsWith(".heic") ||
+        normalized.endsWith(".heif")
+}
+
+private const val PREVIEW_MAX_DIMENSION_PX = 512
 
 @Composable
 private fun DetailLine(label: String, value: String) {

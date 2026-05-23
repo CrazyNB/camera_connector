@@ -8,6 +8,7 @@ fn scans_inbox_files_and_skips_temporary_uploads() {
     std::fs::write(temp_dir.path().join("DSC_2467.JPG"), [1, 2, 3]).unwrap();
     std::fs::write(temp_dir.path().join("DSC_2467.NEF"), [4, 5]).unwrap();
     std::fs::write(temp_dir.path().join("DSC_2467.NEF.tmp"), [6]).unwrap();
+    std::fs::write(temp_dir.path().join("README.TXT"), [6]).unwrap();
     std::fs::create_dir(temp_dir.path().join("CARD1")).unwrap();
     std::fs::write(
         temp_dir.path().join("CARD1").join("DSC_2468.MOV"),
@@ -19,6 +20,9 @@ fn scans_inbox_files_and_skips_temporary_uploads() {
 
     assert_eq!(assets.len(), 3);
     assert!(assets.iter().all(|asset| !asset.filename.ends_with(".tmp")));
+    assert!(assets
+        .iter()
+        .all(|asset| asset.format != ObjectFormat::Unknown));
     assert!(assets.iter().any(|asset| asset.filename == "DSC_2467.JPG"
         && asset.format == ObjectFormat::Jpeg
         && asset.size_bytes == 3));

@@ -4,7 +4,8 @@ param(
     [string]$Password = "secret",
     [string]$DeviceName = "Verify Camera",
     [int]$HostControlPort = 12121,
-    [string]$RealAssetDirectory
+    [string]$RealAssetDirectory,
+    [int]$RealPairLimit = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,10 +61,10 @@ function U {
     return -join ($Codes | ForEach-Object { [char]$_ })
 }
 
-function Find-RealRawJpegPair {
+function Find-RealRawJpegPairs {
     param([string]$Directory)
     if ([string]::IsNullOrWhiteSpace($Directory)) {
-        return $null
+        return @()
     }
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
         throw "Real asset directory does not exist: $Directory"
@@ -104,7 +105,55 @@ function Find-RealRawJpegPair {
     if ($pairs.Count -eq 0) {
         throw "No matching RAW/JPEG pair found under: $Directory"
     }
-    return $pairs | Sort-Object TotalLength, Stem | Select-Object -First 1
+    return @($pairs | Sort-Object TotalLength, Stem | Select-Object -First $RealPairLimit)
+}
+
+function New-UploadCase {
+    param(
+        [string]$Label,
+        [string]$RemoteDirectory,
+        [string]$Filename,
+        [byte[]]$Bytes,
+        [string]$ExpectedStoredName = $Filename,
+        [bool]$ExpectExactStoredFile = $true,
+        [bool]$ExpectInPhotoGrid = $false
+    )
+    return [pscustomobject]@{
+        Label = $Label
+        RemoteDirectory = $RemoteDirectory
+        Filename = $Filename
+        Bytes = $Bytes
+        ExpectedStoredName = $ExpectedStoredName
+        ExpectExactStoredFile = $ExpectExactStoredFile
+        ExpectInPhotoGrid = $ExpectInPhotoGrid
+    }
+}
+
+function New-RealUploadCases {
+    param([string]$Directory)
+    $pairs = @(Find-RealRawJpegPairs $Directory)
+    if ($pairs.Count -eq 0) {
+        return @(
+            New-UploadCase "synthetic raw" "DCIM/100VERIFY" $sampleRawName $sampleRawBytes $sampleRawName $true $true
+            New-UploadCase "synthetic jpg" "DCIM/100VERIFY" $sampleJpegName $sampleJpegBytes $sampleJpegName $true $true
+        )
+    }
+
+    $cases = @()
+    foreach ($pair in $pairs) {
+        $remoteDirectory = "DCIM/REALPAIR/$($pair.Stem)"
+        $cases += New-UploadCase "real pair raw $($pair.Stem)" $remoteDirectory $pair.Raw.Name ([System.IO.File]::ReadAllBytes($pair.Raw.FullName)) $pair.Raw.Name $true $true
+        $cases += New-UploadCase "real pair jpg $($pair.Stem)" $remoteDirectory $pair.Jpeg.Name ([System.IO.File]::ReadAllBytes($pair.Jpeg.FullName)) $pair.Jpeg.Name $true $true
+    }
+
+    $firstPair = $pairs[0]
+    $cases += New-UploadCase "jpg only boundary" "DCIM/EDGE/JPG_ONLY" "EDGE_JPG_ONLY.JPG" ([System.IO.File]::ReadAllBytes($firstPair.Jpeg.FullName)) "EDGE_JPG_ONLY.JPG" $true $true
+    $cases += New-UploadCase "raw only boundary" "DCIM/EDGE/RAW_ONLY" "EDGE_RAW_ONLY.NEF" ([System.IO.File]::ReadAllBytes($firstPair.Raw.FullName)) "EDGE_RAW_ONLY.NEF" $true $true
+    $duplicateBytes = [System.IO.File]::ReadAllBytes($firstPair.Jpeg.FullName)
+    $cases += New-UploadCase "duplicate first boundary" "DCIM/EDGE/DUPLICATE_A" "EDGE_DUPLICATE.JPG" $duplicateBytes "EDGE_DUPLICATE.JPG" $true $true
+    $cases += New-UploadCase "duplicate second boundary" "DCIM/EDGE/DUPLICATE_B" "EDGE_DUPLICATE.JPG" $duplicateBytes "EDGE_DUPLICATE.JPG" $false $true
+    $cases += New-UploadCase "non image boundary" "DCIM/EDGE/NOT_IMAGE" "EDGE_NOT_IMAGE.TXT" ([System.Text.Encoding]::UTF8.GetBytes("not an image fixture for Camera Connector transfer verification`n")) "EDGE_NOT_IMAGE.TXT" $true $false
+    return $cases
 }
 
 function Remove-AdbForward {
@@ -309,13 +358,28 @@ function Send-FtpFile {
     }
 }
 
-$realPair = Find-RealRawJpegPair $RealAssetDirectory
-if ($realPair) {
-    $sampleRawName = $realPair.Raw.Name
-    $sampleJpegName = $realPair.Jpeg.Name
-    $sampleRawBytes = [System.IO.File]::ReadAllBytes($realPair.Raw.FullName)
-    $sampleJpegBytes = [System.IO.File]::ReadAllBytes($realPair.Jpeg.FullName)
-    Write-Host "Using real RAW/JPEG pair: $($realPair.Raw.FullName) + $($realPair.Jpeg.FullName)"
+$uploadCases = @(New-RealUploadCases $RealAssetDirectory)
+$photoGridCase = @($uploadCases | Where-Object { $_.Label -like "real pair jpg*" } | Select-Object -Last 1)[0]
+if ($null -eq $photoGridCase) {
+    $photoGridCase = @($uploadCases | Where-Object { $_.ExpectInPhotoGrid -and $_.Filename.ToUpperInvariant().EndsWith(".JPG") } | Select-Object -First 1)[0]
+}
+if ($null -eq $photoGridCase) {
+    throw "No photo-grid JPEG upload case was prepared."
+}
+$sampleJpegName = $photoGridCase.ExpectedStoredName
+$sampleStem = [System.IO.Path]::GetFileNameWithoutExtension($photoGridCase.Filename)
+$sampleRawCase = @(
+    $uploadCases |
+        Where-Object {
+            $_.ExpectInPhotoGrid `
+                -and ($rawExtensions -contains ([System.IO.Path]::GetExtension($_.Filename).ToUpperInvariant())) `
+                -and ([System.IO.Path]::GetFileNameWithoutExtension($_.Filename) -eq $sampleStem)
+        } |
+        Select-Object -First 1
+)[0]
+$sampleRawName = if ($sampleRawCase) { $sampleRawCase.ExpectedStoredName } else { $sampleRawName }
+if ($RealAssetDirectory) {
+    Write-Host "Prepared $($uploadCases.Count) real upload cases from $RealAssetDirectory"
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $root "target") | Out-Null
@@ -369,25 +433,36 @@ try {
     Send-FtpCommand $writer $reader "USER $Username" "331" | Out-Null
     Send-FtpCommand $writer $reader "PASS $Password" "230" | Out-Null
     Send-FtpCommand $writer $reader "TYPE I" "200" | Out-Null
-    Send-FtpCommand $writer $reader "CWD DCIM/100VERIFY" "250" | Out-Null
-    Send-FtpFile $writer $reader $sampleRawName $sampleRawBytes
-    Send-FtpFile $writer $reader $sampleJpegName $sampleJpegBytes
+    $uploadIndex = 0
+    foreach ($case in $uploadCases) {
+        $uploadIndex += 1
+        Write-Host ("Uploading [{0}/{1}] {2}: {3} ({4:n0} bytes)" -f $uploadIndex, $uploadCases.Count, $case.Label, $case.Filename, $case.Bytes.Length)
+        Send-FtpCommand $writer $reader "CWD /$($case.RemoteDirectory)" "250" | Out-Null
+        Send-FtpFile $writer $reader $case.Filename $case.Bytes
+    }
     Send-FtpCommand $writer $reader "QUIT" "221" | Out-Null
 } finally {
     $control.Dispose()
     Remove-AdbForward $controlForward
 }
 
-$uploadedRawSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$sampleRawName") -join "`n").Trim()
-if ([int64]$uploadedRawSize -ne $sampleRawBytes.Length) {
-    throw "Uploaded raw file size mismatch. Expected $($sampleRawBytes.Length), got $uploadedRawSize."
+$inboxListing = (& $adb -s $Serial shell run-as $packageName ls "files/inbox") -join "`n"
+$transferLog = Get-AndroidFileText "files/state/transfer-log.jsonl"
+foreach ($case in $uploadCases) {
+    if ($case.ExpectExactStoredFile) {
+        $uploadedSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$($case.ExpectedStoredName)") -join "`n").Trim()
+        if ([int64]$uploadedSize -ne $case.Bytes.Length) {
+            throw "Uploaded file size mismatch for $($case.ExpectedStoredName). Expected $($case.Bytes.Length), got $uploadedSize."
+        }
+    }
+    if ($transferLog -notmatch [regex]::Escape($case.Filename)) {
+        throw "Android transfer log did not include uploaded case: $($case.Label)"
+    }
 }
-$uploadedJpegSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$sampleJpegName") -join "`n").Trim()
-if ([int64]$uploadedJpegSize -ne $sampleJpegBytes.Length) {
-    throw "Uploaded jpeg file size mismatch. Expected $($sampleJpegBytes.Length), got $uploadedJpegSize."
+if (([regex]::Matches($inboxListing, "EDGE_DUPLICATE(?: \(\d+\))?\.JPG")).Count -lt 2) {
+    throw "Duplicate upload boundary did not leave at least two EDGE_DUPLICATE JPG files in inbox."
 }
 
-$transferLog = Get-AndroidFileText "files/state/transfer-log.jsonl"
 if ($transferLog -notmatch $sampleRawName -or $transferLog -notmatch $sampleJpegName) {
     throw "Android transfer log did not include uploaded raw/jpeg pair."
 }
@@ -406,7 +481,7 @@ $inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox
 Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
-Assert-UiNotContains $inboxUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder"
+Assert-UiNotContains $inboxUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo inbox"
 Assert-UiContains $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
 Tap-UiNodeByContentDescription $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
 $gridPrefs = Get-AndroidFileText "shared_prefs/camera_connector_storage.xml"
@@ -423,16 +498,16 @@ $detailUi = Get-UiXml
 Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
 Assert-UiContains $detailUi (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
 Assert-UiContains $detailUi $sampleJpegName "photo detail jpeg file"
-Assert-UiNotContains $detailUi (U @(0x0052,0x0041,0x0057,0x0020,0x9884,0x89C8,0x5F85,0x751F,0x6210)) "raw preview placeholder in detail"
 Invoke-Adb @("shell", "input", "swipe", "540", "1900", "540", "900", "400") | Out-Null
 Start-Sleep -Milliseconds 700
 $detailFilesUi = Get-UiXml
 Assert-UiContains $detailFilesUi $sampleRawName "photo detail raw file"
 Invoke-Adb @("shell", "input", "keyevent", "4") | Out-Null
 Start-Sleep -Milliseconds 700
-$transferUi = Tap-UntilUiContains 900 2240 $sampleJpegName "uploaded transfer row"
-Assert-UiContains $transferUi $sampleRawName "uploaded raw transfer row"
-Assert-UiContains $transferUi $sampleJpegName "uploaded jpeg transfer row"
+$transferUi = Tap-UntilUiContains 900 2240 "completed=$($uploadCases.Count)" "uploaded transfer summary"
+Assert-UiContains $transferUi "failed=0" "uploaded transfer failure count"
+Assert-UiContains $transferUi "total=$($uploadCases.Count)" "uploaded transfer total count"
+Assert-UiContains $transferUi "EDGE_DUPLICATE" "visible duplicate transfer row"
 Assert-UiContains $transferUi $DeviceName "transfer device name"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
 if ($LASTEXITCODE -ne 0) {

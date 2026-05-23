@@ -457,6 +457,28 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
         },
     )
     .expect("raw transfer should append");
+    append_transfer_record(
+        &state_dir,
+        &TransferRecord {
+            transfer_id: "ftp:txt".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "DCIM/100/README.TXT".to_string(),
+            final_filename: "README.TXT".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::document_uri(
+                "content://camera-connector/README.TXT",
+            )),
+            size_bytes: 10,
+            username: None,
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Z5_2".to_string()),
+            started_at_ms: 12,
+            completed_at_ms: Some(22),
+            error: None,
+        },
+    )
+    .expect("non-media transfer should append");
 
     let service = CameraConnectorService::new(None);
     let groups = service
@@ -465,6 +487,7 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].group_key, "IMG_2222");
+    assert_ne!(groups[0].primary.filename, "README.TXT");
     assert_eq!(
         groups[0].jpeg.as_ref().map(|asset| asset.filename.as_str()),
         Some("IMG_2222.JPG")

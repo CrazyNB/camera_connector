@@ -292,6 +292,7 @@ impl CameraConnectorService {
         let assets = records
             .into_iter()
             .map(|record| asset_from_transfer_record(record, &accounts, &duplicates))
+            .filter(|asset| asset.format.is_supported_media())
             .collect::<Vec<_>>();
         Ok(group_received_assets(assets)
             .into_iter()

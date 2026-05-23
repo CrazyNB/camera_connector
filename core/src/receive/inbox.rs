@@ -53,6 +53,9 @@ fn collect_assets(
         let mut asset =
             ReceivedAsset::new(relative_path.clone(), relative_path, metadata.len(), source)
                 .with_storage_location(StoredObjectLocation::local_path(path.clone()));
+        if !asset.format.is_supported_media() {
+            continue;
+        }
         asset.received_time_ms = metadata
             .modified()
             .ok()

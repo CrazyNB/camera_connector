@@ -63,4 +63,8 @@ impl ObjectFormat {
     pub fn is_video(self) -> bool {
         matches!(self, Self::Mov | Self::Mp4)
     }
+
+    pub fn is_supported_media(self) -> bool {
+        self == Self::Jpeg || self == Self::Tiff || self.is_raw() || self.is_video()
+    }
 }
