@@ -149,6 +149,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x672A,0x8FDE,0x63A5))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x65B0,0x589E,0x8D26,0x53F7))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x5220,0x9664,0x8D26,0x53F7))
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x767B,0x5F55,0x7528,0x6237,0x540D))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x5168,0x90E8,0x6587,0x4EF6))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "192\.168\.137\.1"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x5168,0x90E8,0x6765,0x6E90))

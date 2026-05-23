@@ -639,7 +639,7 @@ private fun SettingsScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "还没有账号。请为相机配置 FTP/SFTP 用户名和密码。",
+                        "还没有账号。请为相机配置登录用户名和密码。",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
