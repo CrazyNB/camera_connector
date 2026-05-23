@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $androidRoot = Join-Path $root "apps\android"
 $buildNativeScript = Join-Path $root "scripts\build_android_native.ps1"
+$inspectApkScript = Join-Path $root "scripts\inspect_android_apk.ps1"
 
 $defaultJavaHome = "C:\Program Files\ojdkbuild\java-17-openjdk-17.0.3.0.6-1"
 $defaultSdkRoot = Join-Path $env:LOCALAPPDATA "Android\Sdk"
@@ -56,15 +57,9 @@ if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
     throw "Android debug APK not found: $apk"
 }
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead($apk)
-try {
-    $nativeEntry = $zip.Entries | Where-Object { $_.FullName -eq "lib/arm64-v8a/libcamera_connector_ffi.so" } | Select-Object -First 1
-    if ($null -eq $nativeEntry -or $nativeEntry.Length -le 0) {
-        throw "Android debug APK does not contain lib/arm64-v8a/libcamera_connector_ffi.so"
-    }
-} finally {
-    $zip.Dispose()
+& powershell -NoProfile -ExecutionPolicy Bypass -File $inspectApkScript -ApkPath $apk
+if ($LASTEXITCODE -ne 0) {
+    throw "Android APK inspection failed"
 }
 
 Write-Host "Android debug build passed with arm64 native core packaged."

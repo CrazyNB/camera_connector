@@ -84,6 +84,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_android_device
 
 The smoke pass builds and installs the debug APK, grants notification permission when available, verifies `pm path com.cameraconnector.app`, launches the app, and writes diagnostics to `target\android-diagnostics\smoke-latest`.
 
+To inspect an already built APK and write an auditable package report:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\inspect_android_apk.ps1
+```
+
+The build verification script runs this automatically and writes `target\android-apk-report.txt` with the APK size, SHA-256 hash, manifest/classes entries, and packaged `lib/arm64-v8a/libcamera_connector_ffi.so` size.
+
 To rebuild only the Rust native library and copy it into the APK source tree:
 
 ```powershell
