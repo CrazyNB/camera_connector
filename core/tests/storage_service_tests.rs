@@ -275,6 +275,64 @@ fn service_builds_project_dashboard_from_sqlite_assets() {
 }
 
 #[test]
+fn service_project_dashboard_filters_transfer_summary_by_query() {
+    let config_path = unique_temp_path("storage-service-dashboard-summary-filter");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Filtered Dashboard")
+        .expect("project should create");
+
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:z5-complete", "DCIM/100/IMG_3001.JPG", 40),
+        )
+        .expect("z5 completed transfer should record");
+
+    let mut z5_failed = completed_transfer("ftp:z5-failed", "DCIM/100/IMG_3002.JPG", 50);
+    z5_failed.status = TransferStatus::Failed;
+    z5_failed.error = Some("simulated failure".to_string());
+    service
+        .record_project_transfer(&project.project_id, z5_failed)
+        .expect("z5 failed transfer should record");
+
+    let mut z6_complete = completed_transfer("ftp:z6-complete", "DCIM/100/IMG_3003.JPG", 60);
+    z6_complete.username = Some("z6".to_string());
+    z6_complete.source_name = Some("Studio Z6".to_string());
+    service
+        .record_project_transfer(&project.project_id, z6_complete)
+        .expect("z6 completed transfer should record");
+
+    let mut z6_failed = completed_transfer("ftp:z6-failed", "DCIM/100/IMG_3004.JPG", 70);
+    z6_failed.status = TransferStatus::Failed;
+    z6_failed.username = Some("z6".to_string());
+    z6_failed.source_name = Some("Studio Z6".to_string());
+    z6_failed.error = Some("other failure".to_string());
+    service
+        .record_project_transfer(&project.project_id, z6_failed)
+        .expect("z6 failed transfer should record");
+
+    let dashboard = service
+        .project_dashboard(
+            &project.project_id,
+            AssetGroupQuery {
+                username: Some("z5".to_string()),
+                ..AssetGroupQuery::default()
+            },
+            0,
+            25,
+            false,
+        )
+        .expect("project dashboard should build");
+
+    assert_eq!(dashboard.transfers.total_count, 2);
+    assert_eq!(dashboard.transfers.completed_count, 1);
+    assert_eq!(dashboard.transfers.failed_count, 1);
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_project_dashboard_includes_project_scoped_recent_failures() {
     let config_path = unique_temp_path("storage-service-dashboard-failures");
     let service = CameraConnectorService::new(Some(config_path.clone()));

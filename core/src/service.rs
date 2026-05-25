@@ -462,6 +462,19 @@ impl CameraConnectorService {
         Ok(summarize_transfers(&records))
     }
 
+    pub fn project_transfer_summary_with_query(
+        &self,
+        project_id: &str,
+        query: TransferQuery,
+    ) -> Result<TransferSummary> {
+        let records = self
+            .project_transfers(project_id, query)?
+            .into_iter()
+            .map(|view| view.record)
+            .collect::<Vec<_>>();
+        Ok(summarize_transfers(&records))
+    }
+
     pub fn recent_failed_transfers(
         &self,
         output_dir: impl AsRef<Path>,
@@ -599,7 +612,9 @@ impl CameraConnectorService {
         )?;
         let accounts = accounts_with_devices(self.accounts()?, &devices);
         let store = self.storage_store()?;
-        let (total_count, completed_count, failed_count) = store.transfer_counts(project_id)?;
+        let transfer_query = transfer_query_from_asset_query(&asset_query);
+        let transfers =
+            self.project_transfer_summary_with_query(project_id, transfer_query.clone())?;
         Ok(CameraConnectorDashboard {
             receiver_settings,
             paths: SystemPathsView {
@@ -612,16 +627,8 @@ impl CameraConnectorService {
             receiver_status,
             accounts,
             devices,
-            transfers: TransferSummary {
-                total_count,
-                completed_count,
-                failed_count,
-            },
-            recent_failures: self.project_recent_failed_transfers(
-                project_id,
-                transfer_query_from_asset_query(&asset_query),
-                5,
-            )?,
+            transfers,
+            recent_failures: self.project_recent_failed_transfers(project_id, transfer_query, 5)?,
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
