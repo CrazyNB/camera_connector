@@ -38,7 +38,7 @@ The receiver writes to `StagingStore`, which is always reliable local app-privat
 
 For desktop, the object store can still be a local folder. For Android, the object store can be SAF or MediaStore. For future iOS, it can map to Files or Photos identifiers.
 
-Physical storage can remain flat for safety and compatibility. Project organization is metadata-first and query-first. Object stores may optionally create project folders or album-like collections when the platform supports it, but the core product model must not depend on folder hierarchy.
+Physical storage can remain flat for safety and platform portability. Project organization is metadata-first and query-first. Object stores may optionally create project folders or album-like collections when the platform supports it, but the core product model must not depend on folder hierarchy.
 
 ## Current Model To Preserve
 
@@ -50,7 +50,6 @@ These product rules must not change:
 - RAW/JPEG/video grouping is based on normalized filename stem.
 - Transfer rows expose display source, username, remote address, virtual display path, size, and failure text.
 - Receiver metadata lives outside the user-facing inbox.
-- Existing `transfer-log.jsonl` records remain readable.
 - The final storage location can stay flat while projects and virtual paths provide user-facing organization.
 
 ## Target Components
@@ -198,7 +197,6 @@ Assignment rules:
 
 - Use the active project selected in the UI when the receiver starts.
 - If no active project exists, either block receiver start until the user chooses or creates one, or use an explicit system project such as "Inbox" when the product chooses a low-friction default.
-- Keep old records without a project readable by mapping them to "Legacy Import" or "Unassigned" during migration.
 - Do not create unprojected assets.
 
 Project metadata should not replace original camera path. The original path stays diagnostic metadata. Project identity is product organization.
@@ -219,7 +217,7 @@ The UI can still collapse this into simple labels, but the core needs enough sta
 
 ### Final location
 
-`final_location` should become the primary location field for new records. `final_path` should remain only as a legacy compatibility field.
+`final_location` should be the only canonical final storage field in the new schema.
 
 Rules:
 
@@ -227,7 +225,6 @@ Rules:
 - Android SAF records write `final_location = DocumentUri`.
 - Android MediaStore records write `final_location = MediaUri`.
 - Future iOS Photos records write `final_location = PhotoAsset`.
-- Readers continue resolving legacy `final_path` as `LocalPath`.
 
 ### Output configuration
 
@@ -272,23 +269,21 @@ The optimized model must handle these cases:
 - State write fails after final publish: preserve enough queue metadata to reconcile on next startup.
 - SAF permission is revoked: keep staged files and prompt user to reauthorize storage.
 - Active project is deleted/archived during receiver activity: prevent destructive removal until receiver stops, or require the user to move in-flight records to another project.
-- Legacy imports have no project id: expose them under "Legacy Import" or "Unassigned" and allow manual reassignment.
-
 No completed upload should disappear silently. If final publishing fails, the staged bytes remain recoverable until the user deletes them or a successful retry completes.
 
-## Migration Plan
+## Schema Reset Plan
 
-### Foundation milestone: complete storage schema and local compatibility
+### Foundation milestone: complete storage schema and local desktop behavior
 
 This milestone should land the durable architecture in one pass:
 
+- Treat the current development data as disposable; state and schema resets are allowed.
 - Introduce SQLite-backed `StateStore` and `AssetIndex`.
 - Add project tables and required project references on transfers, assets, asset groups, and publish queue rows.
 - Introduce `StagingStore`, `PublishQueue`, and `ObjectStore` abstractions.
-- Keep local folder publishing compatible with current desktop smoke tests.
-- Continue writing readable `transfer-log.jsonl` as an audit log.
+- Keep local folder publishing behavior aligned with current desktop smoke tests.
+- Continue writing `transfer-log.jsonl` as an audit log.
 - Record `final_location` for all new records, including local paths.
-- Map legacy records without project identity into "Legacy Import" or "Unassigned".
 - Add cleanup for stale incomplete temp files.
 - Make dashboard and inbox queries project-scoped.
 
@@ -320,11 +315,9 @@ Unit tests:
 - Staging temp write, complete, and cleanup.
 - Publish queue retry and recovery transitions.
 - Duplicate filename reservation before publish.
-- Legacy `final_path` records resolving as `LocalPath`.
-- New records using `final_location`.
+- Records using `final_location`.
 - Asset index grouping, paging, filters, and duplicate counts.
 - Project creation, archive, and reassignment.
-- Legacy import migration into "Legacy Import" or "Unassigned".
 - Receiver start behavior when no active project exists.
 - Dashboard and inbox queries requiring a project id.
 - Moving assets or groups between projects.
@@ -360,15 +353,13 @@ Device smoke tests:
 The storage model optimization is accepted when:
 
 - Receiver uploads no longer require final storage to support random access or atomic rename.
-- Desktop local-folder behavior remains compatible with current smoke tests.
+- Desktop local-folder behavior remains aligned with current smoke tests.
 - New transfer records store `final_location` as the canonical final target.
-- Legacy records with `final_path` still appear in transfers, inbox groups, and dashboard.
 - Android can distinguish app-private staging from user-selected final output.
 - A completed upload whose final publish fails remains recoverable and retryable.
 - Users can create/select projects and start imports into the active project.
 - Every uploaded asset is associated with a project.
 - Dashboard and inbox asset views require a selected project.
-- Legacy imports remain visible under a safe fallback project.
 - Dashboard behavior remains familiar while adding project filters.
 
 ## Non-Goals
@@ -376,7 +367,7 @@ The storage model optimization is accepted when:
 - Changing FTP/SFTP protocol behavior.
 - Mirroring camera-side folders into final storage.
 - Decoding RAW files.
-- Replacing current transfer-log audit history.
+- Removing the transfer-log audit output.
 - Implementing cloud sync.
 - Making physical final storage mirror project hierarchy mandatory.
 - Adding any extra grouping layer between project and asset before there is a proven product need.
