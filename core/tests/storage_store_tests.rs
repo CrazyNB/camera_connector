@@ -98,6 +98,50 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
 }
 
 #[test]
+fn sqlite_store_lists_project_transfers_by_latest_time() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project_a = store
+        .create_project("Wedding")
+        .expect("project should create");
+    let project_b = store
+        .create_project("Street")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project_a.project_id,
+            completed_transfer("ftp:old", "DCIM/100/IMG_1111.JPG", 20),
+        )
+        .expect("old transfer should record");
+    let mut failed = completed_transfer("ftp:failed", "DCIM/100/IMG_2222.JPG", 30);
+    failed.status = TransferStatus::Failed;
+    failed.error = Some("simulated failure".to_string());
+    store
+        .record_transfer(&project_a.project_id, failed)
+        .expect("failed transfer should record");
+    store
+        .record_transfer(
+            &project_b.project_id,
+            completed_transfer("ftp:other", "DCIM/100/IMG_3333.JPG", 40),
+        )
+        .expect("other project transfer should record");
+
+    let transfers = store
+        .transfer_records(&project_a.project_id)
+        .expect("project transfers should list");
+
+    assert_eq!(transfers.len(), 2);
+    assert_eq!(transfers[0].transfer_id, "ftp:failed");
+    assert_eq!(transfers[0].status, TransferStatus::Failed);
+    assert_eq!(transfers[0].error.as_deref(), Some("simulated failure"));
+    assert_eq!(transfers[1].transfer_id, "ftp:old");
+    assert!(transfers
+        .iter()
+        .all(|record| record.transfer_id != "ftp:other"));
+}
+
+#[test]
 fn sqlite_store_preserves_duplicate_uploads_as_separate_assets() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");

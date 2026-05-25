@@ -415,6 +415,32 @@ impl CameraConnectorService {
         Ok(views)
     }
 
+    pub fn project_transfers(
+        &self,
+        project_id: &str,
+        query: TransferQuery,
+    ) -> Result<Vec<TransferRecordView>> {
+        let accounts = self.load_config()?.accounts;
+        let views = self
+            .storage_store()?
+            .transfer_records(project_id)?
+            .into_iter()
+            .filter(|record| transfer_matches(record, &query, &accounts))
+            .map(|record| {
+                let display_source = record_display_source(&record, &accounts);
+                let virtual_display_path = record.virtual_display_path(display_source.as_deref());
+                TransferRecordView {
+                    final_location_kind: record.final_location_kind().map(ToOwned::to_owned),
+                    final_location_label: record.final_location_label(),
+                    record,
+                    display_source,
+                    virtual_display_path,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(views)
+    }
+
     pub fn transfer_summary_with_query(
         &self,
         output_dir: impl AsRef<Path>,

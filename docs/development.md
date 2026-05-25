@@ -107,7 +107,13 @@ List the receiver folder directly for legacy diagnostics:
 target\debug\camera-connector.exe inbox --path C:\Users\hxn\Pictures\CameraConnector --source ftp
 ```
 
-List transfer records and filter by source name, original camera path, final filename, remote IP, or transfer id:
+List project transfer records from SQLite and filter by status, source name, original camera path, final filename, remote IP, or transfer id:
+
+```powershell
+target\debug\camera-connector.exe transfers --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --status completed
+```
+
+List legacy transfer-log records for diagnostics:
 
 ```powershell
 target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --source-name "Z5_2" --original-path DCIM

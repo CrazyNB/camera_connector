@@ -357,6 +357,16 @@ if (($projectInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*sou
 }
 Write-Output $projectInboxOutput
 
+$projectTransfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --project-id $projectId --status completed --username "verify"
+if ($LASTEXITCODE -ne 0) { throw "project transfers smoke failed" }
+if (($projectTransfersOutput | Where-Object { $_ -like "ftp:*Completed*username=verify*source=Verify Camera*" }).Count -lt 2) {
+    throw "project transfers did not expose completed SQLite transfers"
+}
+if (($projectTransfersOutput | Where-Object { $_ -like "*ftp:verify-failed*" }).Count -gt 0) {
+    throw "project transfers should not include transfer-log-only failure"
+}
+Write-Output $projectTransfersOutput
+
 $projectDashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --project-id $projectId --username "verify" --limit 1
 if ($LASTEXITCODE -ne 0) { throw "project dashboard smoke failed" }
 if (($projectDashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {

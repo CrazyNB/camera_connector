@@ -1,6 +1,6 @@
 use camera_connector_core::{
     AssetGroupQuery, CameraConnectorService, ReceiverSettingsUpdate, SqliteStore,
-    StoredObjectLocation, TransferRecord, TransferStatus,
+    StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -153,6 +153,50 @@ fn service_queries_storage_asset_groups_inside_project_scope() {
     assert_eq!(page.total_groups, 1);
     assert_eq!(page.summary.asset_count, 2);
     assert_eq!(page.groups[0].group_key, "IMG_1000");
+}
+
+#[test]
+fn service_filters_project_transfers_from_sqlite() {
+    let config_path = unique_temp_path("storage-service-project-transfers");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Transfers")
+        .expect("project should create");
+
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:complete", "DCIM/100/IMG_1000.JPG", 20),
+        )
+        .expect("completed transfer should record");
+    let mut failed = completed_transfer("ftp:failed", "DCIM/100/IMG_1001.JPG", 30);
+    failed.status = TransferStatus::Failed;
+    failed.error = Some("simulated failure".to_string());
+    service
+        .record_project_transfer(&project.project_id, failed)
+        .expect("failed transfer should record");
+
+    let transfers = service
+        .project_transfers(
+            &project.project_id,
+            TransferQuery {
+                status: Some(TransferStatus::Failed),
+                source_name: Some("Studio Z5".to_string()),
+                ..TransferQuery::default()
+            },
+        )
+        .expect("project transfers should query");
+
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].record.transfer_id, "ftp:failed");
+    assert_eq!(transfers[0].display_source.as_deref(), Some("Studio Z5"));
+    assert_eq!(
+        transfers[0].record.error.as_deref(),
+        Some("simulated failure")
+    );
+    assert!(transfers[0].virtual_display_path.contains("IMG_1001.JPG"));
+
+    let _ = std::fs::remove_file(config_path);
 }
 
 #[test]

@@ -180,8 +180,10 @@ enum Command {
     Transfers {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long, alias = "path")]
-        state: PathBuf,
+        #[arg(long, alias = "path", required_unless_present = "project_id")]
+        state: Option<PathBuf>,
+        #[arg(long, alias = "project")]
+        project_id: Option<String>,
         #[arg(long)]
         status: Option<String>,
         #[arg(long)]
@@ -549,6 +551,7 @@ async fn main() -> Result<()> {
         Some(Command::Transfers {
             config,
             state,
+            project_id,
             status,
             transfer_id,
             original_path,
@@ -557,9 +560,10 @@ async fn main() -> Result<()> {
             source_name,
             remote_addr,
         }) => {
-            let service = CameraConnectorService::new(config);
-            for view in service.transfers(
+            for view in load_transfers(
+                config,
                 state,
+                project_id,
                 TransferQuery {
                     status: status.as_deref().map(parse_transfer_status).transpose()?,
                     transfer_id,
@@ -730,6 +734,22 @@ fn load_project_inbox_page(
 ) -> Result<AssetGroupPage> {
     CameraConnectorService::new(config)
         .project_asset_group_page_with_query(project_id, query, offset, limit)
+}
+
+fn load_transfers(
+    config: Option<PathBuf>,
+    state: Option<PathBuf>,
+    project_id: Option<String>,
+    query: TransferQuery,
+) -> Result<Vec<TransferRecordView>> {
+    let service = CameraConnectorService::new(config);
+    match project_id {
+        Some(project_id) => service.project_transfers(&project_id, query),
+        None => {
+            let state = state.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
+            service.transfers(state, query)
+        }
+    }
 }
 
 fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
@@ -1540,6 +1560,100 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_project_transfers_command_without_state() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "transfers",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "--project-id",
+            "project-1",
+            "--status",
+            "failed",
+        ])
+        .expect("project transfers command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Transfers {
+                state: None,
+                project_id: Some(project_id),
+                status: Some(_),
+                ..
+            }) if project_id == "project-1"
+        ));
+    }
+
+    #[test]
+    fn project_transfers_load_from_sqlite() {
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-project-transfers-{}",
+            current_time_ms()
+        ));
+        let config_path = root.join("config.json");
+        let state_dir = root.join("state");
+        std::fs::create_dir_all(&root).expect("temp root should create");
+        let service = CameraConnectorService::new(Some(config_path.clone()));
+        service
+            .set_receiver_settings(ReceiverSettingsUpdate {
+                state_dir: Some(state_dir),
+                ..ReceiverSettingsUpdate::default()
+            })
+            .expect("receiver settings should save");
+        let project = service
+            .create_project("Project Transfers")
+            .expect("project should create");
+        let mut failed = TransferRecord {
+            transfer_id: "ftp:project-failed".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Failed,
+            original_path: "DCIM/100/IMG_0303.CR3".to_string(),
+            final_filename: "IMG_0303.CR3".to_string(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::local_path(root.join("IMG_0303.CR3"))),
+            size_bytes: 42,
+            username: Some("verify".to_string()),
+            remote_addr: None,
+            source_name: Some("Verify Camera".to_string()),
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: Some("simulated failure".to_string()),
+        };
+        service
+            .record_project_transfer(&project.project_id, failed.clone())
+            .expect("failed transfer should record");
+        failed.transfer_id = "ftp:other".to_string();
+        failed.status = TransferStatus::Completed;
+        service
+            .record_project_transfer(&project.project_id, failed)
+            .expect("completed transfer should record");
+
+        let transfers = load_transfers(
+            Some(config_path.clone()),
+            None,
+            Some(project.project_id),
+            TransferQuery {
+                status: Some(TransferStatus::Failed),
+                ..TransferQuery::default()
+            },
+        )
+        .expect("project transfers should load");
+
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].record.transfer_id, "ftp:project-failed");
+        assert_eq!(
+            transfers[0].display_source.as_deref(),
+            Some("Verify Camera")
+        );
+        assert_eq!(
+            transfers[0].record.error.as_deref(),
+            Some("simulated failure")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

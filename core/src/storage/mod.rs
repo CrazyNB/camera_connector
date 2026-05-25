@@ -352,6 +352,24 @@ impl SqliteStore {
         })
     }
 
+    pub fn transfer_records(&self, project_id: &str) -> Result<Vec<TransferRecord>> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let mut statement = connection.prepare(
+                "SELECT transfer_id, protocol, status, original_path, final_filename,
+                        final_location_payload, size_bytes, username, remote_addr, source_name,
+                        started_at_ms, completed_at_ms, error
+                 FROM transfers
+                 WHERE project_id = ?1
+                 ORDER BY COALESCE(completed_at_ms, started_at_ms) DESC,
+                          started_at_ms DESC,
+                          transfer_id DESC",
+            )?;
+            let rows = statement.query_map(params![project_id], transfer_record_from_row)?;
+            collect_rows(rows)
+        })
+    }
+
     pub fn enqueue_publish(
         &self,
         project_id: &str,
@@ -902,6 +920,27 @@ fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusq
     })
 }
 
+fn transfer_record_from_row(row: &Row<'_>) -> std::result::Result<TransferRecord, rusqlite::Error> {
+    let status: String = row.get(2)?;
+    let final_location_payload: Option<String> = row.get(5)?;
+    Ok(TransferRecord {
+        transfer_id: row.get(0)?,
+        protocol: row.get(1)?,
+        status: parse_transfer_status(&status),
+        original_path: row.get(3)?,
+        final_filename: row.get(4)?,
+        final_path: None,
+        final_location: parse_location(final_location_payload)?,
+        size_bytes: row.get::<_, i64>(6)? as u64,
+        username: row.get(7)?,
+        remote_addr: row.get(8)?,
+        source_name: row.get(9)?,
+        started_at_ms: row.get(10)?,
+        completed_at_ms: row.get(11)?,
+        error: row.get(12)?,
+    })
+}
+
 fn publish_item_from_row(row: &Row<'_>) -> std::result::Result<PublishQueueItem, rusqlite::Error> {
     let state: String = row.get(6)?;
     Ok(PublishQueueItem {
@@ -1140,6 +1179,13 @@ fn transfer_status_name(status: TransferStatus) -> &'static str {
     match status {
         TransferStatus::Completed => "completed",
         TransferStatus::Failed => "failed",
+    }
+}
+
+fn parse_transfer_status(value: &str) -> TransferStatus {
+    match value {
+        "failed" => TransferStatus::Failed,
+        _ => TransferStatus::Completed,
     }
 }
 
