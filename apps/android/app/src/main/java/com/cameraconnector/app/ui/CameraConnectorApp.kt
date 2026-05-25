@@ -9,14 +9,17 @@ import android.graphics.Matrix
 import android.net.Uri
 import java.io.File
 import java.io.InputStream
+import java.util.Locale
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -305,6 +308,38 @@ private enum class PreviewQuality {
     Thumbnail,
     Detail,
     FullScreen,
+}
+
+private data class PhotoMetadata(
+    val shotTime: String? = null,
+    val camera: String? = null,
+    val lens: String? = null,
+    val iso: String? = null,
+    val aperture: String? = null,
+    val shutter: String? = null,
+    val focalLength: String? = null,
+    val exposureBias: String? = null,
+    val dimensions: String? = null,
+    val whiteBalance: String? = null,
+    val flash: String? = null,
+    val colorSpace: String? = null,
+    val orientation: String? = null,
+) {
+    fun lines(): List<Pair<String, String>> = listOfNotNull(
+        shotTime?.let { "拍摄时间" to it },
+        camera?.let { "相机" to it },
+        lens?.let { "镜头" to it },
+        iso?.let { "ISO" to it },
+        aperture?.let { "光圈" to it },
+        shutter?.let { "快门" to it },
+        focalLength?.let { "焦距" to it },
+        exposureBias?.let { "曝光补偿" to it },
+        dimensions?.let { "像素尺寸" to it },
+        whiteBalance?.let { "白平衡" to it },
+        flash?.let { "闪光灯" to it },
+        colorSpace?.let { "色彩空间" to it },
+        orientation?.let { "方向" to it },
+    )
 }
 
 private val ElementBlue = Color(0xFF409EFF)
@@ -1218,6 +1253,17 @@ private fun PhotoDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val metadataLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
+    val photoMetadata by produceState<PhotoMetadata?>(initialValue = null, metadataLocation) {
+        value = if (metadataLocation == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                loadPhotoMetadata(context, metadataLocation)
+            }
+        }
+    }
     var fullScreenPreview by remember { mutableStateOf(false) }
     if (fullScreenPreview) {
         FullScreenPhotoPreview(
@@ -1225,52 +1271,58 @@ private fun PhotoDetailScreen(
             onDismiss = { fullScreenPreview = false },
         )
     }
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            HeaderWithBack(
-                title = asset.groupTitle(),
-                subtitle = "照片详情",
-                onBack = onBack,
-            )
-        }
-        item {
-            PhotoPreview(
-                asset = asset,
-                previewQuality = PreviewQuality.Detail,
-                fitToImageAspect = true,
-                contentScale = ContentScale.Fit,
-                backgroundColor = Color.Black,
-                onClick = { fullScreenPreview = true },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        item {
+        HeaderWithBack(
+            title = asset.groupTitle(),
+            subtitle = "照片详情",
+            onBack = onBack,
+        )
+        PhotoPreview(
+            asset = asset,
+            previewQuality = PreviewQuality.Detail,
+            fitToImageAspect = true,
+            contentScale = ContentScale.Fit,
+            backgroundColor = Color.Black,
+            onClick = { fullScreenPreview = true },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        photoMetadata?.lines()?.takeIf { it.isNotEmpty() }?.let { metadataLines ->
             ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("来源信息", style = MaterialTheme.typography.titleMedium)
+                    Text("拍摄参数", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    DetailLine("来源", asset.sourceLabel())
-                    DetailLine("账号", asset.username ?: "未记录")
-                    DetailLine("原始路径", asset.originalPath ?: asset.displayPath)
-                    DetailLine("接收时间", formatEpochMillisTextForDisplay(asset.receivedAt))
-                    DetailLine("文件大小", asset.sizeBytes?.let { "$it bytes" } ?: "未记录")
+                    metadataLines.forEach { (label, value) ->
+                        DetailLine(label, value)
+                    }
                 }
             }
         }
-        item {
-            ElementCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("文件组", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    DetailLine("主文件", asset.displayPath)
-                    DetailLine("RAW", asset.rawPath ?: "无")
-                    DetailLine("JPEG", asset.jpegPath ?: "无")
-                    DetailLine("视频", asset.videoPath ?: "无")
-                }
+        ElementCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("来源信息", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                DetailLine("来源", asset.sourceLabel())
+                DetailLine("账号", asset.username ?: "未记录")
+                DetailLine("原始路径", asset.originalPath ?: asset.displayPath)
+                DetailLine("接收时间", formatEpochMillisTextForDisplay(asset.receivedAt))
+                DetailLine("文件大小", asset.sizeBytes?.let { "$it bytes" } ?: "未记录")
+            }
+        }
+        ElementCard(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text("文件组", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                DetailLine("主文件", asset.displayPath)
+                DetailLine("RAW", asset.rawPath ?: "无")
+                DetailLine("JPEG", asset.jpegPath ?: "无")
+                DetailLine("视频", asset.videoPath ?: "无")
             }
         }
     }
@@ -1435,7 +1487,7 @@ private fun PhotoPreview(
                     )
                 } else {
                     Text(
-                        if (asset.rawPath != null) "RAW 预览待生成" else "暂无预览",
+                        "加载中",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -1479,6 +1531,160 @@ private fun loadPreviewBitmap(
             ) { File(location).inputStream() }
         }
     }.getOrNull()
+}
+
+private fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
+    if (location.isNullOrBlank()) {
+        return null
+    }
+    return runCatching {
+        readExifInterface(context, location) { exif ->
+            PhotoMetadata(
+                shotTime = formatExifDateTime(
+                    exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                        ?: exif.getAttribute(ExifInterface.TAG_DATETIME),
+                ),
+                camera = formatCameraName(
+                    make = exif.getAttribute(ExifInterface.TAG_MAKE),
+                    model = exif.getAttribute(ExifInterface.TAG_MODEL),
+                ),
+                lens = exif.getAttribute(ExifInterface.TAG_LENS_MODEL)
+                    ?: exif.getAttribute(ExifInterface.TAG_LENS_MAKE),
+                iso = readIso(exif)?.let { "ISO $it" },
+                aperture = readDoubleAttribute(exif, ExifInterface.TAG_F_NUMBER)?.let {
+                    "f/${formatDecimal(it, 1)}"
+                },
+                shutter = readDoubleAttribute(exif, ExifInterface.TAG_EXPOSURE_TIME)?.let(::formatShutterSpeed),
+                focalLength = readDoubleAttribute(exif, ExifInterface.TAG_FOCAL_LENGTH)?.let {
+                    val focal35mm = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM)
+                    val focalText = "${formatDecimal(it, 1)} mm"
+                    if (focal35mm.isNullOrBlank()) {
+                        focalText
+                    } else {
+                        "$focalText（等效 ${focal35mm} mm）"
+                    }
+                },
+                exposureBias = readSignedDoubleAttribute(exif, ExifInterface.TAG_EXPOSURE_BIAS_VALUE)?.let {
+                    "${formatSignedDecimal(it, 1)} EV"
+                },
+                dimensions = formatPixelDimensions(exif),
+                whiteBalance = formatWhiteBalance(exif.getAttributeInt(ExifInterface.TAG_WHITE_BALANCE, -1)),
+                flash = formatFlash(exif.getAttributeInt(ExifInterface.TAG_FLASH, -1)),
+                colorSpace = formatColorSpace(exif.getAttributeInt(ExifInterface.TAG_COLOR_SPACE, -1)),
+                orientation = formatOrientation(
+                    exif.getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_UNDEFINED,
+                    ),
+                ),
+            )
+        }
+    }.getOrNull()?.takeIf { it.lines().isNotEmpty() }
+}
+
+private fun <T> readExifInterface(context: Context, location: String, block: (ExifInterface) -> T): T? {
+    return if (location.startsWith("content://")) {
+        val uri = Uri.parse(location)
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            block(ExifInterface(stream))
+        }
+    } else {
+        block(ExifInterface(File(location).absolutePath))
+    }
+}
+
+private fun readIso(exif: ExifInterface): String? =
+    exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
+        ?: exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS)
+        ?: exif.getAttribute(ExifInterface.TAG_ISO_SPEED)
+
+private fun readDoubleAttribute(exif: ExifInterface, tag: String): Double? {
+    val value = exif.getAttributeDouble(tag, Double.NaN)
+    return value.takeUnless { it.isNaN() || it <= 0.0 }
+}
+
+private fun readSignedDoubleAttribute(exif: ExifInterface, tag: String): Double? {
+    val value = exif.getAttributeDouble(tag, Double.NaN)
+    return value.takeUnless { it.isNaN() }
+}
+
+private fun formatCameraName(make: String?, model: String?): String? {
+    val cleanedMake = make?.trim().orEmpty()
+    val cleanedModel = model?.trim().orEmpty()
+    return when {
+        cleanedMake.isBlank() && cleanedModel.isBlank() -> null
+        cleanedMake.isBlank() -> cleanedModel
+        cleanedModel.isBlank() -> cleanedMake
+        cleanedModel.startsWith(cleanedMake, ignoreCase = true) -> cleanedModel
+        else -> "$cleanedMake $cleanedModel"
+    }
+}
+
+private fun formatExifDateTime(value: String?): String? {
+    if (value.isNullOrBlank()) {
+        return null
+    }
+    return value.replaceFirst(Regex("""^(\d{4}):(\d{2}):(\d{2})"""), "$1-$2-$3")
+}
+
+private fun formatShutterSpeed(seconds: Double): String =
+    if (seconds >= 1.0) {
+        "${formatDecimal(seconds, 1)} s"
+    } else {
+        val denominator = (1.0 / seconds).toInt()
+        "1/$denominator s"
+    }
+
+private fun formatPixelDimensions(exif: ExifInterface): String? {
+    val width = exif.getAttributeInt(ExifInterface.TAG_PIXEL_X_DIMENSION, 0)
+        .takeIf { it > 0 }
+        ?: exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0).takeIf { it > 0 }
+    val height = exif.getAttributeInt(ExifInterface.TAG_PIXEL_Y_DIMENSION, 0)
+        .takeIf { it > 0 }
+        ?: exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0).takeIf { it > 0 }
+    return if (width != null && height != null) {
+        "$width × $height"
+    } else {
+        null
+    }
+}
+
+private fun formatWhiteBalance(value: Int): String? = when (value) {
+    0 -> "自动"
+    1 -> "手动"
+    else -> null
+}
+
+private fun formatFlash(value: Int): String? = when {
+    value < 0 -> null
+    value and 0x1 == 0x1 -> "已闪光"
+    else -> "未闪光"
+}
+
+private fun formatColorSpace(value: Int): String? = when (value) {
+    1 -> "sRGB"
+    0xffff -> "未校准"
+    else -> null
+}
+
+private fun formatOrientation(value: Int): String? = when (value) {
+    ExifInterface.ORIENTATION_NORMAL -> "正常"
+    ExifInterface.ORIENTATION_ROTATE_90 -> "旋转 90°"
+    ExifInterface.ORIENTATION_ROTATE_180 -> "旋转 180°"
+    ExifInterface.ORIENTATION_ROTATE_270 -> "旋转 270°"
+    ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> "水平翻转"
+    ExifInterface.ORIENTATION_FLIP_VERTICAL -> "垂直翻转"
+    ExifInterface.ORIENTATION_TRANSPOSE -> "转置"
+    ExifInterface.ORIENTATION_TRANSVERSE -> "横向转置"
+    else -> null
+}
+
+private fun formatDecimal(value: Double, digits: Int): String =
+    String.format(Locale.US, "%.${digits}f", value).trimEnd('0').trimEnd('.')
+
+private fun formatSignedDecimal(value: Double, digits: Int): String {
+    val prefix = if (value > 0.0) "+" else ""
+    return "$prefix${formatDecimal(value, digits)}"
 }
 
 private fun loadCameraPreviewBitmap(
