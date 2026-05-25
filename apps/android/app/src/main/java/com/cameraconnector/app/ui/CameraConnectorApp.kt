@@ -75,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
@@ -302,7 +303,8 @@ private enum class InboxFilter(val label: String) {
 
 private enum class PreviewQuality {
     Thumbnail,
-    HighResolution,
+    Detail,
+    FullScreen,
 }
 
 private val ElementBlue = Color(0xFF409EFF)
@@ -1238,13 +1240,12 @@ private fun PhotoDetailScreen(
         item {
             PhotoPreview(
                 asset = asset,
-                previewQuality = PreviewQuality.HighResolution,
+                previewQuality = PreviewQuality.Detail,
+                fitToImageAspect = true,
                 contentScale = ContentScale.Fit,
                 backgroundColor = Color.Black,
                 onClick = { fullScreenPreview = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 4f),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
@@ -1327,7 +1328,7 @@ private fun FullScreenPhotoPreview(
         ) {
             PhotoPreview(
                 asset = asset,
-                previewQuality = PreviewQuality.HighResolution,
+                previewQuality = PreviewQuality.FullScreen,
                 contentScale = ContentScale.Fit,
                 backgroundColor = Color.Black,
                 clipPreview = false,
@@ -1373,6 +1374,7 @@ private fun PhotoPreview(
     modifier: Modifier = Modifier,
     compactFallback: Boolean = false,
     previewQuality: PreviewQuality = PreviewQuality.Thumbnail,
+    fitToImageAspect: Boolean = false,
     contentScale: ContentScale = ContentScale.Crop,
     backgroundColor: Color = Color(0xFFE4E7ED),
     clipPreview: Boolean = true,
@@ -1390,10 +1392,20 @@ private fun PhotoPreview(
         }
     }
 
-    val previewModifier = if (clipPreview) {
-        modifier.clip(elementShape)
+    val loadedBitmap = bitmap
+    val aspectModifier = if (fitToImageAspect) {
+        val imageAspectRatio = loadedBitmap
+            ?.takeIf { it.width > 0 && it.height > 0 }
+            ?.let { it.width.toFloat() / it.height.toFloat() }
+            ?: PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
+        modifier.aspectRatio(imageAspectRatio)
     } else {
         modifier
+    }
+    val previewModifier = if (clipPreview) {
+        aspectModifier.clip(elementShape)
+    } else {
+        aspectModifier
     }
     val clickableModifier = if (onClick == null) {
         previewModifier
@@ -1404,13 +1416,13 @@ private fun PhotoPreview(
         modifier = clickableModifier.background(backgroundColor),
         contentAlignment = Alignment.Center,
     ) {
-        val loadedBitmap = bitmap
         if (loadedBitmap != null) {
             Image(
                 bitmap = loadedBitmap.asImageBitmap(),
                 contentDescription = asset.groupTitle(),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale,
+                filterQuality = FilterQuality.High,
             )
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1456,11 +1468,13 @@ private fun loadPreviewBitmap(
             val uri = Uri.parse(location)
             loadCameraPreviewBitmap(
                 isRawPreview = isRawPreviewLocation(location),
+                isJpegPreview = isJpegPreviewLocation(location),
                 quality = quality,
             ) { context.contentResolver.openInputStream(uri) }
         } else {
             loadCameraPreviewBitmap(
                 isRawPreview = isRawPreviewLocation(location),
+                isJpegPreview = isJpegPreviewLocation(location),
                 quality = quality,
             ) { File(location).inputStream() }
         }
@@ -1469,6 +1483,7 @@ private fun loadPreviewBitmap(
 
 private fun loadCameraPreviewBitmap(
     isRawPreview: Boolean,
+    isJpegPreview: Boolean,
     quality: PreviewQuality,
     openStream: () -> InputStream?,
 ): Bitmap? {
@@ -1476,18 +1491,28 @@ private fun loadCameraPreviewBitmap(
         isRawPreview = isRawPreview,
         openStream = openStream,
     )
-    if (quality == PreviewQuality.HighResolution) {
-        return (if (isRawPreview) {
+    if (quality != PreviewQuality.Thumbnail) {
+        val maxDimensionPx = when (quality) {
+            PreviewQuality.Detail -> PREVIEW_DETAIL_MAX_DIMENSION_PX
+            PreviewQuality.FullScreen -> PREVIEW_FULLSCREEN_MAX_DIMENSION_PX
+            PreviewQuality.Thumbnail -> PREVIEW_MAX_DIMENSION_PX
+        }
+        return (if (isJpegPreview && !isRawPreview) {
+            decodeFullBitmap(
+                openStream = openStream,
+                orientation = orientation,
+            )
+        } else if (isRawPreview) {
             decodeLargestEmbeddedJpeg(
                 openStream = openStream,
-                maxDimensionPx = PREVIEW_HIGH_MAX_DIMENSION_PX,
+                maxDimensionPx = maxDimensionPx,
                 orientation = orientation,
             )
         } else {
             null
         })
             ?: decodeSampledBitmap(
-                maxDimensionPx = PREVIEW_HIGH_MAX_DIMENSION_PX,
+                maxDimensionPx = maxDimensionPx,
                 openStream = openStream,
                 orientation = orientation,
                 preferredConfig = Bitmap.Config.ARGB_8888,
@@ -1624,6 +1649,21 @@ private fun readUnsignedInt(bytes: ByteArray, offset: Int, littleEndian: Boolean
     }
 }
 
+private fun decodeFullBitmap(
+    openStream: () -> InputStream?,
+    orientation: Int,
+): Bitmap? {
+    return runCatching {
+        val decodeOptions = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = openStream()?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOptions)
+        }
+        applyExifOrientation(bitmap, orientation)
+    }.getOrNull()
+}
+
 private fun loadExifThumbnail(openStream: () -> InputStream?, orientation: Int): Bitmap? {
     return runCatching {
         openStream()?.use { stream ->
@@ -1728,6 +1768,22 @@ private fun decodeSampledBitmap(
     orientation: Int,
     preferredConfig: Bitmap.Config,
 ): Bitmap? {
+    return runCatching {
+        decodeSampledBitmapUnsafe(
+            maxDimensionPx = maxDimensionPx,
+            openStream = openStream,
+            orientation = orientation,
+            preferredConfig = preferredConfig,
+        )
+    }.getOrNull()
+}
+
+private fun decodeSampledBitmapUnsafe(
+    maxDimensionPx: Int,
+    openStream: () -> InputStream?,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
     val bounds = BitmapFactory.Options().apply {
         inJustDecodeBounds = true
     }
@@ -1822,8 +1878,15 @@ private fun isRawPreviewLocation(location: String?): Boolean {
         normalized.endsWith(".dng")
 }
 
+private fun isJpegPreviewLocation(location: String?): Boolean {
+    val normalized = location.orEmpty().substringBefore('?').lowercase()
+    return normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")
+}
+
 private const val PREVIEW_MAX_DIMENSION_PX = 512
-private const val PREVIEW_HIGH_MAX_DIMENSION_PX = 2400
+private const val PREVIEW_DETAIL_MAX_DIMENSION_PX = 2400
+private const val PREVIEW_FULLSCREEN_MAX_DIMENSION_PX = 4096
+private const val PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO = 3f / 2f
 private const val RAW_ORIENTATION_READ_LIMIT_BYTES = 512 * 1024
 private const val TIFF_HEADER_SCAN_LIMIT_BYTES = 4096
 private const val TIFF_HEADER_BYTES = 8
