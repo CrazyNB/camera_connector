@@ -4,7 +4,7 @@
 
 Evolve Camera Connector's storage model from a desktop-local file sink into a platform-aware import pipeline that works cleanly across desktop, Android SAF, Android MediaStore, future iOS storage, and NAS/headless targets.
 
-The main design move is to separate **receiver staging**, **final object publishing**, **project/session organization**, **state/log persistence**, and **query indexing**. The receiver should keep a simple, reliable write target, while platform-specific storage rules and user-facing organization live behind dedicated layers.
+The main design move is to separate **receiver staging**, **final object publishing**, **project organization**, **state/log persistence**, and **query indexing**. The receiver should keep a simple, reliable write target, while platform-specific storage rules and user-facing organization live behind dedicated layers.
 
 ## Context
 
@@ -29,7 +29,7 @@ Camera FTP/SFTP
   -> StagingStore
   -> PublishQueue
   -> ObjectStore
-  -> ProjectCatalog + ImportSession
+  -> ProjectCatalog
   -> TransferLog + AssetIndex
   -> Dashboard/UI
 ```
@@ -51,7 +51,7 @@ These product rules must not change:
 - Transfer rows expose display source, username, remote address, virtual display path, size, and failure text.
 - Receiver metadata lives outside the user-facing inbox.
 - Existing `transfer-log.jsonl` records remain readable.
-- The final storage location can stay flat while projects, sessions, and virtual paths provide user-facing organization.
+- The final storage location can stay flat while projects and virtual paths provide user-facing organization.
 
 ## Target Components
 
@@ -111,9 +111,11 @@ Owns user-facing shooting project organization.
 Responsibilities:
 
 - Create, update, archive, and list projects.
-- Track the active project used by new imports.
+- Track the active project used by every new import.
+- Require a selected project, or an explicit system project such as "Inbox", before receiving uploads.
+- Provide the required dashboard and inbox scope for viewing assets.
 - Provide project-level output preferences when needed.
-- Support manual reassignment of imports from one project to another.
+- Support manual reassignment of assets or groups from one project to another.
 - Keep project organization independent from physical storage paths.
 
 Project records:
@@ -132,42 +134,7 @@ Project
   default_strategy_profile_id
 ```
 
-Projects are long-lived user containers such as "2026-05 Wedding", "Studio Product Shoot", or "Weekend Street Walk". They should appear in the UI as the first-level organization above imports and asset groups.
-
-### `ImportSession`
-
-Owns one import window inside a project.
-
-Responsibilities:
-
-- Group transfers received during a specific receiver run or user-defined shooting window.
-- Capture source, protocol, camera account, and network context for that import.
-- Let users split or merge sessions after import.
-- Provide a stable scope for filters, progress, failures, and smart selection.
-
-Session records:
-
-```text
-ImportSession
-  session_id
-  project_id
-  name
-  source_identity
-  protocol
-  started_at_ms
-  ended_at_ms
-  status
-  asset_count
-  transfer_count
-  failure_count
-```
-
-Default behavior:
-
-- If the user chooses an active project before starting the receiver, new transfers attach to that project and the current session.
-- If no project is active, imports attach to an automatically created "Inbox" project or an "Unassigned" project.
-- Receiver restarts create new sessions unless the user explicitly continues the previous session.
-- Users can later move a session or selected assets into a different project.
+Projects are long-lived user containers such as "2026-05 Wedding", "Studio Product Shoot", or "Weekend Street Walk". They should appear in the UI as the first-level organization above imports and asset groups. Uploaded photos must not exist outside a project.
 
 ### `StateStore`
 
@@ -181,7 +148,7 @@ Responsibilities:
 - Persist publish queue state.
 - Prevent concurrent read-modify-write corruption.
 
-The append-only `transfer-log.jsonl` can stay as an audit output, but mutable state should move behind a single SQLite-backed state boundary. The first implementation should use serialized writes through `StateStore` so transfer, device, receiver, project, session, and publish queue mutations cannot corrupt each other.
+The append-only `transfer-log.jsonl` can stay as an audit output, but mutable state should move behind a single SQLite-backed state boundary. The first implementation should use serialized writes through `StateStore` so transfer, device, receiver, project, and publish queue mutations cannot corrupt each other.
 
 ### `AssetIndex`
 
@@ -191,16 +158,16 @@ Responsibilities:
 
 - Materialize completed transfer records into asset rows.
 - Support dashboard pagination, filtering, grouping, duplicates, and facet counts.
-- Support project and session filters as first-class query dimensions.
+- Support project filters as first-class query dimensions.
+- Require project-scoped dashboard and inbox queries for asset grids.
 - Avoid rebuilding every asset group from the full transfer log on each poll.
 - Keep `transfer-log.jsonl` as the audit trail.
 
-The foundation implementation should use SQLite instead of a JSON index. The storage refactor is the point where the project, session, publish queue, transfer, asset, and dashboard query models should become durable in one schema.
+The foundation implementation should use SQLite instead of a JSON index. The storage refactor is the point where the project, publish queue, transfer, asset, and dashboard query models should become durable in one schema.
 
 Core tables:
 
 - `projects`
-- `import_sessions`
 - `transfers`
 - `assets`
 - `asset_groups`
@@ -217,26 +184,24 @@ Later feature tables:
 
 ## Data Model Direction
 
-### Project and session identity
+### Project identity
 
 Every new transfer should resolve to:
 
 - a `project_id`
-- an `import_session_id`
 - a source identity
 - a final object location
 
-The project model is user-facing. The session model is operational. A project can contain many sessions; a session belongs to one project at a time; assets inherit project/session identity from their transfer records but can be moved by explicit user action.
+The project model is both the user-facing and operational organization boundary. Every uploaded asset, transfer, group, and publish queue item belongs to exactly one project. Assets inherit project identity from their transfer records and can move to another project only through an explicit user action.
 
 Assignment rules:
 
-- Use the active project selected in the UI when receiver starts.
-- Use the active session for that receiver run.
-- Create a new session when the receiver starts and no session is active.
-- Use "Unassigned" when there is no explicit project.
-- Keep old records without project/session readable by mapping them to "Legacy Import" or "Unassigned" during migration.
+- Use the active project selected in the UI when the receiver starts.
+- If no active project exists, either block receiver start until the user chooses or creates one, or use an explicit system project such as "Inbox" when the product chooses a low-friction default.
+- Keep old records without a project readable by mapping them to "Legacy Import" or "Unassigned" during migration.
+- Do not create unprojected assets.
 
-Project metadata should not replace original camera path. The original path stays diagnostic metadata. Project/session identity is product organization.
+Project metadata should not replace original camera path. The original path stays diagnostic metadata. Project identity is product organization.
 
 ### Transfer lifecycle
 
@@ -274,8 +239,7 @@ Target configuration should distinguish:
 - `state_dir`: metadata, logs, queue, and index.
 - `output_target`: platform final storage target.
 - `output_label`: user-facing display label.
-- `active_project_id`: project used for new sessions.
-- `active_session_id`: optional session to continue.
+- `active_project_id`: project used for new imports.
 
 Desktop can map `output_target` to a local folder. Android can map it to SAF or MediaStore configuration. The native FFI boundary should avoid passing SAF URI values as if they were filesystem paths.
 
@@ -289,12 +253,11 @@ Recommended flow:
 
 1. `CoreGatewayFactory` seeds app-private `staging_dir` and `state_dir`.
 2. Android persists selected SAF/MediaStore targets in `AndroidStorageGateway`.
-3. The user selects an active project or uses "Unassigned".
-4. Starting the receiver creates or continues an `ImportSession`.
-5. The Rust receiver writes staged files only.
-6. Android or a native platform adapter publishes staged files into the selected target.
-7. The final transfer record stores project, session, and platform `StoredObjectLocation`.
-8. Dashboard previews open `document_uri` or `media_uri` through Android APIs.
+3. The user selects an active project, or the app uses an explicit system project such as "Inbox".
+4. The Rust receiver writes staged files only.
+5. Android or a native platform adapter publishes staged files into the selected target.
+6. The final transfer record stores project identity and platform `StoredObjectLocation`.
+7. Dashboard previews open `document_uri` or `media_uri` through Android APIs.
 
 This keeps the Rust receiver portable while letting Android own platform storage permissions.
 
@@ -308,7 +271,7 @@ The optimized model must handle these cases:
 - Final object exists: reserve a duplicate filename before publish.
 - State write fails after final publish: preserve enough queue metadata to reconcile on next startup.
 - SAF permission is revoked: keep staged files and prompt user to reauthorize storage.
-- Active project or session is deleted/archived during receiver activity: keep the session durable and prevent destructive removal until receiver stops.
+- Active project is deleted/archived during receiver activity: prevent destructive removal until receiver stops, or require the user to move in-flight records to another project.
 - Legacy imports have no project id: expose them under "Legacy Import" or "Unassigned" and allow manual reassignment.
 
 No completed upload should disappear silently. If final publishing fails, the staged bytes remain recoverable until the user deletes them or a successful retry completes.
@@ -320,14 +283,14 @@ No completed upload should disappear silently. If final publishing fails, the st
 This milestone should land the durable architecture in one pass:
 
 - Introduce SQLite-backed `StateStore` and `AssetIndex`.
-- Add project and import session tables.
+- Add project tables and required project references on transfers, assets, asset groups, and publish queue rows.
 - Introduce `StagingStore`, `PublishQueue`, and `ObjectStore` abstractions.
 - Keep local folder publishing compatible with current desktop smoke tests.
 - Continue writing readable `transfer-log.jsonl` as an audit log.
 - Record `final_location` for all new records, including local paths.
-- Map legacy records without project/session into "Legacy Import" or "Unassigned".
+- Map legacy records without project identity into "Legacy Import" or "Unassigned".
 - Add cleanup for stale incomplete temp files.
-- Add project/session filters to dashboard queries.
+- Make dashboard and inbox queries project-scoped.
 
 ### Platform checkpoints
 
@@ -361,9 +324,10 @@ Unit tests:
 - New records using `final_location`.
 - Asset index grouping, paging, filters, and duplicate counts.
 - Project creation, archive, and reassignment.
-- Session creation per receiver run.
 - Legacy import migration into "Legacy Import" or "Unassigned".
-- Dashboard filtering by project and session.
+- Receiver start behavior when no active project exists.
+- Dashboard and inbox queries requiring a project id.
+- Moving assets or groups between projects.
 
 Integration tests:
 
@@ -372,8 +336,8 @@ Integration tests:
 - Publish failure preserves staged bytes.
 - Restart recovers queued staged uploads.
 - Dashboard reads from transfer log or index with identical results.
-- Project/session assignment survives receiver restart.
-- Moving a session between projects updates dashboard views without touching final files.
+- Project assignment survives receiver restart.
+- Moving assets between projects updates dashboard views without touching final files.
 
 Android tests:
 
@@ -402,9 +366,10 @@ The storage model optimization is accepted when:
 - Android can distinguish app-private staging from user-selected final output.
 - A completed upload whose final publish fails remains recoverable and retryable.
 - Users can create/select projects and start imports into the active project.
-- Receiver runs create import sessions that can be filtered, renamed, moved, or reviewed.
+- Every uploaded asset is associated with a project.
+- Dashboard and inbox asset views require a selected project.
 - Legacy imports remain visible under a safe fallback project.
-- Dashboard behavior remains familiar while adding project and session filters.
+- Dashboard behavior remains familiar while adding project filters.
 
 ## Non-Goals
 
@@ -414,3 +379,4 @@ The storage model optimization is accepted when:
 - Replacing current transfer-log audit history.
 - Implementing cloud sync.
 - Making physical final storage mirror project hierarchy mandatory.
+- Adding any extra grouping layer between project and asset before there is a proven product need.
