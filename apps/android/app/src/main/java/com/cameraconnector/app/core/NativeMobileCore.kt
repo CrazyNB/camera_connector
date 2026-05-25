@@ -40,13 +40,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     }
 
     fun saveReceiverSettings(settings: ReceiverSettings) {
-        val patch = JSONObject()
-            .put("protocol", settings.protocol.lowercase())
-            .put("bind_host", settings.host)
-            .put("ftp_port", settings.ftpPort)
-            .put("sftp_port", settings.sftpPort)
-            .put("output_dir", settings.outputLabel)
-        call { saveReceiverSettingsJson(handle, patch.toString()) }
+        call { saveReceiverSettingsJson(handle, receiverSettingsPatch(settings).toString()) }
     }
 
     fun saveAndroidReceiverPaths(outputDir: String, stateDir: String) {
@@ -122,6 +116,19 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         }
     }
 }
+
+internal fun receiverSettingsPatch(settings: ReceiverSettings): JSONObject =
+    receiverSettingsPatchFields(settings).entries.fold(JSONObject()) { patch, (key, value) ->
+        patch.put(key, value)
+    }
+
+internal fun receiverSettingsPatchFields(settings: ReceiverSettings): Map<String, Any> =
+    mapOf(
+        "protocol" to settings.protocol.lowercase(),
+        "bind_host" to settings.host,
+        "ftp_port" to settings.ftpPort,
+        "sftp_port" to settings.sftpPort,
+    )
 
 object NativeEnvelope {
     fun unwrap(raw: String): JSONObject {
