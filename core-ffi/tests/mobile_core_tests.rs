@@ -127,6 +127,64 @@ fn mobile_core_returns_dashboard_json() {
 }
 
 #[test]
+fn mobile_core_manages_projects_as_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let initial_active: Value = serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
+    assert!(initial_active.is_null());
+
+    let created_json = core
+        .create_project_json("Wedding Shoot".to_string())
+        .unwrap();
+    let created: Value = serde_json::from_str(&created_json).unwrap();
+    assert_eq!(created["name"], "Wedding Shoot");
+    assert_eq!(created["slug"], "wedding-shoot");
+    assert_eq!(created["status"], "Active");
+    let project_id = created["project_id"].as_str().unwrap().to_string();
+
+    let listed_json = core.list_projects_json().unwrap();
+    let listed: Value = serde_json::from_str(&listed_json).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["project_id"], project_id);
+
+    let active_json = core.set_active_project_json(project_id.clone()).unwrap();
+    let active: Value = serde_json::from_str(&active_json).unwrap();
+    assert_eq!(active["project_id"], project_id);
+
+    let active_again: Value = serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
+    assert_eq!(active_again["project_id"], project_id);
+}
+
+#[test]
+fn mobile_core_returns_project_dashboard_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    let created: Value = serde_json::from_str(
+        &core
+            .create_project_json("Catalog Session".to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    let project_id = created["project_id"].as_str().unwrap();
+
+    let dashboard_json = core
+        .project_dashboard_json(project_id.to_string(), 0, 50)
+        .unwrap();
+
+    let dashboard: Value = serde_json::from_str(&dashboard_json).unwrap();
+    assert_eq!(dashboard["assets"]["total_groups"], 0);
+    assert_eq!(dashboard["assets"]["limit"], 50);
+    assert_eq!(dashboard["transfers"]["total_count"], 0);
+    assert!(dashboard["paths"]["state_dir"]
+        .as_str()
+        .unwrap()
+        .contains("state"));
+}
+
+#[test]
 fn mobile_core_starts_and_stops_receiver_as_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

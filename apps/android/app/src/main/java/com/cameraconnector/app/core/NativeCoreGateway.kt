@@ -21,19 +21,45 @@ class NativeCoreGateway(
     private val receiverServiceController: ReceiverServiceController,
 ) : CoreGateway, AutoCloseable {
     private val gatewayScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val projects = MutableStateFlow(
+        ProjectState(projects = emptyList(), activeProjectId = null),
+    )
     private val dashboard = MutableStateFlow(emptyDashboard())
 
     init {
-        dashboard.value = loadDashboard()
+        projects.value = loadProjects()
+        dashboard.value = loadDashboard(projects.value.activeProjectId)
         pollDashboard()
     }
 
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
 
+    override fun observeProjects(): Flow<ProjectState> = projects.asStateFlow()
+
     suspend fun refresh() {
-        dashboard.value = withContext(Dispatchers.IO) {
-            loadDashboard()
+        val (nextProjects, nextDashboard) = withContext(Dispatchers.IO) {
+            val loadedProjects = loadProjects()
+            loadedProjects to loadDashboard(loadedProjects.activeProjectId)
         }
+        projects.value = nextProjects
+        dashboard.value = nextDashboard
+    }
+
+    override suspend fun createProject(name: String): ProjectSummary {
+        val project = withContext(Dispatchers.IO) {
+            val created = nativeCore.createProject(name).toProjectSummary()
+            nativeCore.setActiveProject(created.id)
+            created
+        }
+        refresh()
+        return project
+    }
+
+    override suspend fun setActiveProject(projectId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.setActiveProject(projectId)
+        }
+        refresh()
     }
 
     override suspend fun startReceiver() {
@@ -72,8 +98,30 @@ class NativeCoreGateway(
         nativeCore.close()
     }
 
-    private fun loadDashboard(): DashboardState =
-        mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = CONTINUOUS_INBOX_LIMIT))
+    private fun loadDashboard(
+        activeProjectId: String? = loadProjects().activeProjectId,
+    ): DashboardState {
+        val dashboardJson = activeProjectId
+            ?.let { nativeCore.projectDashboardJson(it, offset = 0, limit = CONTINUOUS_INBOX_LIMIT) }
+            ?: nativeCore.dashboardJson(stateDir, offset = 0, limit = CONTINUOUS_INBOX_LIMIT)
+        return mapDashboard(dashboardJson)
+    }
+
+    private fun loadProjects(): ProjectState {
+        val activeProjectId = nativeCore.activeProject()
+            ?.optString("project_id")
+            ?.takeIf { it.isNotBlank() }
+        val projectList = nativeCore.listProjects()
+        return ProjectState(
+            projects = buildList {
+                for (index in 0 until projectList.length()) {
+                    val item = projectList.optJSONObject(index) ?: continue
+                    add(item.toProjectSummary())
+                }
+            },
+            activeProjectId = activeProjectId,
+        )
+    }
 
     private suspend fun refreshAfterServiceCommand() {
         delay(250)
@@ -84,7 +132,9 @@ class NativeCoreGateway(
         gatewayScope.launch {
             while (isActive) {
                 runCatching {
-                    dashboard.value = loadDashboard()
+                    val loadedProjects = loadProjects()
+                    projects.value = loadedProjects
+                    dashboard.value = loadDashboard(loadedProjects.activeProjectId)
                 }
                 delay(DASHBOARD_POLL_INTERVAL_MS)
             }
@@ -332,6 +382,16 @@ class NativeCoreGateway(
             accounts = emptyList(),
             inbox = emptyList(),
             transfers = emptyList(),
+        )
+
+    private fun JSONObject.toProjectSummary(): ProjectSummary =
+        ProjectSummary(
+            id = optString("project_id"),
+            name = optString("name"),
+            slug = optString("slug"),
+            status = optString("status"),
+            createdAtMs = optLong("created_at_ms"),
+            updatedAtMs = optLong("updated_at_ms"),
         )
 
     private companion object {

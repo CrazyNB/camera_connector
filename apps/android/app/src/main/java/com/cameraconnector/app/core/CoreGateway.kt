@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 interface CoreGateway {
     fun observeDashboard(): Flow<DashboardState>
+    fun observeProjects(): Flow<ProjectState>
+    suspend fun createProject(name: String): ProjectSummary
+    suspend fun setActiveProject(projectId: String)
     suspend fun startReceiver()
     suspend fun stopReceiver()
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
@@ -18,6 +21,20 @@ data class DashboardState(
     val accounts: List<DeviceAccount>,
     val inbox: List<InboxAsset>,
     val transfers: List<TransferRow>,
+)
+
+data class ProjectState(
+    val projects: List<ProjectSummary>,
+    val activeProjectId: String?,
+)
+
+data class ProjectSummary(
+    val id: String,
+    val name: String,
+    val slug: String,
+    val status: String,
+    val createdAtMs: Long,
+    val updatedAtMs: Long,
 )
 
 data class ReceiverState(
@@ -76,6 +93,22 @@ data class TransferRow(
 )
 
 class PreviewCoreGateway : CoreGateway {
+    private val projects = MutableStateFlow(
+        ProjectState(
+            projects = listOf(
+                ProjectSummary(
+                    id = "project-preview",
+                    name = "Preview Project",
+                    slug = "preview-project",
+                    status = "Active",
+                    createdAtMs = 0,
+                    updatedAtMs = 0,
+                ),
+            ),
+            activeProjectId = "project-preview",
+        ),
+    )
+
     private val dashboard = MutableStateFlow(
         DashboardState(
             receiver = ReceiverState(
@@ -108,6 +141,31 @@ class PreviewCoreGateway : CoreGateway {
     )
 
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
+
+    override fun observeProjects(): Flow<ProjectState> = projects.asStateFlow()
+
+    override suspend fun createProject(name: String): ProjectSummary {
+        val project = ProjectSummary(
+            id = "project-preview-${projects.value.projects.size + 1}",
+            name = name,
+            slug = name.lowercase()
+                .replace(Regex("[^a-z0-9]+"), "-")
+                .trim('-')
+                .ifBlank { "project" },
+            status = "Active",
+            createdAtMs = 0,
+            updatedAtMs = 0,
+        )
+        projects.value = ProjectState(
+            projects = listOf(project) + projects.value.projects,
+            activeProjectId = project.id,
+        )
+        return project
+    }
+
+    override suspend fun setActiveProject(projectId: String) {
+        projects.value = projects.value.copy(activeProjectId = projectId)
+    }
 
     override suspend fun startReceiver() {
         dashboard.value = dashboard.value.copy(

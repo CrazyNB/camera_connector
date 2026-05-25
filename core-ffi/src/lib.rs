@@ -107,6 +107,46 @@ impl MobileCore {
         Ok(serde_json::to_string(&dashboard)?)
     }
 
+    pub fn create_project_json(&self, name: String) -> MobileCoreResult<String> {
+        let project = self.service.create_project(name)?;
+        Ok(serde_json::to_string(&project)?)
+    }
+
+    pub fn list_projects_json(&self) -> MobileCoreResult<String> {
+        let projects = self.service.list_projects()?;
+        Ok(serde_json::to_string(&projects)?)
+    }
+
+    pub fn set_active_project_json(&self, project_id: String) -> MobileCoreResult<String> {
+        self.service.set_active_project(&project_id)?;
+        let project = self
+            .service
+            .active_project()?
+            .ok_or_else(|| ImporterError::internal("active project was not found after update"))?;
+        Ok(serde_json::to_string(&project)?)
+    }
+
+    pub fn active_project_json(&self) -> MobileCoreResult<String> {
+        let project = self.service.active_project()?;
+        Ok(serde_json::to_string(&project)?)
+    }
+
+    pub fn project_dashboard_json(
+        &self,
+        project_id: String,
+        offset: u32,
+        limit: u32,
+    ) -> MobileCoreResult<String> {
+        let dashboard: CameraConnectorDashboard = self.service.project_dashboard(
+            &project_id,
+            AssetGroupQuery::default(),
+            offset as usize,
+            limit as usize,
+            false,
+        )?;
+        Ok(serde_json::to_string(&dashboard)?)
+    }
+
     pub fn save_receiver_settings_json(
         &self,
         patch: MobileReceiverSettingsPatch,
@@ -261,6 +301,82 @@ pub unsafe extern "C" fn camera_connector_mobile_core_dashboard_json(
     ffi_response(|| {
         let dashboard =
             core_ref(core)?.dashboard_json(optional_c_string(state_dir)?, offset, limit)?;
+        parse_json_value(&dashboard)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `name` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_create_project_json(
+    core: *const MobileCore,
+    name: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let name = required_c_string(name, "name")?;
+        let project = core_ref(core)?.create_project_json(name)?;
+        parse_json_value(&project)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_list_projects_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let projects = core_ref(core)?.list_projects_json()?;
+        parse_json_value(&projects)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_set_active_project_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let project = core_ref(core)?.set_active_project_json(project_id)?;
+        parse_json_value(&project)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_active_project_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project = core_ref(core)?.active_project_json()?;
+        parse_json_value(&project)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_project_dashboard_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+    offset: u32,
+    limit: u32,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let dashboard = core_ref(core)?.project_dashboard_json(project_id, offset, limit)?;
         parse_json_value(&dashboard)
     })
 }
@@ -453,6 +569,93 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_dashbo
         java_response(env, || {
             let dashboard = mobile_core_from_handle(handle)?.dashboard_json(
                 state_dir?,
+                offset.max(0) as u32,
+                limit.max(0) as u32,
+            )?;
+            parse_json_value(&dashboard)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_createProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    name: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let name = required_java_string(env, name, "name");
+        java_response(env, || {
+            let project = mobile_core_from_handle(handle)?.create_project_json(name?)?;
+            parse_json_value(&project)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_listProjectsJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let projects = mobile_core_from_handle(handle)?.list_projects_json()?;
+            parse_json_value(&projects)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_setActiveProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        java_response(env, || {
+            let project = mobile_core_from_handle(handle)?.set_active_project_json(project_id?)?;
+            parse_json_value(&project)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_activeProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let project = mobile_core_from_handle(handle)?.active_project_json()?;
+            parse_json_value(&project)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projectDashboardJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        java_response(env, || {
+            let dashboard = mobile_core_from_handle(handle)?.project_dashboard_json(
+                project_id?,
                 offset.max(0) as u32,
                 limit.max(0) as u32,
             )?;

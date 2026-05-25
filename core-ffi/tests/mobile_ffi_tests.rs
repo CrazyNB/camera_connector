@@ -3,11 +3,15 @@ use std::ffi::{CStr, CString};
 use serde_json::Value;
 
 use camera_connector_ffi::{
-    camera_connector_mobile_core_create, camera_connector_mobile_core_dashboard_json,
+    camera_connector_mobile_core_active_project_json, camera_connector_mobile_core_create,
+    camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_dashboard_json,
     camera_connector_mobile_core_destroy, camera_connector_mobile_core_free_string,
+    camera_connector_mobile_core_list_projects_json,
+    camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
+    camera_connector_mobile_core_set_active_project_json,
     camera_connector_mobile_core_start_receiver_json,
     camera_connector_mobile_core_stop_receiver_json,
 };
@@ -149,6 +153,71 @@ fn ffi_returns_dashboard_json_envelope() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["value"]["assets"]["limit"], 25);
     assert!(value["value"]["paths"]["config_path"].is_string());
+}
+
+#[test]
+fn ffi_manages_projects_with_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let name = CString::new("Commercial Shoot").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let created = take_ffi_string(unsafe {
+        camera_connector_mobile_core_create_project_json(core, name.as_ptr())
+    });
+    let created: Value = serde_json::from_str(&created).unwrap();
+    assert_eq!(created["ok"], true);
+    assert_eq!(created["value"]["name"], "Commercial Shoot");
+    let project_id = CString::new(created["value"]["project_id"].as_str().unwrap()).unwrap();
+
+    let listed = take_ffi_string(unsafe { camera_connector_mobile_core_list_projects_json(core) });
+    let listed: Value = serde_json::from_str(&listed).unwrap();
+    assert_eq!(listed["ok"], true);
+    assert_eq!(listed["value"].as_array().unwrap().len(), 1);
+
+    let active = take_ffi_string(unsafe {
+        camera_connector_mobile_core_set_active_project_json(core, project_id.as_ptr())
+    });
+    let active: Value = serde_json::from_str(&active).unwrap();
+    assert_eq!(active["ok"], true);
+    assert_eq!(active["value"]["project_id"], project_id.to_str().unwrap());
+
+    let active_again =
+        take_ffi_string(unsafe { camera_connector_mobile_core_active_project_json(core) });
+    let active_again: Value = serde_json::from_str(&active_again).unwrap();
+    assert_eq!(
+        active_again["value"]["project_id"],
+        project_id.to_str().unwrap()
+    );
+
+    unsafe { camera_connector_mobile_core_destroy(core) };
+}
+
+#[test]
+fn ffi_returns_project_dashboard_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let name = CString::new("Editorial Shoot").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let created = take_ffi_string(unsafe {
+        camera_connector_mobile_core_create_project_json(core, name.as_ptr())
+    });
+    let created: Value = serde_json::from_str(&created).unwrap();
+    let project_id = CString::new(created["value"]["project_id"].as_str().unwrap()).unwrap();
+
+    let dashboard = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_dashboard_json(core, project_id.as_ptr(), 0, 25)
+    });
+    let dashboard: Value = serde_json::from_str(&dashboard).unwrap();
+    assert_eq!(dashboard["ok"], true);
+    assert_eq!(dashboard["value"]["assets"]["limit"], 25);
+    assert_eq!(dashboard["value"]["assets"]["total_groups"], 0);
+    assert_eq!(dashboard["value"]["transfers"]["total_count"], 0);
+
+    unsafe { camera_connector_mobile_core_destroy(core) };
 }
 
 #[test]

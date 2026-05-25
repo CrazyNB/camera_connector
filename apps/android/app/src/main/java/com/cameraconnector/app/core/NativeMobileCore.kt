@@ -1,5 +1,6 @@
 package com.cameraconnector.app.core
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 class NativeMobileCore(configPath: String?) : AutoCloseable {
@@ -7,6 +8,27 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
 
     fun dashboardJson(stateDir: String?, offset: Int, limit: Int): JSONObject =
         call { dashboardJson(handle, stateDir, offset, limit) }
+
+    fun projectDashboardJson(projectId: String, offset: Int, limit: Int): JSONObject =
+        call { projectDashboardJson(handle, projectId, offset, limit) }
+
+    fun createProject(name: String): JSONObject =
+        call { createProjectJson(handle, name) }
+
+    fun listProjects(): JSONArray =
+        call { listProjectsJson(handle) }.optJSONArray("value") ?: JSONArray()
+
+    fun setActiveProject(projectId: String): JSONObject =
+        call { setActiveProjectJson(handle, projectId) }
+
+    fun activeProject(): JSONObject? {
+        val value = call { activeProjectJson(handle) }
+        return if (value.has("value") && value.isNull("value")) {
+            null
+        } else {
+            value
+        }
+    }
 
     fun saveReceiverSettings(settings: ReceiverSettings) {
         val patch = JSONObject()
@@ -66,6 +88,11 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     private external fun create(configPath: String?): Long
     private external fun destroy(handle: Long)
     private external fun dashboardJson(handle: Long, stateDir: String?, offset: Int, limit: Int): String
+    private external fun projectDashboardJson(handle: Long, projectId: String, offset: Int, limit: Int): String
+    private external fun createProjectJson(handle: Long, name: String): String
+    private external fun listProjectsJson(handle: Long): String
+    private external fun setActiveProjectJson(handle: Long, projectId: String): String
+    private external fun activeProjectJson(handle: Long): String
     private external fun saveReceiverSettingsJson(handle: Long, patchJson: String): String
     private external fun saveDeviceAccountJson(
         handle: Long,
