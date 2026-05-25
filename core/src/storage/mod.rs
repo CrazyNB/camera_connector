@@ -16,6 +16,7 @@ pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore,
 
 const DB_FILENAME: &str = "camera-connector.sqlite3";
 const ACTIVE_PROJECT_KEY: &str = "active_project_id";
+const SYSTEM_INBOX_PROJECT_ID: &str = "project-inbox";
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -185,7 +186,7 @@ impl SqliteStore {
                             archived_at_ms, default_output_target_id, default_strategy_profile_id
                      FROM projects
                      WHERE project_id = ?1",
-                    params!["project-inbox"],
+                    params![SYSTEM_INBOX_PROJECT_ID],
                     project_from_row,
                 )
                 .optional()?;
@@ -197,9 +198,9 @@ impl SqliteStore {
                 "INSERT INTO projects (
                     project_id, name, slug, status, created_at_ms, updated_at_ms,
                     archived_at_ms, default_output_target_id, default_strategy_profile_id
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
-                    "project-inbox",
+                    SYSTEM_INBOX_PROJECT_ID,
                     "Inbox",
                     "inbox",
                     ProjectStatus::Active.as_str(),
@@ -215,7 +216,7 @@ impl SqliteStore {
                         archived_at_ms, default_output_target_id, default_strategy_profile_id
                  FROM projects
                  WHERE project_id = ?1",
-                params!["project-inbox"],
+                params![SYSTEM_INBOX_PROJECT_ID],
                 project_from_row,
             )
         })
@@ -235,6 +236,11 @@ impl SqliteStore {
     }
 
     pub fn archive_project(&self, project_id: &str) -> Result<Project> {
+        if project_id == SYSTEM_INBOX_PROJECT_ID {
+            return Err(ImporterError::internal(
+                "system inbox project cannot be archived",
+            ));
+        }
         self.with_connection(|connection| {
             let now = current_time_ms();
             ensure_project_exists(connection, project_id)?;

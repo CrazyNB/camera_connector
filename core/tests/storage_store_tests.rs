@@ -70,6 +70,42 @@ fn sqlite_store_archives_projects_and_clears_active_selection() {
 }
 
 #[test]
+fn sqlite_store_rejects_archiving_system_inbox_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let inbox = store
+        .ensure_inbox_project()
+        .expect("inbox project should exist");
+    store
+        .set_active_project(&inbox.project_id)
+        .expect("inbox should become active");
+
+    let result = store.archive_project(&inbox.project_id);
+
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .expect("error should exist")
+        .to_string()
+        .contains("system inbox project cannot be archived"));
+    assert_eq!(
+        store
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should remain")
+            .project_id,
+        "project-inbox"
+    );
+    assert_eq!(
+        store
+            .ensure_inbox_project()
+            .expect("inbox project should load")
+            .status,
+        ProjectStatus::Active
+    );
+}
+
+#[test]
 fn sqlite_store_rejects_transfer_without_existing_project() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");

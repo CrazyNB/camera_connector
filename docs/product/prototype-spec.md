@@ -68,7 +68,7 @@ Content:
 - Project list with active and archived states.
 - Create project.
 - Select active project before starting or inspecting imports.
-- System Inbox project for low-friction imports when no explicit project has been chosen.
+- System Inbox project for low-friction imports when no explicit project has been chosen; this fallback project cannot be archived.
 
 ### Receiver Settings
 
