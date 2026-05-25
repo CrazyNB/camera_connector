@@ -21,6 +21,12 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     fun setActiveProject(projectId: String): JSONObject =
         call { setActiveProjectJson(handle, projectId) }
 
+    fun archiveProject(projectId: String): JSONObject =
+        call { archiveProjectJson(handle, projectId) }
+
+    fun restoreProject(projectId: String): JSONObject =
+        call { restoreProjectJson(handle, projectId) }
+
     fun ensureActiveProject(): JSONObject =
         call { ensureActiveProjectJson(handle) }
 
@@ -95,6 +101,8 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String
+    private external fun archiveProjectJson(handle: Long, projectId: String): String
+    private external fun restoreProjectJson(handle: Long, projectId: String): String
     private external fun activeProjectJson(handle: Long): String
     private external fun ensureActiveProjectJson(handle: Long): String
     private external fun saveReceiverSettingsJson(handle: Long, patchJson: String): String

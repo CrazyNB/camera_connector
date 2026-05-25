@@ -3,12 +3,14 @@ use std::ffi::{CStr, CString};
 use serde_json::Value;
 
 use camera_connector_ffi::{
-    camera_connector_mobile_core_active_project_json, camera_connector_mobile_core_create,
+    camera_connector_mobile_core_active_project_json,
+    camera_connector_mobile_core_archive_project_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_dashboard_json,
     camera_connector_mobile_core_destroy, camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_remove_device_account_json,
+    camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
     camera_connector_mobile_core_set_active_project_json,
@@ -190,6 +192,36 @@ fn ffi_manages_projects_with_envelopes() {
         active_again["value"]["project_id"],
         project_id.to_str().unwrap()
     );
+
+    let archived = take_ffi_string(unsafe {
+        camera_connector_mobile_core_archive_project_json(core, project_id.as_ptr())
+    });
+    let archived: Value = serde_json::from_str(&archived).unwrap();
+    assert_eq!(archived["ok"], true);
+    assert_eq!(archived["value"]["status"], "Archived");
+
+    let active_after_archive =
+        take_ffi_string(unsafe { camera_connector_mobile_core_active_project_json(core) });
+    let active_after_archive: Value = serde_json::from_str(&active_after_archive).unwrap();
+    assert_eq!(active_after_archive["ok"], true);
+    assert!(active_after_archive["value"].is_null());
+
+    let select_archived = take_ffi_string(unsafe {
+        camera_connector_mobile_core_set_active_project_json(core, project_id.as_ptr())
+    });
+    let select_archived: Value = serde_json::from_str(&select_archived).unwrap();
+    assert_eq!(select_archived["ok"], false);
+    assert!(select_archived["error"]
+        .as_str()
+        .unwrap()
+        .contains("project archived"));
+
+    let restored = take_ffi_string(unsafe {
+        camera_connector_mobile_core_restore_project_json(core, project_id.as_ptr())
+    });
+    let restored: Value = serde_json::from_str(&restored).unwrap();
+    assert_eq!(restored["ok"], true);
+    assert_eq!(restored["value"]["status"], "Active");
 
     unsafe { camera_connector_mobile_core_destroy(core) };
 }

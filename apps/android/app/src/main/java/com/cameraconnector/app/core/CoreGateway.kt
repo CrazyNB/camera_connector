@@ -9,6 +9,8 @@ interface CoreGateway {
     fun observeProjects(): Flow<ProjectState>
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
+    suspend fun archiveProject(projectId: String)
+    suspend fun restoreProject(projectId: String)
     suspend fun startReceiver()
     suspend fun stopReceiver()
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
@@ -165,6 +167,25 @@ class PreviewCoreGateway : CoreGateway {
 
     override suspend fun setActiveProject(projectId: String) {
         projects.value = projects.value.copy(activeProjectId = projectId)
+    }
+
+    override suspend fun archiveProject(projectId: String) {
+        val nextProjects = projects.value.projects.map { project ->
+            if (project.id == projectId) project.copy(status = "Archived") else project
+        }
+        val nextActiveProjectId = projects.value.activeProjectId.takeUnless { it == projectId }
+            ?: nextProjects.firstOrNull { it.status == "Active" }?.id
+        projects.value = ProjectState(
+            projects = nextProjects,
+            activeProjectId = nextActiveProjectId,
+        )
+    }
+
+    override suspend fun restoreProject(projectId: String) {
+        val nextProjects = projects.value.projects.map { project ->
+            if (project.id == projectId) project.copy(status = "Active") else project
+        }
+        projects.value = projects.value.copy(projects = nextProjects)
     }
 
     override suspend fun startReceiver() {

@@ -62,6 +62,20 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun archiveProject(projectId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.archiveProject(projectId)
+        }
+        refresh()
+    }
+
+    override suspend fun restoreProject(projectId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.restoreProject(projectId)
+        }
+        refresh()
+    }
+
     override suspend fun startReceiver() {
         receiverServiceController.startReceiver()
         refreshAfterServiceCommand()

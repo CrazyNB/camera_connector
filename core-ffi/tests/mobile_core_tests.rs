@@ -155,6 +155,23 @@ fn mobile_core_manages_projects_as_json() {
 
     let active_again: Value = serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
     assert_eq!(active_again["project_id"], project_id);
+
+    let archived_json = core.archive_project_json(project_id.clone()).unwrap();
+    let archived: Value = serde_json::from_str(&archived_json).unwrap();
+    assert_eq!(archived["project_id"], project_id);
+    assert_eq!(archived["status"], "Archived");
+    let active_after_archive: Value =
+        serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
+    assert!(active_after_archive.is_null());
+    assert!(core.set_active_project_json(project_id.clone()).is_err());
+
+    let restored_json = core.restore_project_json(project_id.clone()).unwrap();
+    let restored: Value = serde_json::from_str(&restored_json).unwrap();
+    assert_eq!(restored["project_id"], project_id);
+    assert_eq!(restored["status"], "Active");
+    let active_after_restore: Value =
+        serde_json::from_str(&core.set_active_project_json(project_id.clone()).unwrap()).unwrap();
+    assert_eq!(active_after_restore["project_id"], project_id);
 }
 
 #[test]
