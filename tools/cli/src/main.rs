@@ -2,13 +2,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+#[cfg(test)]
+use camera_connector_core::ReceiverSettingsConfig;
 use camera_connector_core::{
     append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsConfig,
-    ReceiverSettingsUpdate, Result, StoredObjectLocation, TransferQuery, TransferRecord,
-    TransferRecordView, TransferStatus,
+    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
+    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
+    TransferStatus,
 };
 use clap::{Parser, Subcommand};
 

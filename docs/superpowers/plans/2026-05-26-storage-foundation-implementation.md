@@ -19,11 +19,11 @@
 - Modify: `core/src/lib.rs`
 - Test: `core/tests/storage_store_tests.rs`
 
-- [ ] Add `rusqlite` as a workspace dependency with the bundled SQLite feature.
-- [ ] Write failing tests for schema creation, required project identity, project-scoped asset grouping, duplicate preservation, and publish queue retry state.
-- [ ] Implement `SqliteStore` with schema initialization and models for `Project`, `StoredTransfer`, `StoredAsset`, `StoredAssetGroup`, and `PublishQueueItem`.
-- [ ] Run `cargo test -p camera_connector_core storage_store_tests`.
-- [ ] Commit with message `Add SQLite storage foundation`.
+- [x] Add `rusqlite` as a workspace dependency with the bundled SQLite feature.
+- [x] Write failing tests for schema creation, required project identity, project-scoped asset grouping, duplicate preservation, and publish queue retry state.
+- [x] Implement `SqliteStore` with schema initialization and models for `Project`, `StoredTransfer`, `StoredAsset`, `StoredAssetGroup`, and `PublishQueueItem`.
+- [x] Run `cargo test -p camera_connector_core storage_store_tests`.
+- [x] Commit with message `Add SQLite storage foundation`.
 
 ### Task 2: Project-Aware Service Queries
 
@@ -32,11 +32,11 @@
 - Modify: `core/src/lib.rs`
 - Test: `core/tests/storage_service_tests.rs`
 
-- [ ] Write failing tests showing dashboard asset queries require a project id for SQLite-backed project views.
-- [ ] Add service methods to create/list/archive projects, resolve the active project, and query project asset groups from SQLite.
-- [ ] Keep existing log-backed methods working for old smoke tests during the transition.
-- [ ] Run `cargo test -p camera_connector_core storage_service_tests service_tests`.
-- [ ] Commit with message `Add project scoped storage service`.
+- [x] Write failing tests showing dashboard asset queries require a project id for SQLite-backed project views.
+- [x] Add service methods to create/list/archive projects, resolve the active project, and query project asset groups from SQLite.
+- [x] Keep existing log-backed methods working for old smoke tests during the transition.
+- [x] Run `cargo test -p camera_connector_core storage_service_tests service_tests`.
+- [x] Commit with message `Add project scoped storage service`.
 
 ### Task 3: Receiver Dual-Write
 
@@ -47,11 +47,11 @@
 - Test: `core/tests/ftp_push_tests.rs`
 - Test: `core/tests/sftp_push_tests.rs`
 
-- [ ] Write failing tests proving FTP/SFTP uploads create SQLite transfer, asset, and group rows under the active project.
-- [ ] Add `active_project_id` to receiver config and require it for storage-indexed receiver writes, defaulting tests to an explicit Inbox project.
-- [ ] After a completed transfer is appended to `transfer-log.jsonl`, also record it in `SqliteStore`.
-- [ ] Run `cargo test -p camera_connector_core ftp_push_tests sftp_push_tests storage_store_tests`.
-- [ ] Commit with message `Index receiver uploads in SQLite`.
+- [x] Write failing tests proving FTP/SFTP uploads create SQLite transfer, asset, and group rows under the active project.
+- [x] Add `active_project_id` to receiver config and require it for storage-indexed receiver writes, defaulting tests to an explicit Inbox project.
+- [x] After a completed transfer is appended to `transfer-log.jsonl`, also record it in `SqliteStore`.
+- [x] Run `cargo test -p camera_connector_core ftp_push_tests sftp_push_tests storage_store_tests`.
+- [x] Commit with message `Index receiver uploads in SQLite`.
 
 ### Task 4: Staging And Local Publishing
 
@@ -62,11 +62,11 @@
 - Test: `core/tests/storage_pipeline_tests.rs`
 - Test: `core/tests/receive_sink_tests.rs`
 
-- [ ] Write failing tests for local staging temp writes, publish queue enqueue, local object publish, retry after publish failure, and stale staging cleanup.
-- [ ] Implement `LocalStagingStore`, `LocalFolderObjectStore`, and `StoragePipeline` for local publish.
-- [ ] Update FTP/SFTP to write staged files and publish through the pipeline while preserving final local-folder behavior.
-- [ ] Run `cargo test -p camera_connector_core storage_pipeline_tests receive_sink_tests ftp_push_tests sftp_push_tests`.
-- [ ] Commit with message `Add staging and local publish pipeline`.
+- [x] Write failing tests for local staging temp writes, publish queue enqueue, local object publish, retry after publish failure, and stale staging cleanup.
+- [x] Implement `LocalStagingStore`, `LocalFolderObjectStore`, and `StoragePipeline` for local publish.
+- [x] Update FTP/SFTP to write staged files and publish through the pipeline while preserving final local-folder behavior.
+- [x] Run `cargo test -p camera_connector_core storage_pipeline_tests receive_sink_tests ftp_push_tests sftp_push_tests`.
+- [x] Commit with message `Add staging and local publish pipeline`.
 
 ### Task 5: Full Verification And Docs
 
@@ -75,7 +75,7 @@
 - Modify: `docs/product/prototype-spec.md`
 - Modify: `docs/superpowers/specs/2026-05-26-storage-model-optimization-design.md`
 
-- [ ] Update docs to describe project-scoped SQLite-backed storage and local staging/publish behavior.
-- [ ] Run `cargo test`.
-- [ ] Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1`.
-- [ ] Commit with message `Document storage foundation`.
+- [x] Update docs to describe project-scoped SQLite-backed storage and local staging/publish behavior.
+- [x] Run `cargo test`.
+- [x] Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1`.
+- [x] Commit with message `Document storage foundation`.

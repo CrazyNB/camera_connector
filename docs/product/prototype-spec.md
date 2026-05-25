@@ -36,9 +36,9 @@ flowchart TD
   C --> F["Show camera-facing host, port, protocol, username"]
   F --> G["User configures camera FTP/SFTP profile"]
   G --> H["Camera uploads files"]
-  H --> I["Receiver publishes completed files into flat inbox"]
-  H --> J["Transfer log stores source, account, original path, failures"]
-  I --> K["Inbox groups RAW/JPEG/video assets"]
+  H --> I["Receiver stages bytes, then publishes completed files"]
+  H --> J["SQLite stores project, transfer, asset, group, and publish state"]
+  I --> K["Project inbox groups RAW/JPEG/video assets"]
   J --> L["Transfers tab shows completed and failed records"]
 ```
 
@@ -56,7 +56,19 @@ Content:
 - Current account/device state: account username, device name, online state, active connection count, latest IP/port.
 - Recent failures with error text and virtual display path.
 - Config/state/output path summary.
+- Active project summary.
 - Entry points to Receiver Settings and Device Accounts.
+
+### Projects
+
+Purpose: choose the shooting project used by new imports and dashboard views.
+
+Content:
+
+- Project list with active and archived states.
+- Create project.
+- Select active project before starting or inspecting imports.
+- System Inbox project for low-friction imports when no explicit project has been chosen.
 
 ### Receiver Settings
 
@@ -96,7 +108,7 @@ Purpose: show successfully published camera files.
 
 Content:
 
-- Flat inbox assets backed by transfer log or storage scan.
+- Project-scoped inbox assets backed by SQLite.
 - RAW+JPEG grouping.
 - Video groups.
 - Format filters: All, JPG, RAW, Video.
@@ -127,9 +139,9 @@ The prototype maps to `CameraConnectorDashboard`:
 - `devices` -> Device Accounts connection records.
 - `transfers` -> Overview transfer health metrics.
 - `recent_failures` -> Overview recent failures and Transfers failure rows.
-- `assets` -> Inbox asset groups and format/source filters.
+- `assets` -> Project-scoped inbox asset groups and format/source filters.
 
-Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
+Project actions map to `CameraConnectorService::create_project`, `set_active_project`, `active_project`, and `project_dashboard`. Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
 
 ## 6. Visual Direction
 

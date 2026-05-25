@@ -268,7 +268,6 @@ impl SqliteStore {
                     project_from_row,
                 )
                 .optional()
-                .map_err(Into::into)
         })
     }
 

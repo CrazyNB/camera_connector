@@ -38,7 +38,7 @@ Minimum FTP commands supported by the core receiver:
 - `STOR`
 - `QUIT`
 
-`STOR` writes bytes to a temporary file first, then atomically publishes the final file. The transfer record is appended after the completed file is published.
+`STOR` writes bytes to the app state staging area first, then publishes the completed staged file into the final object store. The transfer record and SQLite asset index are updated after the completed file is published.
 
 ## SFTP Push
 
@@ -53,7 +53,7 @@ Implemented behavior:
 - Same transfer log fields as FTP, with `protocol` set to `sftp`.
 - Same connected-device metadata as FTP, including latest IP, login username, account device name, online state, and disconnect state.
 - Same runtime status model as FTP.
-- Streaming large uploads directly to temporary files before atomic publish.
+- Streaming large uploads to app state staging files before final object publish.
 
 Not yet implemented:
 
@@ -64,13 +64,14 @@ Not yet implemented:
 
 - System config, receiver state/logs, and uploaded assets are separate:
   - Config: account and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
-  - State/log directory: `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key`.
-  - Output/inbox location: completed camera files and in-progress `.tmp` uploads only.
+  - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, `sftp-host-key`, and the `staging` directory.
+  - Output/inbox location: completed camera files only.
 - The core records final save targets as `StoredObjectLocation`, not only as local filesystem paths:
   - Desktop: `local_path`.
   - Android: `media_uri` or `document_uri` through MediaStore/SAF.
   - iOS: `document_uri` or `photo_asset` through Files/Photos APIs.
-- Receiver implementations write through a `ReceiveStorage` backend. The current desktop backend is `LocalFileSink`; mobile shells should provide platform storage adapters while preserving the same temp-write then publish contract.
+- Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then publish contract.
+- Every completed upload is indexed under a project in SQLite. When no explicit active project is provided by the app shell, the core uses the system `Inbox` project.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
 - Use only the final remote filename for local storage.
@@ -84,21 +85,20 @@ Not yet implemented:
 
 ## Transfer Log
 
-The receiver writes `transfer-log.jsonl` in the state/log directory. Each completed transfer records:
+The receiver writes `transfer-log.jsonl` in the state/log directory as an audit stream. SQLite is the durable state and dashboard index. Each completed transfer records:
 
 - `transfer_id`: stable enough to reference a single transfer.
 - `protocol`: FTP, SFTP, or manual validation source.
 - `original_path`: remote path sent by the camera, such as `DCIM/100CANON/IMG_1001.CR3`.
 - `final_filename`: flattened result name.
 - `final_location`: platform save target, such as `local_path`, `media_uri`, `document_uri`, or `photo_asset`.
-- `final_path`: desktop local path when available; mobile records may omit it.
 - `size_bytes`.
 - `username`: authenticated push-login username when available.
 - `remote_addr`: camera IP when available.
 - `source_name`: optional user-set camera/source label.
 - `started_at_ms` and `completed_at_ms`.
 
-The product uses this log for tag-style grouping and filters. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
+The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, and `publish_queue` tables for project-scoped dashboard queries. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 For display, the UI builds a virtual path from metadata:
 
@@ -136,7 +136,7 @@ The receiver writes `receiver-status.json` in the state/log directory. It record
 - `account_count`.
 - `message`: failure or diagnostic text.
 
-The status file is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore legacy metadata names defensively.
+The status file is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore known metadata filenames defensively.
 
 Status readers should treat a stale `Running` file as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
 

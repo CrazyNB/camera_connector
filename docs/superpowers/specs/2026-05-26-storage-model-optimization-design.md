@@ -18,7 +18,7 @@ The current core already has the right product rules:
 - Android can persist a selected SAF directory label, but native smoke imports still write to app-private storage.
 - The current flat inbox is good for one shoot, but multiple shooting projects become hard to distinguish without a first-class project model.
 
-The gap is that `LocalFileSink` is still the real write path. It assumes final storage behaves like a local filesystem with seek, rename, path-based existence checks, and direct scanning. Those assumptions do not hold uniformly for SAF, MediaStore, Photos, or remote object stores.
+The original gap was that `LocalFileSink` acted as the real write path. That assumed final storage behaved like a local filesystem with seek, rename, path-based existence checks, and direct scanning. Those assumptions do not hold uniformly for SAF, MediaStore, Photos, or remote object stores, so the optimized path stages receiver writes before final object publishing.
 
 ## Decision
 
@@ -173,6 +173,63 @@ Core tables:
 - `publish_queue`
 - `connected_devices`
 - `receiver_status`
+
+Asset model:
+
+```text
+assets
+  asset_id
+  project_id
+  group_id
+  transfer_id
+  group_role
+  group_rank
+  media_kind
+  format
+  original_filename
+  final_filename
+  normalized_stem
+  original_path
+  original_parent_path
+  final_location_kind
+  final_location_payload
+  size_bytes
+  capture_at_ms
+  received_at_ms
+  published_at_ms
+  source_identity
+  username
+  remote_addr
+  duplicate_key
+  duplicate_index
+  duplicate_count
+```
+
+Asset group model:
+
+```text
+asset_groups
+  group_id
+  project_id
+  group_identity
+  display_key
+  source_identity
+  original_parent_path
+  primary_asset_id
+  preview_asset_id
+  member_count
+  has_raw
+  has_jpeg
+  has_video
+  first_capture_at_ms
+  last_capture_at_ms
+  first_received_at_ms
+  last_received_at_ms
+  created_at_ms
+  updated_at_ms
+```
+
+`assets.group_id` is the membership link. A separate asset-group-member table is not part of the foundation because each asset has exactly one RAW/JPEG/video group. Later burst grouping should reference `asset_groups`, not individual file assets.
 
 Later feature tables:
 
