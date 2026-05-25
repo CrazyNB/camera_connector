@@ -73,7 +73,7 @@ class NativeCoreGateway(
     }
 
     private fun loadDashboard(): DashboardState =
-        mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = 50))
+        mapDashboard(nativeCore.dashboardJson(stateDir, offset = 0, limit = CONTINUOUS_INBOX_LIMIT))
 
     private suspend fun refreshAfterServiceCommand() {
         delay(250)
@@ -337,5 +337,6 @@ class NativeCoreGateway(
     private companion object {
         const val DEFAULT_LISTEN_HOST = "192.168.137.1"
         const val DASHBOARD_POLL_INTERVAL_MS = 2_000L
+        const val CONTINUOUS_INBOX_LIMIT = 2_000
     }
 }

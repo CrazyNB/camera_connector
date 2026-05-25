@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.LruCache
 import java.io.File
 import java.io.InputStream
 import java.util.Locale
@@ -340,6 +341,29 @@ private data class PhotoMetadata(
         colorSpace?.let { "色彩空间" to it },
         orientation?.let { "方向" to it },
     )
+}
+
+private object ThumbnailPreviewMemoryCache {
+    private val maxSizeBytes = (Runtime.getRuntime().maxMemory() / 8)
+        .coerceIn(THUMBNAIL_MEMORY_CACHE_MIN_BYTES.toLong(), THUMBNAIL_MEMORY_CACHE_MAX_BYTES.toLong())
+        .toInt()
+    private val cache = object : LruCache<String, Bitmap>(maxSizeBytes) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            value.allocationByteCount.takeIf { it > 0 } ?: value.byteCount
+    }
+
+    fun get(key: String): Bitmap? = synchronized(cache) {
+        cache.get(key)?.takeUnless { it.isRecycled }
+    }
+
+    fun put(key: String, bitmap: Bitmap) {
+        if (bitmap.isRecycled) {
+            return
+        }
+        synchronized(cache) {
+            cache.put(key, bitmap)
+        }
+    }
 }
 
 private val ElementBlue = Color(0xFF409EFF)
@@ -1434,12 +1458,24 @@ private fun PhotoPreview(
 ) {
     val context = LocalContext.current
     val previewLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
-    val bitmap by produceState<Bitmap?>(initialValue = null, previewLocation, previewQuality) {
+    val previewCacheKey = remember(previewLocation, previewQuality) {
+        if (previewQuality == PreviewQuality.Thumbnail && previewLocation != null) {
+            thumbnailPreviewCacheKey(previewLocation)
+        } else {
+            null
+        }
+    }
+    val initialBitmap = remember(previewCacheKey) {
+        previewCacheKey?.let(ThumbnailPreviewMemoryCache::get)
+    }
+    val bitmap by produceState<Bitmap?>(initialValue = initialBitmap, previewLocation, previewQuality) {
         value = if (previewLocation == null) {
             null
         } else {
-            withContext(Dispatchers.IO) {
+            previewCacheKey?.let(ThumbnailPreviewMemoryCache::get) ?: withContext(Dispatchers.IO) {
                 loadPreviewBitmap(context, previewLocation, previewQuality)
+            }?.also { loadedBitmap ->
+                previewCacheKey?.let { ThumbnailPreviewMemoryCache.put(it, loadedBitmap) }
             }
         }
     }
@@ -1532,6 +1568,9 @@ private fun loadPreviewBitmap(
         }
     }.getOrNull()
 }
+
+private fun thumbnailPreviewCacheKey(location: String): String =
+    "${PreviewQuality.Thumbnail.name}:$location"
 
 private fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
     if (location.isNullOrBlank()) {
@@ -2093,6 +2132,8 @@ private const val PREVIEW_MAX_DIMENSION_PX = 512
 private const val PREVIEW_DETAIL_MAX_DIMENSION_PX = 2400
 private const val PREVIEW_FULLSCREEN_MAX_DIMENSION_PX = 4096
 private const val PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO = 3f / 2f
+private const val THUMBNAIL_MEMORY_CACHE_MIN_BYTES = 16 * 1024 * 1024
+private const val THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 64 * 1024 * 1024
 private const val RAW_ORIENTATION_READ_LIMIT_BYTES = 512 * 1024
 private const val TIFF_HEADER_SCAN_LIMIT_BYTES = 4096
 private const val TIFF_HEADER_BYTES = 8
