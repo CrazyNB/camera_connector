@@ -356,26 +356,35 @@ impl SqliteStore {
         offset: usize,
         limit: usize,
     ) -> Result<AssetGroupPage> {
-        let assets = self.assets_for_project(project_id)?;
-        let groups = group_received_assets(assets)
-            .into_iter()
-            .filter(|group| asset_group_matches(group, &query))
-            .collect::<Vec<_>>();
-        let total_groups = groups.len();
-        let summary = summarize_asset_groups(&groups);
-        let page_groups = groups
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect::<Vec<_>>();
+        self.with_connection(|connection| {
+            let stored_groups = stored_asset_groups_for_project(connection, project_id)?;
+            let mut groups = Vec::new();
+            for stored_group in stored_groups {
+                let assets =
+                    received_assets_for_group(connection, project_id, &stored_group.group_id)?;
+                if let Some(group) = group_received_assets(assets).into_iter().next() {
+                    if asset_group_matches(&group, &query) {
+                        groups.push(group);
+                    }
+                }
+            }
 
-        Ok(AssetGroupPage {
-            groups: page_groups,
-            summary,
-            offset,
-            limit,
-            total_groups,
-            has_more: offset.saturating_add(limit) < total_groups,
+            let total_groups = groups.len();
+            let summary = summarize_asset_groups(&groups);
+            let page_groups = groups
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
+
+            Ok(AssetGroupPage {
+                groups: page_groups,
+                summary,
+                offset,
+                limit,
+                total_groups,
+                has_more: offset.saturating_add(limit) < total_groups,
+            })
         })
     }
 
@@ -407,22 +416,7 @@ impl SqliteStore {
     }
 
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
-        self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
-            let mut statement = connection.prepare(
-                "SELECT group_id, project_id, group_identity, display_key, source_identity,
-                        original_parent_path, primary_asset_id, preview_asset_id, member_count,
-                        has_raw, has_jpeg, has_video, first_capture_at_ms, last_capture_at_ms,
-                        first_received_at_ms, last_received_at_ms, created_at_ms, updated_at_ms
-                 FROM asset_groups
-                 WHERE project_id = ?1
-                 ORDER BY COALESCE(last_received_at_ms, updated_at_ms) DESC,
-                          display_key ASC,
-                          group_id ASC",
-            )?;
-            let rows = statement.query_map(params![project_id], stored_asset_group_from_row)?;
-            collect_rows(rows)
-        })
+        self.with_connection(|connection| stored_asset_groups_for_project(connection, project_id))
     }
 
     pub fn transfer_counts(&self, project_id: &str) -> Result<(usize, usize, usize)> {
@@ -552,24 +546,6 @@ impl SqliteStore {
         })
     }
 
-    fn assets_for_project(&self, project_id: &str) -> Result<Vec<ReceivedAsset>> {
-        self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
-            let mut statement = connection.prepare(
-                "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
-                        format, original_filename, final_filename, normalized_stem, original_path,
-                        final_location_payload, size_bytes, capture_at_ms, received_at_ms,
-                        published_at_ms, source_identity, username, remote_addr,
-                        duplicate_index, duplicate_count
-                 FROM assets
-                 WHERE project_id = ?1
-                 ORDER BY published_at_ms DESC, asset_id ASC",
-            )?;
-            let rows = statement.query_map(params![project_id], received_asset_from_row)?;
-            collect_rows(rows)
-        })
-    }
-
     fn with_connection<T>(
         &self,
         operation: impl FnOnce(&mut Connection) -> std::result::Result<T, rusqlite::Error>,
@@ -597,6 +573,45 @@ fn count_transfers(
             |row| row.get(0),
         ),
     }
+}
+
+fn stored_asset_groups_for_project(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Vec<StoredAssetGroup>, rusqlite::Error> {
+    ensure_project_exists(connection, project_id)?;
+    let mut statement = connection.prepare(
+        "SELECT group_id, project_id, group_identity, display_key, source_identity,
+                original_parent_path, primary_asset_id, preview_asset_id, member_count,
+                has_raw, has_jpeg, has_video, first_capture_at_ms, last_capture_at_ms,
+                first_received_at_ms, last_received_at_ms, created_at_ms, updated_at_ms
+         FROM asset_groups
+         WHERE project_id = ?1
+         ORDER BY COALESCE(last_received_at_ms, updated_at_ms) DESC,
+                  display_key ASC,
+                  group_id ASC",
+    )?;
+    let rows = statement.query_map(params![project_id], stored_asset_group_from_row)?;
+    collect_rows(rows)
+}
+
+fn received_assets_for_group(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Vec<ReceivedAsset>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
+                format, original_filename, final_filename, normalized_stem, original_path,
+                final_location_payload, size_bytes, capture_at_ms, received_at_ms,
+                published_at_ms, source_identity, username, remote_addr,
+                duplicate_index, duplicate_count
+         FROM assets
+         WHERE project_id = ?1 AND group_id = ?2
+         ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
+    )?;
+    let rows = statement.query_map(params![project_id, group_id], received_asset_from_row)?;
+    collect_rows(rows)
 }
 
 fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlite::Error> {

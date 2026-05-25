@@ -216,6 +216,46 @@ fn sqlite_store_exposes_asset_group_rollup_model() {
 }
 
 #[test]
+fn sqlite_store_keeps_same_stem_groups_separate_by_source_and_parent() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Same Stem")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:z5", "DCIM/100/IMG_4001.JPG", 20),
+        )
+        .expect("first transfer should record");
+    let mut second = completed_transfer("ftp:z6", "DCIM/200/IMG_4001.JPG", 21);
+    second.username = Some("z6".to_string());
+    second.source_name = Some("Studio Z6".to_string());
+    store
+        .record_transfer(&project.project_id, second)
+        .expect("second transfer should record");
+
+    let page = store
+        .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("groups should query");
+
+    assert_eq!(page.total_groups, 2);
+    assert_eq!(page.groups.len(), 2);
+    assert_eq!(page.summary.asset_count, 2);
+    assert!(page
+        .summary
+        .source_counts
+        .iter()
+        .any(|count| count.value == "Studio Z5" && count.group_count == 1));
+    assert!(page
+        .summary
+        .source_counts
+        .iter()
+        .any(|count| count.value == "Studio Z6" && count.group_count == 1));
+}
+
+#[test]
 fn sqlite_store_lists_project_transfers_by_latest_time() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
