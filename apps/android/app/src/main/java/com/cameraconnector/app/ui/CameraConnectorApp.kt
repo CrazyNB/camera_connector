@@ -357,9 +357,6 @@ private enum class PreviewQuality {
     FullScreen,
 }
 
-private fun ProjectState.activeProject(): ProjectSummary? =
-    projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
-
 private data class PhotoMetadata(
     val shotTime: String? = null,
     val camera: String? = null,
@@ -631,7 +628,7 @@ private fun ProjectScopeCard(
     onOpenProjects: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val project = projectState.activeProject()
+    val project = projectState.activeProjectSummary()
     ElementCard(modifier = modifier) {
         Row(
             modifier = Modifier

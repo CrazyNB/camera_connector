@@ -1,6 +1,7 @@
 package com.cameraconnector.app.ui
 
 import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.ProjectState
 
 private const val SYSTEM_INBOX_PROJECT_ID = "project-inbox"
 
@@ -10,6 +11,9 @@ internal data class ProjectLifecycleUi(
     val canArchive: Boolean,
     val canRestore: Boolean,
 )
+
+internal fun ProjectState.activeProjectSummary(): ProjectSummary? =
+    activeProjectId?.let { id -> projects.firstOrNull { it.id == id } }
 
 internal fun projectLifecycleUi(
     project: ProjectSummary,

@@ -1,8 +1,10 @@
 package com.cameraconnector.app.ui
 
 import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.ProjectState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,6 +49,37 @@ class ProjectUiModelsTest {
         assertFalse(ui.canSelect)
         assertFalse(ui.canArchive)
         assertFalse(ui.canRestore)
+    }
+
+    @Test
+    fun activeProjectSummaryDoesNotFallbackToFirstProject() {
+        val state = ProjectState(
+            projects = listOf(project(id = "project-client", status = "Active")),
+            activeProjectId = null,
+        )
+
+        assertNull(state.activeProjectSummary())
+    }
+
+    @Test
+    fun activeProjectSummaryRequiresMatchingProjectId() {
+        val state = ProjectState(
+            projects = listOf(project(id = "project-client", status = "Active")),
+            activeProjectId = "project-missing",
+        )
+
+        assertNull(state.activeProjectSummary())
+    }
+
+    @Test
+    fun activeProjectSummaryReturnsSelectedProject() {
+        val selected = project(id = "project-client", status = "Active")
+        val state = ProjectState(
+            projects = listOf(project(id = "project-other", status = "Active"), selected),
+            activeProjectId = selected.id,
+        )
+
+        assertEquals(selected, state.activeProjectSummary())
     }
 
     private fun project(id: String, status: String): ProjectSummary =
