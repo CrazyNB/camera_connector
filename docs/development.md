@@ -136,19 +136,21 @@ target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\
 
 Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project active` ensures a default Inbox project exists when no project has been selected yet.
 
-Read the app dashboard model in one command:
+Read the project-scoped dashboard model in one command:
 
 ```powershell
-target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50
+target\debug\camera-connector.exe dashboard --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --limit 50
 ```
 
-Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, transfer health counts, recent failed transfers, connected devices, asset summary, and paged assets.
+Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, transfer health counts, recent failed transfers, connected devices, asset summary, and paged assets. With `--project-id`, transfers and assets come from the SQLite project model in the configured state directory.
 
 Use JSON output for UI shells or automation:
 
 ```powershell
-target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50 --json
+target\debug\camera-connector.exe dashboard --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --limit 50 --json
 ```
+
+For legacy transfer-log diagnostics, omit `--project-id` and pass `--state`.
 
 The completed file folder remains flat for predictable export paths. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path, login username, project id, storage location, and grouping metadata live in the state directory. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `camera-connector.sqlite3`, `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
 

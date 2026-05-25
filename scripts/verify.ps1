@@ -347,6 +347,22 @@ if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=
 }
 Write-Output $filteredLogBackedInboxOutput
 
+$projectDashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --project-id $projectId --username "verify" --limit 1
+if ($LASTEXITCODE -ne 0) { throw "project dashboard smoke failed" }
+if (($projectDashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {
+    throw "project dashboard did not use configured state path"
+}
+if (($projectDashboardOutput | Where-Object { $_ -like "transfers*total=2*completed=2*failed=0*" }).Count -lt 1) {
+    throw "project dashboard did not expose SQLite transfer summary"
+}
+if (($projectDashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
+    throw "project dashboard did not expose paged project asset summary"
+}
+if (($projectDashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
+    throw "project dashboard did not expose project asset rows"
+}
+Write-Output $projectDashboardOutput
+
 $dashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --state $pushState --username "verify" --limit 1
 if ($LASTEXITCODE -ne 0) { throw "dashboard smoke failed" }
 if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {

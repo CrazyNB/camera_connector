@@ -87,7 +87,9 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, alias = "path")]
-        state: PathBuf,
+        state: Option<PathBuf>,
+        #[arg(long, alias = "project")]
+        project_id: Option<String>,
         #[arg(long)]
         username: Option<String>,
         #[arg(long)]
@@ -281,6 +283,16 @@ struct ReceiveFileArgs {
     source_name: Option<String>,
 }
 
+struct DashboardArgs {
+    config: Option<PathBuf>,
+    state: Option<PathBuf>,
+    project_id: Option<String>,
+    query: AssetGroupQuery,
+    offset: usize,
+    limit: usize,
+    online_devices: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -373,6 +385,7 @@ async fn main() -> Result<()> {
         Some(Command::Dashboard {
             config,
             state,
+            project_id,
             username,
             source_name,
             original_path,
@@ -383,10 +396,11 @@ async fn main() -> Result<()> {
             online_devices,
             json,
         }) => {
-            let service = CameraConnectorService::new(config);
-            let dashboard = service.dashboard(
+            let dashboard = load_dashboard(DashboardArgs {
+                config,
                 state,
-                AssetGroupQuery {
+                project_id,
+                query: AssetGroupQuery {
                     username,
                     source_name,
                     original_path,
@@ -396,7 +410,7 @@ async fn main() -> Result<()> {
                 offset,
                 limit,
                 online_devices,
-            )?;
+            })?;
             if json {
                 print_dashboard_json(&dashboard)?;
             } else {
@@ -663,6 +677,31 @@ fn record_transfer_in_active_project(state_dir: &Path, record: &TransferRecord) 
         }
     };
     store.record_transfer(&project.project_id, record.clone())
+}
+
+fn load_dashboard(args: DashboardArgs) -> Result<CameraConnectorDashboard> {
+    let service = CameraConnectorService::new(args.config);
+    match args.project_id {
+        Some(project_id) => service.project_dashboard(
+            &project_id,
+            args.query,
+            args.offset,
+            args.limit,
+            args.online_devices,
+        ),
+        None => {
+            let state = args
+                .state
+                .ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
+            service.dashboard(
+                state,
+                args.query,
+                args.offset,
+                args.limit,
+                args.online_devices,
+            )
+        }
+    }
 }
 
 fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
@@ -1413,6 +1452,95 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_project_dashboard_command_without_state() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "dashboard",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "--project-id",
+            "project-1",
+            "--json",
+        ])
+        .expect("project dashboard command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Dashboard {
+                state: None,
+                project_id: Some(project_id),
+                json: true,
+                ..
+            }) if project_id == "project-1"
+        ));
+    }
+
+    #[test]
+    fn dashboard_command_loads_project_dashboard_from_sqlite() {
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-project-dashboard-{}",
+            current_time_ms()
+        ));
+        let config_path = root.join("config.json");
+        let state_dir = root.join("state");
+        std::fs::create_dir_all(&root).expect("temp root should create");
+        let service = CameraConnectorService::new(Some(config_path.clone()));
+        service
+            .set_receiver_settings(ReceiverSettingsUpdate {
+                state_dir: Some(state_dir.clone()),
+                ..ReceiverSettingsUpdate::default()
+            })
+            .expect("receiver settings should save");
+        let project = service
+            .create_project("CLI Dashboard")
+            .expect("project should create");
+        service
+            .record_project_transfer(
+                &project.project_id,
+                TransferRecord {
+                    transfer_id: "ftp:cli-dashboard".to_string(),
+                    protocol: "ftp".to_string(),
+                    status: TransferStatus::Completed,
+                    original_path: "DCIM/100/IMG_0101.CR3".to_string(),
+                    final_filename: "IMG_0101.CR3".to_string(),
+                    final_path: None,
+                    final_location: Some(StoredObjectLocation::local_path(
+                        root.join("IMG_0101.CR3"),
+                    )),
+                    size_bytes: 42,
+                    username: Some("verify".to_string()),
+                    remote_addr: None,
+                    source_name: Some("Verify Camera".to_string()),
+                    started_at_ms: 10,
+                    completed_at_ms: Some(20),
+                    error: None,
+                },
+            )
+            .expect("project transfer should record");
+
+        let dashboard = load_dashboard(DashboardArgs {
+            config: Some(config_path.clone()),
+            state: None,
+            project_id: Some(project.project_id),
+            query: AssetGroupQuery::default(),
+            offset: 0,
+            limit: 50,
+            online_devices: false,
+        })
+        .expect("project dashboard should load");
+
+        assert_eq!(dashboard.paths.state_dir, state_dir);
+        assert_eq!(dashboard.assets.total_groups, 1);
+        assert_eq!(dashboard.assets.summary.asset_count, 1);
+        assert_eq!(
+            dashboard.assets.groups[0].primary.display_source.as_deref(),
+            Some("Verify Camera")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
