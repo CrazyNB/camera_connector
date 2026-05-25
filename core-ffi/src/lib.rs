@@ -131,6 +131,11 @@ impl MobileCore {
         Ok(serde_json::to_string(&project)?)
     }
 
+    pub fn ensure_active_project_json(&self) -> MobileCoreResult<String> {
+        let project = self.service.ensure_active_project()?;
+        Ok(serde_json::to_string(&project)?)
+    }
+
     pub fn project_dashboard_json(
         &self,
         project_id: String,
@@ -359,6 +364,19 @@ pub unsafe extern "C" fn camera_connector_mobile_core_active_project_json(
 ) -> *mut c_char {
     ffi_response(|| {
         let project = core_ref(core)?.active_project_json()?;
+        parse_json_value(&project)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_ensure_active_project_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project = core_ref(core)?.ensure_active_project_json()?;
         parse_json_value(&project)
     })
 }
@@ -636,6 +654,21 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_active
     env.with_env(|env| {
         java_response(env, || {
             let project = mobile_core_from_handle(handle)?.active_project_json()?;
+            parse_json_value(&project)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_ensureActiveProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let project = mobile_core_from_handle(handle)?.ensure_active_project_json()?;
             parse_json_value(&project)
         })
     })

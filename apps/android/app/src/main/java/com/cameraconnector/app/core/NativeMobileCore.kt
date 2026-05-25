@@ -21,6 +21,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     fun setActiveProject(projectId: String): JSONObject =
         call { setActiveProjectJson(handle, projectId) }
 
+    fun ensureActiveProject(): JSONObject =
+        call { ensureActiveProjectJson(handle) }
+
     fun activeProject(): JSONObject? {
         val value = call { activeProjectJson(handle) }
         return if (value.has("value") && value.isNull("value")) {
@@ -93,6 +96,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String
     private external fun activeProjectJson(handle: Long): String
+    private external fun ensureActiveProjectJson(handle: Long): String
     private external fun saveReceiverSettingsJson(handle: Long, patchJson: String): String
     private external fun saveDeviceAccountJson(
         handle: Long,

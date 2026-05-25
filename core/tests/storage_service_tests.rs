@@ -1,5 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, StoredObjectLocation, TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorService, ReceiverSettingsUpdate, SqliteStore,
+    StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -21,6 +22,95 @@ fn service_creates_and_selects_active_storage_project() {
 
     assert_eq!(active.project_id, project.project_id);
     assert_eq!(active.name, "Wedding");
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_ensures_system_inbox_project_when_none_is_active() {
+    let config_path = unique_temp_path("storage-service-ensure-inbox");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+
+    assert!(service
+        .active_project()
+        .expect("active project should load")
+        .is_none());
+
+    let project = service
+        .ensure_active_project()
+        .expect("active project should be ensured");
+
+    assert_eq!(project.project_id, "project-inbox");
+    assert_eq!(project.name, "Inbox");
+    assert_eq!(
+        service
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist")
+            .project_id,
+        "project-inbox"
+    );
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_ensure_active_project_keeps_existing_selection() {
+    let config_path = unique_temp_path("storage-service-preserve-active");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Selected")
+        .expect("project should create");
+    service
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let ensured = service
+        .ensure_active_project()
+        .expect("active project should be ensured");
+
+    assert_eq!(ensured.project_id, project.project_id);
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_uses_configured_state_dir_for_project_storage() {
+    let config_path = unique_temp_path("storage-service-configured-state");
+    let configured_state_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("configured-state");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(configured_state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+
+    let project = service
+        .ensure_active_project()
+        .expect("active project should be ensured");
+
+    let configured_store =
+        SqliteStore::open_state_dir(&configured_state_dir).expect("configured store should open");
+    let active = configured_store
+        .active_project()
+        .expect("active project should load")
+        .expect("active project should exist");
+    assert_eq!(active.project_id, project.project_id);
+
+    let dashboard = service
+        .project_dashboard(
+            &project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+            false,
+        )
+        .expect("project dashboard should build");
+    assert_eq!(dashboard.paths.state_dir, configured_state_dir);
 
     let _ = std::fs::remove_file(config_path);
 }

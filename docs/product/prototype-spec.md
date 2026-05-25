@@ -141,7 +141,7 @@ The prototype maps to `CameraConnectorDashboard`:
 - `recent_failures` -> Overview recent failures and Transfers failure rows.
 - `assets` -> Project-scoped inbox asset groups and format/source filters.
 
-Project actions map to `CameraConnectorService::create_project`, `set_active_project`, `active_project`, and `project_dashboard`. Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
+Project actions map to `CameraConnectorService::create_project`, `set_active_project`, `ensure_active_project`, and `project_dashboard`. On first launch, the app ensures a system Inbox project so uploads and views always have a project boundary. Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
 
 ## 6. Visual Direction
 

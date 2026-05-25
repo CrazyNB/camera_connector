@@ -105,6 +105,8 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.core.InboxAsset
+import com.cameraconnector.app.core.ProjectState
+import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
 import com.cameraconnector.app.storage.AndroidStorageGateway
@@ -141,6 +143,9 @@ fun CameraConnectorApp(
             transfers = emptyList(),
         ),
     )
+    val projectState by coreGateway.observeProjects().collectAsState(
+        initial = ProjectState(projects = emptyList(), activeProjectId = null),
+    )
     val notificationsGranted by notificationPermissionGranted.collectAsState(initial = true)
     val selectedInbox by selectedInboxLabel.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
@@ -148,6 +153,7 @@ fun CameraConnectorApp(
     var settingsOpen by remember { mutableStateOf(false) }
     var accountDetail by remember { mutableStateOf<DeviceAccount?>(null) }
     var addingAccount by remember { mutableStateOf(false) }
+    var projectSwitcherOpen by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
     var actionInFlight by remember { mutableStateOf<String?>(null) }
     var inboxGridColumnCount by rememberSaveable { mutableStateOf(storageGateway.inboxGridColumnCount()) }
@@ -249,43 +255,71 @@ fun CameraConnectorApp(
                             modifier = Modifier.padding(padding),
                         )
                     }
-                } else when (tab) {
-                    MainTab.Overview -> OverviewScreen(
-                        dashboard = dashboard,
-                        notificationPermissionGranted = notificationsGranted,
-                        actionError = actionError,
-                        actionInFlight = actionInFlight,
-                        onClearActionError = { actionError = null },
-                        onOpenSettings = { settingsOpen = true },
-                        onToggleReceiver = {
-                            if (dashboard.receiver.running) {
-                                runAction("正在停止接收服务") { coreGateway.stopReceiver() }
-                            } else {
-                                runAction("正在启动接收服务") { coreGateway.startReceiver() }
-                            }
-                        },
-                        onSaveReceiverSettings = { settings ->
-                            runAction("正在保存接收设置") {
-                                coreGateway.saveReceiverSettings(settings)
-                            }
-                        },
-                        modifier = Modifier.padding(padding),
-                    )
+                } else {
+                    if (projectSwitcherOpen) {
+                        ProjectSwitcherDialog(
+                            projectState = projectState,
+                            actionsEnabled = actionInFlight == null,
+                            onDismiss = { projectSwitcherOpen = false },
+                            onSelectProject = { projectId ->
+                                projectSwitcherOpen = false
+                                runAction("正在切换项目") {
+                                    coreGateway.setActiveProject(projectId)
+                                }
+                            },
+                            onCreateProject = { name ->
+                                projectSwitcherOpen = false
+                                runAction("正在创建项目") {
+                                    coreGateway.createProject(name)
+                                }
+                            },
+                        )
+                    }
 
-                    MainTab.Inbox -> InboxScreen(
-                        dashboard = dashboard,
-                        gridColumnCount = inboxGridColumnCount,
-                        onGridColumnCountChange = { count ->
-                            inboxGridColumnCount = count
-                            storageGateway.persistInboxGridColumnCount(count)
-                        },
-                        modifier = Modifier.padding(padding),
-                    )
+                    when (tab) {
+                        MainTab.Overview -> OverviewScreen(
+                            dashboard = dashboard,
+                            projectState = projectState,
+                            notificationPermissionGranted = notificationsGranted,
+                            actionError = actionError,
+                            actionInFlight = actionInFlight,
+                            onClearActionError = { actionError = null },
+                            onOpenSettings = { settingsOpen = true },
+                            onOpenProjects = { projectSwitcherOpen = true },
+                            onToggleReceiver = {
+                                if (dashboard.receiver.running) {
+                                    runAction("正在停止接收服务") { coreGateway.stopReceiver() }
+                                } else {
+                                    runAction("正在启动接收服务") { coreGateway.startReceiver() }
+                                }
+                            },
+                            onSaveReceiverSettings = { settings ->
+                                runAction("正在保存接收设置") {
+                                    coreGateway.saveReceiverSettings(settings)
+                                }
+                            },
+                            modifier = Modifier.padding(padding),
+                        )
 
-                    MainTab.Transfers -> TransfersScreen(
-                        dashboard = dashboard,
-                        modifier = Modifier.padding(padding),
-                    )
+                        MainTab.Inbox -> InboxScreen(
+                            dashboard = dashboard,
+                            projectState = projectState,
+                            onOpenProjects = { projectSwitcherOpen = true },
+                            gridColumnCount = inboxGridColumnCount,
+                            onGridColumnCountChange = { count ->
+                                inboxGridColumnCount = count
+                                storageGateway.persistInboxGridColumnCount(count)
+                            },
+                            modifier = Modifier.padding(padding),
+                        )
+
+                        MainTab.Transfers -> TransfersScreen(
+                            dashboard = dashboard,
+                            projectState = projectState,
+                            onOpenProjects = { projectSwitcherOpen = true },
+                            modifier = Modifier.padding(padding),
+                        )
+                    }
                 }
             }
         }
@@ -310,6 +344,9 @@ private enum class PreviewQuality {
     Detail,
     FullScreen,
 }
+
+private fun ProjectState.activeProject(): ProjectSummary? =
+    projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
 
 private data class PhotoMetadata(
     val shotTime: String? = null,
@@ -425,11 +462,13 @@ private fun ElementTag(text: String, color: Color) {
 @Composable
 private fun OverviewScreen(
     dashboard: DashboardState,
+    projectState: ProjectState,
     notificationPermissionGranted: Boolean,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenProjects: () -> Unit,
     onToggleReceiver: () -> Unit,
     onSaveReceiverSettings: (ReceiverSettings) -> Unit,
     modifier: Modifier = Modifier,
@@ -477,6 +516,15 @@ private fun OverviewScreen(
 
         actionInFlight?.let { action ->
             item { ProcessingCard(action) }
+        }
+
+        item {
+            ProjectScopeCard(
+                projectState = projectState,
+                actionsEnabled = actionsEnabled,
+                onOpenProjects = onOpenProjects,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         item {
@@ -559,6 +607,147 @@ private fun OverviewScreen(
                         Text("保存接收设置")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectScopeCard(
+    projectState: ProjectState,
+    actionsEnabled: Boolean,
+    onOpenProjects: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val project = projectState.activeProject()
+    ElementCard(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("当前拍摄项目", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    project?.name ?: "正在初始化",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(
+                onClick = onOpenProjects,
+                enabled = actionsEnabled,
+                shape = elementShape,
+            ) {
+                Text("切换")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectSwitcherDialog(
+    projectState: ProjectState,
+    actionsEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onSelectProject: (String) -> Unit,
+    onCreateProject: (String) -> Unit,
+) {
+    var newProjectName by remember { mutableStateOf("") }
+    val cleanName = newProjectName.trim()
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = true),
+    ) {
+        ElementCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("拍摄项目", style = MaterialTheme.typography.titleLarge)
+                if (projectState.projects.isEmpty()) {
+                    Text("正在初始化", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    projectState.projects.forEach { project ->
+                        ProjectOptionRow(
+                            project = project,
+                            selected = project.id == projectState.activeProjectId,
+                            enabled = actionsEnabled,
+                            onClick = { onSelectProject(project.id) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = newProjectName,
+                    onValueChange = { newProjectName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("新项目名称") },
+                    singleLine = true,
+                    enabled = actionsEnabled,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    OutlinedButton(onClick = onDismiss, shape = elementShape) {
+                        Text("取消")
+                    }
+                    Button(
+                        onClick = { onCreateProject(cleanName) },
+                        enabled = actionsEnabled && cleanName.isNotBlank(),
+                        shape = elementShape,
+                    ) {
+                        Text("新建")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectOptionRow(
+    project: ProjectSummary,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                project.name,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                if (selected) "当前项目" else project.status,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        if (selected) {
+            ElementTag(text = "当前", color = ElementSuccess)
+        } else {
+            OutlinedButton(
+                onClick = onClick,
+                enabled = enabled,
+                shape = elementShape,
+            ) {
+                Text("选择")
             }
         }
     }
@@ -914,6 +1103,8 @@ private fun AccountDetailScreen(
 @Composable
 private fun InboxScreen(
     dashboard: DashboardState,
+    projectState: ProjectState,
+    onOpenProjects: () -> Unit,
     gridColumnCount: Int,
     onGridColumnCountChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -965,6 +1156,13 @@ private fun InboxScreen(
                 onColumnCountChange = onGridColumnCountChange,
             )
         }
+        Spacer(Modifier.height(10.dp))
+        ProjectScopeCard(
+            projectState = projectState,
+            actionsEnabled = true,
+            onOpenProjects = onOpenProjects,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Spacer(Modifier.height(10.dp))
         FilterToggleRow(
             selectedSource = selectedSource,
@@ -2157,6 +2355,8 @@ private fun DetailLine(label: String, value: String) {
 @Composable
 private fun TransfersScreen(
     dashboard: DashboardState,
+    projectState: ProjectState,
+    onOpenProjects: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -2166,6 +2366,14 @@ private fun TransfersScreen(
     ) {
         item {
             Text("传输记录", style = MaterialTheme.typography.headlineMedium)
+        }
+        item {
+            ProjectScopeCard(
+                projectState = projectState,
+                actionsEnabled = true,
+                onOpenProjects = onOpenProjects,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         if (dashboard.transfers.isEmpty()) {
             item { Text("还没有传输记录。") }

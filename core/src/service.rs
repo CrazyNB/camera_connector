@@ -199,12 +199,21 @@ impl CameraConnectorService {
             request.password.as_deref(),
             config.source_name.as_deref(),
         )?;
-        config.active_project_id = self.active_project()?.map(|project| project.project_id);
+        config.active_project_id =
+            Some(ensure_active_project_in_state_dir(&config.state_dir)?.project_id);
         Ok(config)
     }
 
+    pub fn storage_state_dir(&self) -> Result<PathBuf> {
+        Ok(self
+            .load_config()?
+            .receiver
+            .state_dir
+            .unwrap_or_else(|| self.state_dir()))
+    }
+
     pub fn storage_store(&self) -> Result<SqliteStore> {
-        SqliteStore::open_state_dir(self.state_dir())
+        SqliteStore::open_state_dir(self.storage_state_dir()?)
     }
 
     pub fn create_project(&self, name: impl AsRef<str>) -> Result<crate::Project> {
@@ -217,6 +226,10 @@ impl CameraConnectorService {
 
     pub fn active_project(&self) -> Result<Option<crate::Project>> {
         self.storage_store()?.active_project()
+    }
+
+    pub fn ensure_active_project(&self) -> Result<crate::Project> {
+        ensure_active_project_in_state_dir(self.storage_state_dir()?)
     }
 
     pub fn list_projects(&self) -> Result<Vec<crate::Project>> {
@@ -524,7 +537,7 @@ impl CameraConnectorService {
         limit: usize,
         online_devices_only: bool,
     ) -> Result<CameraConnectorDashboard> {
-        let state_dir = self.state_dir();
+        let state_dir = self.storage_state_dir()?;
         let config = self.load_config()?;
         let receiver_settings = config.receiver.clone();
         let receiver_status = self.receiver_status(&state_dir)?;
@@ -557,6 +570,16 @@ impl CameraConnectorService {
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
+}
+
+fn ensure_active_project_in_state_dir(state_dir: impl AsRef<Path>) -> Result<crate::Project> {
+    let store = SqliteStore::open_state_dir(state_dir)?;
+    if let Some(project) = store.active_project()? {
+        return Ok(project);
+    }
+    let project = store.ensure_inbox_project()?;
+    store.set_active_project(&project.project_id)?;
+    Ok(project)
 }
 
 fn transfer_query_from_asset_query(query: &AssetGroupQuery) -> TransferQuery {

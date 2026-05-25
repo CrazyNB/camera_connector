@@ -158,6 +158,23 @@ fn mobile_core_manages_projects_as_json() {
 }
 
 #[test]
+fn mobile_core_ensures_active_project_as_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let ensured_json = core.ensure_active_project_json().unwrap();
+    let ensured: Value = serde_json::from_str(&ensured_json).unwrap();
+
+    assert_eq!(ensured["project_id"], "project-inbox");
+    assert_eq!(ensured["name"], "Inbox");
+    let active: Value = serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
+    assert_eq!(active["project_id"], "project-inbox");
+    let projects: Value = serde_json::from_str(&core.list_projects_json().unwrap()).unwrap();
+    assert_eq!(projects.as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn mobile_core_returns_project_dashboard_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

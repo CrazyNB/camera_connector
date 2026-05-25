@@ -343,6 +343,7 @@ This milestone should land the durable architecture in one pass:
 - Record `final_location` for all new records, including local paths.
 - Add cleanup for stale incomplete temp files.
 - Make dashboard and inbox queries project-scoped.
+- Ensure a system Inbox project when no user-selected project exists, then treat it as the active project instead of falling back to global views.
 
 ### Platform checkpoints
 
@@ -417,6 +418,7 @@ The storage model optimization is accepted when:
 - Users can create/select projects and start imports into the active project.
 - Every uploaded asset is associated with a project.
 - Dashboard and inbox asset views require a selected project.
+- Android exposes the active project in the main views and provides a project switch/create path.
 - Dashboard behavior remains familiar while adding project filters.
 
 ## Non-Goals

@@ -108,9 +108,9 @@ class NativeCoreGateway(
     }
 
     private fun loadProjects(): ProjectState {
-        val activeProjectId = nativeCore.activeProject()
-            ?.optString("project_id")
-            ?.takeIf { it.isNotBlank() }
+        val activeProjectId = nativeCore.ensureActiveProject()
+            .optString("project_id")
+            .takeIf { it.isNotBlank() }
         val projectList = nativeCore.listProjects()
         return ProjectState(
             projects = buildList {

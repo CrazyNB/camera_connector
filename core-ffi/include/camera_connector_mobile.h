@@ -39,6 +39,29 @@ char *camera_connector_mobile_core_dashboard_json(
     uint32_t limit
 );
 
+char *camera_connector_mobile_core_create_project_json(
+    const CameraConnectorMobileCore *core,
+    const char *name
+);
+
+char *camera_connector_mobile_core_list_projects_json(const CameraConnectorMobileCore *core);
+
+char *camera_connector_mobile_core_set_active_project_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_active_project_json(const CameraConnectorMobileCore *core);
+
+char *camera_connector_mobile_core_ensure_active_project_json(const CameraConnectorMobileCore *core);
+
+char *camera_connector_mobile_core_project_dashboard_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    uint32_t offset,
+    uint32_t limit
+);
+
 char *camera_connector_mobile_core_save_receiver_settings_json(
     const CameraConnectorMobileCore *core,
     const char *patch_json
