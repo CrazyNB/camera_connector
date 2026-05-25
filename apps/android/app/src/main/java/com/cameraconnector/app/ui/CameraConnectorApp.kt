@@ -273,6 +273,18 @@ fun CameraConnectorApp(
                                     coreGateway.createProject(name)
                                 }
                             },
+                            onArchiveProject = { projectId ->
+                                projectSwitcherOpen = false
+                                runAction("正在归档项目") {
+                                    coreGateway.archiveProject(projectId)
+                                }
+                            },
+                            onRestoreProject = { projectId ->
+                                projectSwitcherOpen = false
+                                runAction("正在恢复项目") {
+                                    coreGateway.restoreProject(projectId)
+                                }
+                            },
                         )
                     }
 
@@ -657,6 +669,8 @@ private fun ProjectSwitcherDialog(
     onDismiss: () -> Unit,
     onSelectProject: (String) -> Unit,
     onCreateProject: (String) -> Unit,
+    onArchiveProject: (String) -> Unit,
+    onRestoreProject: (String) -> Unit,
 ) {
     var newProjectName by remember { mutableStateOf("") }
     val cleanName = newProjectName.trim()
@@ -680,7 +694,9 @@ private fun ProjectSwitcherDialog(
                             project = project,
                             selected = project.id == projectState.activeProjectId,
                             enabled = actionsEnabled,
-                            onClick = { onSelectProject(project.id) },
+                            onSelect = { onSelectProject(project.id) },
+                            onArchive = { onArchiveProject(project.id) },
+                            onRestore = { onRestoreProject(project.id) },
                         )
                     }
                 }
@@ -717,8 +733,11 @@ private fun ProjectOptionRow(
     project: ProjectSummary,
     selected: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit,
+    onSelect: () -> Unit,
+    onArchive: () -> Unit,
+    onRestore: () -> Unit,
 ) {
+    val lifecycle = projectLifecycleUi(project, selected, enabled)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -733,21 +752,46 @@ private fun ProjectOptionRow(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                if (selected) "当前项目" else project.status,
+                lifecycle.statusLabel,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         Spacer(Modifier.width(12.dp))
-        if (selected) {
-            ElementTag(text = "当前", color = ElementSuccess)
-        } else {
-            OutlinedButton(
-                onClick = onClick,
-                enabled = enabled,
-                shape = elementShape,
-            ) {
-                Text("选择")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selected) {
+                ElementTag(text = "当前", color = ElementSuccess)
+            }
+            if (lifecycle.canSelect) {
+                OutlinedButton(
+                    onClick = onSelect,
+                    enabled = enabled,
+                    shape = elementShape,
+                ) {
+                    Text("选择")
+                }
+            }
+            if (lifecycle.canArchive) {
+                OutlinedButton(
+                    onClick = onArchive,
+                    enabled = enabled,
+                    shape = elementShape,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ElementDanger),
+                ) {
+                    Text("归档")
+                }
+            }
+            if (lifecycle.canRestore) {
+                OutlinedButton(
+                    onClick = onRestore,
+                    enabled = enabled,
+                    shape = elementShape,
+                ) {
+                    Text("恢复")
+                }
             }
         }
     }
