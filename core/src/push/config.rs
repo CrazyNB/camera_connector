@@ -7,7 +7,7 @@ use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use password_hash::PasswordHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{ImporterError, Result, SqliteStore, TransferRecord};
+use crate::{ImporterError, PublishQueueItem, Result, SqliteStore, TransferRecord};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushProtocol {
@@ -442,6 +442,10 @@ impl PushReceiverConfig {
         self
     }
 
+    pub fn staging_dir(&self) -> PathBuf {
+        self.state_dir.join("staging")
+    }
+
     pub fn resolved_source_name(&self, _remote_addr: Option<&str>) -> Option<String> {
         self.source_name.clone()
     }
@@ -460,11 +464,45 @@ impl PushReceiverConfig {
     }
 
     pub fn record_storage_transfer(&self, record: &TransferRecord) -> Result<()> {
+        let project_id = self.resolve_storage_project_id()?;
+        SqliteStore::open_state_dir(&self.state_dir)?.record_transfer(&project_id, record.clone())
+    }
+
+    pub fn enqueue_publish(
+        &self,
+        transfer_id: &str,
+        staged_path: &str,
+        final_filename: &str,
+        size_bytes: u64,
+    ) -> Result<PublishQueueItem> {
         let store = SqliteStore::open_state_dir(&self.state_dir)?;
-        let project_id = match self.active_project_id.as_deref() {
-            Some(project_id) => project_id.to_string(),
-            None => store.ensure_inbox_project()?.project_id,
-        };
-        store.record_transfer(&project_id, record.clone())
+        let project_id = self.resolve_storage_project_id_with_store(&store)?;
+        store.enqueue_publish(
+            &project_id,
+            transfer_id,
+            staged_path,
+            final_filename,
+            size_bytes,
+        )
+    }
+
+    pub fn mark_publish_completed(&self, queue_id: &str) -> Result<()> {
+        SqliteStore::open_state_dir(&self.state_dir)?.mark_publish_completed(queue_id)
+    }
+
+    pub fn mark_publish_failed(&self, queue_id: &str, error: &str) -> Result<()> {
+        SqliteStore::open_state_dir(&self.state_dir)?.mark_publish_failed(queue_id, error)
+    }
+
+    fn resolve_storage_project_id(&self) -> Result<String> {
+        let store = SqliteStore::open_state_dir(&self.state_dir)?;
+        self.resolve_storage_project_id_with_store(&store)
+    }
+
+    fn resolve_storage_project_id_with_store(&self, store: &SqliteStore) -> Result<String> {
+        match self.active_project_id.as_deref() {
+            Some(project_id) => Ok(project_id.to_string()),
+            None => Ok(store.ensure_inbox_project()?.project_id),
+        }
     }
 }

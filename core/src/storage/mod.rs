@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+mod pipeline;
+
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +11,8 @@ use crate::{
     ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup, Result,
     StoredObjectLocation, TransferRecord, TransferStatus,
 };
+
+pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
 
 const DB_FILENAME: &str = "camera-connector.sqlite3";
 const ACTIVE_PROJECT_KEY: &str = "active_project_id";
@@ -403,6 +407,27 @@ impl SqliteStore {
                  SET state = ?1, attempt_count = attempt_count + 1, last_error = ?2, updated_at_ms = ?3
                  WHERE queue_id = ?4",
                 params![PublishState::Failed.as_str(), error, current_time_ms(), queue_id],
+            )?;
+            if changed == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "publish queue item not found".to_string(),
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    pub fn mark_publish_completed(&self, queue_id: &str) -> Result<()> {
+        self.with_connection(|connection| {
+            let changed = connection.execute(
+                "UPDATE publish_queue
+                 SET state = ?1, last_error = NULL, updated_at_ms = ?2
+                 WHERE queue_id = ?3",
+                params![
+                    PublishState::Completed.as_str(),
+                    current_time_ms(),
+                    queue_id
+                ],
             )?;
             if changed == 0 {
                 return Err(rusqlite::Error::InvalidParameterName(

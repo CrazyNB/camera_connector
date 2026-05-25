@@ -127,7 +127,9 @@ fn completed_transfer(
 }
 
 fn unique_temp_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("camera-connector-{name}-{}.json", unique_suffix()))
+    let dir = std::env::temp_dir().join(format!("camera-connector-{name}-{}", unique_suffix()));
+    std::fs::create_dir_all(&dir).expect("unique temp dir should create");
+    dir.join("config.json")
 }
 
 fn unique_suffix() -> u128 {

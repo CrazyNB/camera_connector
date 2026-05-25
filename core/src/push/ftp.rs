@@ -10,7 +10,8 @@ use tokio::time::{timeout, Duration};
 use crate::{
     append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
     record_device_connected, record_device_disconnected, ImporterError, LocalFileSink,
-    PushProtocol, PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
+    LocalFolderObjectStore, LocalStagingStore, PushProtocol, PushReceiverConfig, ReceiverAccount,
+    Result, TransferRecord, TransferStatus,
 };
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
@@ -391,7 +392,7 @@ async fn handle_stor(
     reply(reader, "150 Opening data connection").await?;
     let (mut data, _) = timeout(DATA_TIMEOUT, listener.accept()).await??;
     let mut upload =
-        LocalFileSink::new(&config.output_dir).begin_write(&transfer_id, &upload_path)?;
+        LocalStagingStore::new(config.staging_dir()).begin_write(&transfer_id, &upload_path)?;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let bytes_read = timeout(DATA_TIMEOUT, data.read(&mut buffer)).await??;
@@ -400,7 +401,23 @@ async fn handle_stor(
         }
         upload.write_all(&buffer[..bytes_read])?;
     }
-    let progress = upload.finish()?;
+    let staged = upload.finish()?;
+    let queue_item = config.enqueue_publish(
+        &staged.transfer_id,
+        &staged.staged_path.display().to_string(),
+        &staged.final_filename,
+        staged.bytes_written,
+    )?;
+    let progress = match LocalFolderObjectStore::new(&config.output_dir).publish(staged) {
+        Ok(progress) => {
+            config.mark_publish_completed(&queue_item.queue_id)?;
+            progress
+        }
+        Err(error) => {
+            let _ = config.mark_publish_failed(&queue_item.queue_id, &error.to_string());
+            return Err(error);
+        }
+    };
     let final_path = progress
         .output_path
         .clone()

@@ -70,8 +70,8 @@ async fn ftp_server_accepts_passive_stor_upload() {
         .await
         .expect("data should write");
     assert!(
-        wait_for_path(temp_dir.path().join("IMG_4321.CR3.tmp")).await,
-        "temporary upload file should exist before the data connection closes"
+        wait_for_staged_file(state_dir.path().join("staging")).await,
+        "staged upload file should exist before the data connection closes"
     );
     assert!(!temp_dir.path().join("IMG_4321.CR3").exists());
     data.shutdown().await.expect("data should close");
@@ -251,10 +251,14 @@ fn passive_addr_from_reply(reply: &str) -> SocketAddr {
         .expect("passive address should parse")
 }
 
-async fn wait_for_path(path: impl AsRef<std::path::Path>) -> bool {
+async fn wait_for_staged_file(path: impl AsRef<std::path::Path>) -> bool {
     let path = path.as_ref();
     for _ in 0..20 {
-        if path.exists() {
+        if path
+            .read_dir()
+            .map(|mut entries| entries.any(|entry| entry.is_ok()))
+            .unwrap_or(false)
+        {
             return true;
         }
         sleep(Duration::from_millis(25)).await;

@@ -17,9 +17,9 @@ use tokio::sync::Mutex;
 
 use crate::{
     append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
-    record_device_connected, record_device_disconnected, ImporterError, LocalFileSink,
-    LocalFileUpload, PushProtocol, PushReceiverConfig, ReceiverAccount, Result, TransferRecord,
-    TransferStatus,
+    record_device_connected, record_device_disconnected, ImporterError, LocalFolderObjectStore,
+    LocalStagedUpload, LocalStagingStore, PushProtocol, PushReceiverConfig, ReceiverAccount,
+    Result, TransferRecord, TransferStatus,
 };
 
 const SFTP_HOST_KEY_FILENAME: &str = "sftp-host-key";
@@ -253,7 +253,7 @@ struct PendingUpload {
     transfer_id: String,
     original_path: String,
     started_at_ms: i64,
-    upload: LocalFileUpload,
+    upload: LocalStagedUpload,
 }
 
 struct SftpSession {
@@ -313,7 +313,7 @@ impl russh_sftp::server::Handler for SftpSession {
         let handle = format!("upload-{}", self.next_handle);
         let started_at_ms = current_time_ms();
         let transfer_id = format!("sftp:{started_at_ms}:{filename}");
-        let upload = LocalFileSink::new(&self.config.output_dir)
+        let upload = LocalStagingStore::new(self.config.staging_dir())
             .begin_write(&transfer_id, &filename)
             .map_err(|_| StatusCode::Failure)?;
         self.uploads.insert(
@@ -348,7 +348,30 @@ impl russh_sftp::server::Handler for SftpSession {
 
     async fn close(&mut self, id: u32, handle: String) -> std::result::Result<Status, Self::Error> {
         let upload = self.uploads.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
-        let progress = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
+        let staged = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
+        let queue_item = self
+            .config
+            .enqueue_publish(
+                &staged.transfer_id,
+                &staged.staged_path.display().to_string(),
+                &staged.final_filename,
+                staged.bytes_written,
+            )
+            .map_err(|_| StatusCode::Failure)?;
+        let progress = match LocalFolderObjectStore::new(&self.config.output_dir).publish(staged) {
+            Ok(progress) => {
+                self.config
+                    .mark_publish_completed(&queue_item.queue_id)
+                    .map_err(|_| StatusCode::Failure)?;
+                progress
+            }
+            Err(error) => {
+                let _ = self
+                    .config
+                    .mark_publish_failed(&queue_item.queue_id, &error.to_string());
+                return Err(StatusCode::Failure);
+            }
+        };
         let record = TransferRecord {
             transfer_id: upload.transfer_id,
             protocol: "sftp".to_string(),

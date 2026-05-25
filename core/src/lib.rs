@@ -35,5 +35,6 @@ pub use service::{
     ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
-    Project, ProjectStatus, PublishQueueItem, PublishState, SqliteStore, StoredAsset,
+    LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectStatus,
+    PublishQueueItem, PublishState, SqliteStore, StagedObject, StoredAsset,
 };
