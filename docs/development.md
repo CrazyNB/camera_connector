@@ -123,6 +123,17 @@ Use `--offset` and `--limit` with `--from-transfers` for large imports or UI "lo
 target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
 ```
 
+Manage the active shooting project before importing or reviewing assets:
+
+```powershell
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json create --name "Client Shoot"
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json list
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json active
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json select --id project-...
+```
+
+Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project active` ensures a default Inbox project exists when no project has been selected yet.
+
 Read the app dashboard model in one command:
 
 ```powershell
@@ -137,11 +148,11 @@ Use JSON output for UI shells or automation:
 target\debug\camera-connector.exe dashboard --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --limit 50 --json
 ```
 
-The inbox is intentionally flat. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path and login username remain in the state directory's `transfer-log.jsonl` for filtering. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
+The completed file folder remains flat for predictable export paths. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path, login username, project id, storage location, and grouping metadata live in the state directory. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `camera-connector.sqlite3`, `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, and `sftp-host-key` belong in the state directory, not the upload inbox.
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 
-Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The same config file stores receiver defaults such as protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, source name, and accounts. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
+Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The same config file stores receiver defaults such as protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, source name, and accounts. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `project`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
 
 The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, receiver lifecycle, transfer logs, connected devices, flat inbox handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call `CameraConnectorService`, `CameraConnectorRuntime`, or lower-level core APIs, and print results.
 

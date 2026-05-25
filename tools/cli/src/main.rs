@@ -7,7 +7,7 @@ use camera_connector_core::ReceiverSettingsConfig;
 use camera_connector_core::{
     append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
-    LocalFileSink, ObjectFormat, PushProtocol, PushReceiverConfig, ReceivedAsset,
+    LocalFileSink, ObjectFormat, Project, PushProtocol, PushReceiverConfig, ReceivedAsset,
     ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
     Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
     TransferStatus,
@@ -209,6 +209,12 @@ enum Command {
         #[command(subcommand)]
         action: AccountCommand,
     },
+    Project {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[command(subcommand)]
+        action: ProjectCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -225,6 +231,20 @@ enum AccountCommand {
     Remove {
         #[arg(long)]
         username: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectCommand {
+    List,
+    Create {
+        #[arg(long)]
+        name: String,
+    },
+    Active,
+    Select {
+        #[arg(long, alias = "project-id")]
+        id: String,
     },
 }
 
@@ -559,6 +579,9 @@ async fn main() -> Result<()> {
         Some(Command::Account { config, action }) => {
             handle_account_command(config.as_deref(), action)?;
         }
+        Some(Command::Project { config, action }) => {
+            handle_project_command(config.as_deref(), action)?;
+        }
         Some(Command::Devices {
             config,
             state,
@@ -605,6 +628,17 @@ fn transfer_view_line(view: &TransferRecordView) -> String {
         view.final_location_kind.as_deref().unwrap_or("-"),
         view.final_location_label.as_deref().unwrap_or("-"),
         record.error.as_deref().unwrap_or("-")
+    )
+}
+
+fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
+    format!(
+        "project\tid={}\tname={}\tslug={}\tstatus={}\tactive={}",
+        project.project_id,
+        project.name,
+        project.slug,
+        project.status.as_str(),
+        active_project_id == Some(project.project_id.as_str())
     )
 }
 
@@ -989,6 +1023,52 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
     Ok(())
 }
 
+fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) -> Result<()> {
+    let service = CameraConnectorService::new(config_path.map(Path::to_path_buf));
+    match action {
+        ProjectCommand::List => {
+            let active_project = service.active_project()?;
+            let active_project_id = active_project
+                .as_ref()
+                .map(|project| project.project_id.as_str());
+            let projects = service.list_projects()?;
+            if projects.is_empty() {
+                println!("projects: -");
+            } else {
+                for project in projects {
+                    println!("{}", project_line(&project, active_project_id));
+                }
+            }
+        }
+        ProjectCommand::Create { name } => {
+            let project = service.create_project(name)?;
+            service.set_active_project(&project.project_id)?;
+            println!(
+                "{}",
+                project_line(&project, Some(project.project_id.as_str()))
+            );
+        }
+        ProjectCommand::Active => {
+            let project = service.ensure_active_project()?;
+            println!(
+                "{}",
+                project_line(&project, Some(project.project_id.as_str()))
+            );
+        }
+        ProjectCommand::Select { id } => {
+            service.set_active_project(&id)?;
+            let project = service.active_project()?.ok_or_else(|| {
+                camera_connector_core::ImporterError::internal("active project was not set")
+            })?;
+            println!(
+                "{}",
+                project_line(&project, Some(project.project_id.as_str()))
+            );
+        }
+    }
+    Ok(())
+}
+
 fn handle_receiver_settings_command(
     config_path: Option<&Path>,
     args: ReceiverSettingsArgs,
@@ -1299,6 +1379,51 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_project_create_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "create",
+            "--name",
+            "Verify Shoot",
+        ])
+        .expect("project create command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Project {
+                config: Some(_),
+                action: ProjectCommand::Create { name },
+            }) if name == "Verify Shoot"
+        ));
+    }
+
+    #[test]
+    fn project_line_marks_active_project() {
+        let project = camera_connector_core::Project {
+            project_id: "project-1".to_string(),
+            name: "Verify Shoot".to_string(),
+            slug: "verify-shoot".to_string(),
+            status: camera_connector_core::ProjectStatus::Active,
+            created_at_ms: 10,
+            updated_at_ms: 20,
+            archived_at_ms: None,
+            default_output_target_id: None,
+            default_strategy_profile_id: None,
+        };
+
+        let line = project_line(&project, Some("project-1"));
+
+        assert!(line.contains("project\tid=project-1"));
+        assert!(line.contains("name=Verify Shoot"));
+        assert!(line.contains("slug=verify-shoot"));
+        assert!(line.contains("status=active"));
+        assert!(line.contains("active=true"));
     }
 
     #[test]

@@ -101,6 +101,39 @@ if ($configJson.receiver.output_dir -ne $pushOutput -or $configJson.receiver.sta
     throw "receiver-settings did not persist updated receiver paths"
 }
 
+$projectCreate = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath create --name "Verify Shoot"
+if ($LASTEXITCODE -ne 0) { throw "project create smoke failed" }
+$projectCreateLine = @($projectCreate | Where-Object { $_ -like "project*name=Verify Shoot*active=true*" })
+if ($projectCreateLine.Count -lt 1) {
+    throw "project create did not create an active project"
+}
+if ($projectCreateLine[0] -notmatch "id=([^\t]+)") {
+    throw "project create did not print a project id"
+}
+$projectId = $Matches[1]
+Write-Output $projectCreate
+
+$projectActive = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath active
+if ($LASTEXITCODE -ne 0) { throw "project active smoke failed" }
+if (($projectActive | Where-Object { $_ -like "project*id=$projectId*name=Verify Shoot*active=true*" }).Count -lt 1) {
+    throw "project active did not return the created project"
+}
+Write-Output $projectActive
+
+$projectList = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath list
+if ($LASTEXITCODE -ne 0) { throw "project list smoke failed" }
+if (($projectList | Where-Object { $_ -like "project*id=$projectId*name=Verify Shoot*active=true*" }).Count -lt 1) {
+    throw "project list did not include the active project"
+}
+Write-Output $projectList
+
+$projectSelect = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath select --id $projectId
+if ($LASTEXITCODE -ne 0) { throw "project select smoke failed" }
+if (($projectSelect | Where-Object { $_ -like "project*id=$projectId*active=true*" }).Count -lt 1) {
+    throw "project select did not mark the project active"
+}
+Write-Output $projectSelect
+
 & (Join-Path $root "target\debug\camera-connector.exe") receiver-config --config $configPath --protocol ftp --output $pushOutput --state $pushState
 if ($LASTEXITCODE -ne 0) { throw "receiver-config smoke failed" }
 
