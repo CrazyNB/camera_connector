@@ -152,8 +152,10 @@ enum Command {
     Inbox {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long)]
-        path: PathBuf,
+        #[arg(long, required_unless_present = "project_id")]
+        path: Option<PathBuf>,
+        #[arg(long, alias = "project")]
+        project_id: Option<String>,
         #[arg(long, default_value = "ftp")]
         source: String,
         #[arg(long)]
@@ -488,6 +490,7 @@ async fn main() -> Result<()> {
         Some(Command::Inbox {
             config,
             path,
+            project_id,
             source,
             from_transfers,
             summary,
@@ -500,7 +503,7 @@ async fn main() -> Result<()> {
             limit,
         }) => {
             let source = parse_source(&source)?;
-            let service = CameraConnectorService::new(config);
+            let service = CameraConnectorService::new(config.clone());
             let query = AssetGroupQuery {
                 username,
                 source_name,
@@ -508,7 +511,20 @@ async fn main() -> Result<()> {
                 remote_addr,
                 format: format.as_deref().map(parse_object_format).transpose()?,
             };
-            let groups = if from_transfers {
+            let groups = if let Some(project_id) = project_id {
+                let page = load_project_inbox_page(
+                    config,
+                    &project_id,
+                    query,
+                    offset,
+                    limit.unwrap_or(50),
+                )?;
+                if summary {
+                    println!("{}", asset_group_page_summary_line(&page));
+                }
+                page.groups
+            } else if from_transfers {
+                let path = path.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
                 if let Some(limit) = limit {
                     let page =
                         service.transfer_asset_group_page_with_query(path, query, offset, limit)?;
@@ -525,6 +541,7 @@ async fn main() -> Result<()> {
                     service.transfer_asset_groups_with_query(path, query)?
                 }
             } else {
+                let path = path.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
                 service.inbox_groups(path, source)?
             };
             print_asset_groups(groups);
@@ -702,6 +719,17 @@ fn load_dashboard(args: DashboardArgs) -> Result<CameraConnectorDashboard> {
             )
         }
     }
+}
+
+fn load_project_inbox_page(
+    config: Option<PathBuf>,
+    project_id: &str,
+    query: AssetGroupQuery,
+    offset: usize,
+    limit: usize,
+) -> Result<AssetGroupPage> {
+    CameraConnectorService::new(config)
+        .project_asset_group_page_with_query(project_id, query, offset, limit)
 }
 
 fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
@@ -1398,6 +1426,99 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn parses_project_inbox_command_without_path() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "inbox",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "--project-id",
+            "project-1",
+            "--summary",
+            "--offset",
+            "1",
+            "--limit",
+            "20",
+        ])
+        .expect("project inbox command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Inbox {
+                path: None,
+                project_id: Some(project_id),
+                summary: true,
+                offset: 1,
+                limit: Some(20),
+                ..
+            }) if project_id == "project-1"
+        ));
+    }
+
+    #[test]
+    fn project_inbox_loads_asset_page_from_sqlite() {
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-project-inbox-{}",
+            current_time_ms()
+        ));
+        let config_path = root.join("config.json");
+        let state_dir = root.join("state");
+        std::fs::create_dir_all(&root).expect("temp root should create");
+        let service = CameraConnectorService::new(Some(config_path.clone()));
+        service
+            .set_receiver_settings(ReceiverSettingsUpdate {
+                state_dir: Some(state_dir),
+                ..ReceiverSettingsUpdate::default()
+            })
+            .expect("receiver settings should save");
+        let project = service
+            .create_project("Project Inbox")
+            .expect("project should create");
+        service
+            .record_project_transfer(
+                &project.project_id,
+                TransferRecord {
+                    transfer_id: "ftp:project-inbox".to_string(),
+                    protocol: "ftp".to_string(),
+                    status: TransferStatus::Completed,
+                    original_path: "DCIM/100/IMG_0202.CR3".to_string(),
+                    final_filename: "IMG_0202.CR3".to_string(),
+                    final_path: None,
+                    final_location: Some(StoredObjectLocation::local_path(
+                        root.join("IMG_0202.CR3"),
+                    )),
+                    size_bytes: 42,
+                    username: Some("verify".to_string()),
+                    remote_addr: None,
+                    source_name: Some("Verify Camera".to_string()),
+                    started_at_ms: 10,
+                    completed_at_ms: Some(20),
+                    error: None,
+                },
+            )
+            .expect("project transfer should record");
+
+        let page = load_project_inbox_page(
+            Some(config_path.clone()),
+            &project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            50,
+        )
+        .expect("project inbox page should load");
+
+        assert_eq!(page.total_groups, 1);
+        assert_eq!(page.summary.asset_count, 1);
+        assert_eq!(page.groups[0].primary.filename, "IMG_0202.CR3");
+        assert_eq!(
+            page.groups[0].primary.display_source.as_deref(),
+            Some("Verify Camera")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

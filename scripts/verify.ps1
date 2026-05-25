@@ -347,6 +347,16 @@ if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=
 }
 Write-Output $filteredLogBackedInboxOutput
 
+$projectInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --project-id $projectId --summary --username "verify" --limit 1
+if ($LASTEXITCODE -ne 0) { throw "project inbox smoke failed" }
+if (($projectInboxOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
+    throw "project inbox did not expose paged project asset summary"
+}
+if (($projectInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
+    throw "project inbox did not expose project asset rows"
+}
+Write-Output $projectInboxOutput
+
 $projectDashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --project-id $projectId --username "verify" --limit 1
 if ($LASTEXITCODE -ne 0) { throw "project dashboard smoke failed" }
 if (($projectDashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {

@@ -95,7 +95,13 @@ target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 -
 
 `receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the active project in SQLite. If the state directory has no active project yet, it creates and selects the system Inbox project first.
 
-List the receiver inbox and RAW/JPEG groups:
+List project assets and RAW/JPEG groups from SQLite:
+
+```powershell
+target\debug\camera-connector.exe inbox --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --summary --username z5 --limit 50
+```
+
+List the receiver folder directly for legacy diagnostics:
 
 ```powershell
 target\debug\camera-connector.exe inbox --path C:\Users\hxn\Pictures\CameraConnector --source ftp
@@ -113,7 +119,7 @@ Use `--status completed` or `--status failed` when triaging receiver health:
 target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --status failed
 ```
 
-For mobile-style views that cannot scan a real output folder, build groups from the transfer log:
+For transfer-log diagnostics that cannot scan a real output folder, build groups from the transfer log:
 
 ```powershell
 target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
