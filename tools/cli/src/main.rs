@@ -252,6 +252,14 @@ enum ProjectCommand {
         #[arg(long, alias = "project-id")]
         id: String,
     },
+    Archive {
+        #[arg(long, alias = "project-id")]
+        id: String,
+    },
+    Restore {
+        #[arg(long, alias = "project-id")]
+        id: String,
+    },
 }
 
 struct ConfigArgs {
@@ -1186,6 +1194,18 @@ fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) ->
                 project_line(&project, Some(project.project_id.as_str()))
             );
         }
+        ProjectCommand::Archive { id } => {
+            let project = service.archive_project(&id)?;
+            println!("{}", project_line(&project, None));
+        }
+        ProjectCommand::Restore { id } => {
+            let project = service.restore_project(&id)?;
+            let active_project = service.active_project()?;
+            let active_project_id = active_project
+                .as_ref()
+                .map(|project| project.project_id.as_str());
+            println!("{}", project_line(&project, active_project_id));
+        }
     }
     Ok(())
 }
@@ -1821,6 +1841,90 @@ mod tests {
         assert!(line.contains("slug=verify-shoot"));
         assert!(line.contains("status=active"));
         assert!(line.contains("active=true"));
+    }
+
+    #[test]
+    fn parses_project_archive_and_restore_commands() {
+        let archive = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "archive",
+            "--id",
+            "project-1",
+        ])
+        .expect("project archive command should parse");
+        let restore = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "restore",
+            "--id",
+            "project-1",
+        ])
+        .expect("project restore command should parse");
+
+        assert!(matches!(
+            archive.command,
+            Some(Command::Project {
+                action: ProjectCommand::Archive { id },
+                ..
+            }) if id == "project-1"
+        ));
+        assert!(matches!(
+            restore.command,
+            Some(Command::Project {
+                action: ProjectCommand::Restore { id },
+                ..
+            }) if id == "project-1"
+        ));
+    }
+
+    #[test]
+    fn project_archive_command_clears_active_project() {
+        let path = unique_temp_config_path("project-archive");
+
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::Create {
+                name: "Archive Me".to_string(),
+            },
+        )
+        .expect("project should create");
+        let service = CameraConnectorService::new(Some(path.clone()));
+        let project = service
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist");
+
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::Archive {
+                id: project.project_id.clone(),
+            },
+        )
+        .expect("project should archive");
+
+        assert!(service
+            .active_project()
+            .expect("active project should load")
+            .is_none());
+        assert!(service.set_active_project(&project.project_id).is_err());
+
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::Restore {
+                id: project.project_id.clone(),
+            },
+        )
+        .expect("project should restore");
+        service
+            .set_active_project(&project.project_id)
+            .expect("restored project should be selectable");
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

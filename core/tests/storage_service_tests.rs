@@ -1,5 +1,5 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, ReceiverSettingsUpdate, SqliteStore,
+    AssetGroupQuery, CameraConnectorService, ProjectStatus, ReceiverSettingsUpdate, SqliteStore,
     StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
 };
 
@@ -70,6 +70,48 @@ fn service_ensure_active_project_keeps_existing_selection() {
         .expect("active project should be ensured");
 
     assert_eq!(ensured.project_id, project.project_id);
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_archives_active_project_and_restores_selection() {
+    let config_path = unique_temp_path("storage-service-archive-project");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Archive")
+        .expect("project should create");
+    service
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let archived = service
+        .archive_project(&project.project_id)
+        .expect("project should archive");
+
+    assert_eq!(archived.status, ProjectStatus::Archived);
+    assert!(service
+        .active_project()
+        .expect("active project should load")
+        .is_none());
+    assert!(service.set_active_project(&project.project_id).is_err());
+
+    let restored = service
+        .restore_project(&project.project_id)
+        .expect("project should restore");
+    service
+        .set_active_project(&project.project_id)
+        .expect("restored project should be selectable");
+
+    assert_eq!(restored.status, ProjectStatus::Active);
+    assert_eq!(
+        service
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist")
+            .project_id,
+        project.project_id
+    );
 
     let _ = std::fs::remove_file(config_path);
 }

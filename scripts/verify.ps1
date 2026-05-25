@@ -127,6 +127,27 @@ if (($projectList | Where-Object { $_ -like "project*id=$projectId*name=Verify S
 }
 Write-Output $projectList
 
+$projectArchive = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath archive --id $projectId
+if ($LASTEXITCODE -ne 0) { throw "project archive smoke failed" }
+if (($projectArchive | Where-Object { $_ -like "project*id=$projectId*status=archived*active=false*" }).Count -lt 1) {
+    throw "project archive did not mark project archived"
+}
+Write-Output $projectArchive
+
+$projectActiveAfterArchive = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath list
+if ($LASTEXITCODE -ne 0) { throw "project list after archive smoke failed" }
+if (($projectActiveAfterArchive | Where-Object { $_ -like "project*id=$projectId*status=archived*active=true*" }).Count -gt 0) {
+    throw "project archive should clear active project selection"
+}
+Write-Output $projectActiveAfterArchive
+
+$projectRestore = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath restore --id $projectId
+if ($LASTEXITCODE -ne 0) { throw "project restore smoke failed" }
+if (($projectRestore | Where-Object { $_ -like "project*id=$projectId*status=active*" }).Count -lt 1) {
+    throw "project restore did not reactivate project status"
+}
+Write-Output $projectRestore
+
 $projectSelect = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath select --id $projectId
 if ($LASTEXITCODE -ne 0) { throw "project select smoke failed" }
 if (($projectSelect | Where-Object { $_ -like "project*id=$projectId*active=true*" }).Count -lt 1) {

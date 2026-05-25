@@ -144,9 +144,11 @@ target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json list
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json active
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json select --id project-...
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json archive --id project-...
+target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json restore --id project-...
 ```
 
-Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project active` ensures a default Inbox project exists when no project has been selected yet.
+Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project active` ensures a default Inbox project exists when no project has been selected yet. Archiving keeps the project data queryable but clears it as the active import target until it is restored and selected again.
 
 Read the project-scoped dashboard model in one command:
 

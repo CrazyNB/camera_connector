@@ -234,9 +234,45 @@ impl SqliteStore {
         })
     }
 
+    pub fn archive_project(&self, project_id: &str) -> Result<Project> {
+        self.with_connection(|connection| {
+            let now = current_time_ms();
+            ensure_project_exists(connection, project_id)?;
+            connection.execute(
+                "UPDATE projects
+                 SET status = ?1, archived_at_ms = ?2, updated_at_ms = ?2
+                 WHERE project_id = ?3",
+                params![ProjectStatus::Archived.as_str(), now, project_id],
+            )?;
+            connection.execute(
+                "DELETE FROM app_state WHERE key = ?1 AND value = ?2",
+                params![ACTIVE_PROJECT_KEY, project_id],
+            )?;
+            project_by_id(connection, project_id)?.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("project not found".to_string())
+            })
+        })
+    }
+
+    pub fn restore_project(&self, project_id: &str) -> Result<Project> {
+        self.with_connection(|connection| {
+            let now = current_time_ms();
+            ensure_project_exists(connection, project_id)?;
+            connection.execute(
+                "UPDATE projects
+                 SET status = ?1, archived_at_ms = NULL, updated_at_ms = ?2
+                 WHERE project_id = ?3",
+                params![ProjectStatus::Active.as_str(), now, project_id],
+            )?;
+            project_by_id(connection, project_id)?.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("project not found".to_string())
+            })
+        })
+    }
+
     pub fn set_active_project(&self, project_id: &str) -> Result<()> {
         self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
+            ensure_project_is_active(connection, project_id)?;
             connection.execute(
                 "INSERT INTO app_state (key, value) VALUES (?1, ?2)
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -263,7 +299,7 @@ impl SqliteStore {
                     "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
                             archived_at_ms, default_output_target_id, default_strategy_profile_id
                      FROM projects
-                     WHERE project_id = ?1",
+                     WHERE project_id = ?1 AND status = 'active'",
                     params![project_id],
                     project_from_row,
                 )
@@ -274,7 +310,7 @@ impl SqliteStore {
     pub fn record_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
-            ensure_project_exists(&transaction, project_id)?;
+            ensure_project_is_active(&transaction, project_id)?;
             insert_transfer(&transaction, project_id, &record)?;
             if record.status == TransferStatus::Completed {
                 insert_asset_for_transfer(&transaction, project_id, &record)?;
@@ -393,7 +429,7 @@ impl SqliteStore {
             updated_at_ms: now,
         };
         self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
+            ensure_project_is_active(connection, project_id)?;
             connection.execute(
                 "INSERT INTO publish_queue (
                     queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
@@ -630,19 +666,42 @@ fn ensure_project_exists(
     connection: &Connection,
     project_id: &str,
 ) -> std::result::Result<(), rusqlite::Error> {
-    let exists: Option<i64> = connection
-        .query_row(
-            "SELECT 1 FROM projects WHERE project_id = ?1",
-            params![project_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if exists.is_none() {
+    if project_by_id(connection, project_id)?.is_none() {
         return Err(rusqlite::Error::InvalidParameterName(
             "project not found".to_string(),
         ));
     }
     Ok(())
+}
+
+fn ensure_project_is_active(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Project, rusqlite::Error> {
+    let project = project_by_id(connection, project_id)?
+        .ok_or_else(|| rusqlite::Error::InvalidParameterName("project not found".to_string()))?;
+    if project.status == ProjectStatus::Archived {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "project archived".to_string(),
+        ));
+    }
+    Ok(project)
+}
+
+fn project_by_id(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Option<Project>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
+                    archived_at_ms, default_output_target_id, default_strategy_profile_id
+             FROM projects
+             WHERE project_id = ?1",
+            params![project_id],
+            project_from_row,
+        )
+        .optional()
 }
 
 fn insert_transfer(

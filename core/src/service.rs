@@ -220,6 +220,14 @@ impl CameraConnectorService {
         self.storage_store()?.create_project(name)
     }
 
+    pub fn archive_project(&self, project_id: &str) -> Result<crate::Project> {
+        self.storage_store()?.archive_project(project_id)
+    }
+
+    pub fn restore_project(&self, project_id: &str) -> Result<crate::Project> {
+        self.storage_store()?.restore_project(project_id)
+    }
+
     pub fn set_active_project(&self, project_id: &str) -> Result<()> {
         self.storage_store()?.set_active_project(project_id)
     }

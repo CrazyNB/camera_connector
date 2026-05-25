@@ -1,6 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, ObjectFormat, SqliteStore, StoredObjectLocation, TransferRecord,
-    TransferStatus,
+    AssetGroupQuery, ObjectFormat, ProjectStatus, SqliteStore, StoredObjectLocation,
+    TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -25,6 +25,48 @@ fn sqlite_store_creates_projects_and_tracks_active_project() {
     assert_eq!(active.name, "Studio Product Shoot");
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].status.as_str(), "active");
+}
+
+#[test]
+fn sqlite_store_archives_projects_and_clears_active_selection() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Archive Me")
+        .expect("project should create");
+    store
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let archived = store
+        .archive_project(&project.project_id)
+        .expect("project should archive");
+
+    assert_eq!(archived.status, ProjectStatus::Archived);
+    assert!(archived.archived_at_ms.is_some());
+    assert!(store
+        .active_project()
+        .expect("active project should load")
+        .is_none());
+    assert!(store.set_active_project(&project.project_id).is_err());
+
+    let restored = store
+        .restore_project(&project.project_id)
+        .expect("project should restore");
+    store
+        .set_active_project(&project.project_id)
+        .expect("restored project should become active");
+
+    assert_eq!(restored.status, ProjectStatus::Active);
+    assert!(restored.archived_at_ms.is_none());
+    assert_eq!(
+        store
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist")
+            .project_id,
+        project.project_id
+    );
 }
 
 #[test]
