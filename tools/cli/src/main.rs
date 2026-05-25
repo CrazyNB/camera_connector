@@ -9,7 +9,7 @@ use camera_connector_core::{
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, ObjectFormat, Project, PushProtocol, PushReceiverConfig, ReceivedAsset,
     ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
-    Result, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
+    Result, SqliteStore, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
     TransferStatus,
 };
 use clap::{Parser, Subcommand};
@@ -272,6 +272,15 @@ struct ReceiverSettingsArgs {
     source_name: Option<String>,
 }
 
+struct ReceiveFileArgs {
+    input: PathBuf,
+    output: PathBuf,
+    state: Option<PathBuf>,
+    source: ImportSource,
+    username: Option<String>,
+    source_name: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -288,57 +297,14 @@ async fn main() -> Result<()> {
             username,
             source_name,
         }) => {
-            let source = parse_source(&source)?;
-            let filename = input
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
-            let bytes = fs::read(&input)?;
-            let started_at_ms = current_time_ms();
-            let protocol_label = source_protocol_label(source);
-            let progress = LocalFileSink::new(output).write_complete(
-                format!("{protocol_label}:{started_at_ms}:{filename}"),
-                filename,
-                &bytes,
-            )?;
-            let asset = ReceivedAsset::new(
-                progress.transfer_id,
-                progress.filename,
-                progress.bytes_written,
-                source,
-            );
-            println!(
-                "received {}\t{:?}\t{} bytes",
-                asset.filename, asset.format, asset.size_bytes
-            );
-            let final_path = progress.output_path.clone().ok_or_else(|| {
-                camera_connector_core::ImporterError::internal("missing output path")
+            handle_receive_file_command(ReceiveFileArgs {
+                input,
+                output,
+                state,
+                source: parse_source(&source)?,
+                username,
+                source_name,
             })?;
-            let log_dir = state.unwrap_or_else(|| {
-                final_path
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .to_path_buf()
-            });
-            append_transfer_record(
-                &log_dir,
-                &TransferRecord {
-                    transfer_id: asset.id,
-                    protocol: protocol_label.to_string(),
-                    status: TransferStatus::Completed,
-                    original_path: filename.to_string(),
-                    final_filename: asset.filename,
-                    final_path: Some(final_path),
-                    final_location: progress.output_location,
-                    size_bytes: progress.bytes_written,
-                    username,
-                    remote_addr: None,
-                    source_name,
-                    started_at_ms,
-                    completed_at_ms: Some(current_time_ms()),
-                    error: None,
-                },
-            )?;
         }
         Some(Command::ReceiverConfig {
             config,
@@ -629,6 +595,74 @@ fn transfer_view_line(view: &TransferRecordView) -> String {
         view.final_location_label.as_deref().unwrap_or("-"),
         record.error.as_deref().unwrap_or("-")
     )
+}
+
+fn handle_receive_file_command(args: ReceiveFileArgs) -> Result<TransferRecord> {
+    let filename = args
+        .input
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
+    let bytes = fs::read(&args.input)?;
+    let started_at_ms = current_time_ms();
+    let protocol_label = source_protocol_label(args.source);
+    let progress = LocalFileSink::new(args.output).write_complete(
+        format!("{protocol_label}:{started_at_ms}:{filename}"),
+        filename,
+        &bytes,
+    )?;
+    let asset = ReceivedAsset::new(
+        progress.transfer_id,
+        progress.filename,
+        progress.bytes_written,
+        args.source,
+    );
+    println!(
+        "received {}\t{:?}\t{} bytes",
+        asset.filename, asset.format, asset.size_bytes
+    );
+    let final_path = progress
+        .output_path
+        .clone()
+        .ok_or_else(|| camera_connector_core::ImporterError::internal("missing output path"))?;
+    let log_dir = args.state.unwrap_or_else(|| {
+        final_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    });
+    let record = TransferRecord {
+        transfer_id: asset.id,
+        protocol: protocol_label.to_string(),
+        status: TransferStatus::Completed,
+        original_path: filename.to_string(),
+        final_filename: asset.filename,
+        final_path: Some(final_path),
+        final_location: progress.output_location,
+        size_bytes: progress.bytes_written,
+        username: args.username,
+        remote_addr: None,
+        source_name: args.source_name,
+        started_at_ms,
+        completed_at_ms: Some(current_time_ms()),
+        error: None,
+    };
+    append_transfer_record(&log_dir, &record)?;
+    record_transfer_in_active_project(&log_dir, &record)?;
+    Ok(record)
+}
+
+fn record_transfer_in_active_project(state_dir: &Path, record: &TransferRecord) -> Result<()> {
+    let store = SqliteStore::open_state_dir(state_dir)?;
+    let project = match store.active_project()? {
+        Some(project) => project,
+        None => {
+            let project = store.ensure_inbox_project()?;
+            store.set_active_project(&project.project_id)?;
+            project
+        }
+    };
+    store.record_transfer(&project.project_id, record.clone())
 }
 
 fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
@@ -1424,6 +1458,53 @@ mod tests {
         assert!(line.contains("slug=verify-shoot"));
         assert!(line.contains("status=active"));
         assert!(line.contains("active=true"));
+    }
+
+    #[test]
+    fn receive_file_command_indexes_upload_under_active_project() {
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-receive-file-{}",
+            current_time_ms()
+        ));
+        let input = root.join("IMG_0001.CR3");
+        let output = root.join("output");
+        let state = root.join("state");
+        std::fs::create_dir_all(&root).expect("temp root should create");
+        std::fs::write(&input, [1_u8, 2, 3, 4]).expect("sample should write");
+
+        let store = camera_connector_core::SqliteStore::open_state_dir(&state)
+            .expect("storage should open");
+        let project = store
+            .create_project("CLI Shoot")
+            .expect("project should create");
+        store
+            .set_active_project(&project.project_id)
+            .expect("project should become active");
+
+        let record = handle_receive_file_command(ReceiveFileArgs {
+            input,
+            output,
+            state: Some(state.clone()),
+            source: ImportSource::FtpPush,
+            username: Some("verify".to_string()),
+            source_name: Some("Verify Camera".to_string()),
+        })
+        .expect("receive-file should index upload");
+
+        let page = store
+            .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 50)
+            .expect("project assets should load");
+
+        assert_eq!(record.final_filename, "IMG_0001.CR3");
+        assert_eq!(page.summary.asset_count, 1);
+        assert_eq!(page.groups[0].primary.filename, "IMG_0001.CR3");
+        assert_eq!(page.groups[0].primary.username.as_deref(), Some("verify"));
+        assert_eq!(
+            page.groups[0].primary.display_source.as_deref(),
+            Some("Verify Camera")
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

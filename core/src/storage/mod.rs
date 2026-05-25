@@ -1113,9 +1113,9 @@ fn original_filename(path: &str) -> String {
 
 fn source_identity(record: &TransferRecord) -> Option<String> {
     record
-        .username
+        .source_name
         .clone()
-        .or_else(|| record.source_name.clone())
+        .or_else(|| record.username.clone())
         .or_else(|| record.remote_addr.clone())
 }
 

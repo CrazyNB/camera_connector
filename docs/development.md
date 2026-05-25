@@ -93,6 +93,8 @@ Validate local ingest without a camera:
 target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 --output C:\Users\hxn\Pictures\CameraConnector --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --source ftp --source-name "Studio Camera"
 ```
 
+`receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the active project in SQLite. If the state directory has no active project yet, it creates and selects the system Inbox project first.
+
 List the receiver inbox and RAW/JPEG groups:
 
 ```powershell
