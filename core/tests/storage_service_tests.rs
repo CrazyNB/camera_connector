@@ -274,6 +274,50 @@ fn service_builds_project_dashboard_from_sqlite_assets() {
     let _ = std::fs::remove_file(config_path);
 }
 
+#[test]
+fn service_project_dashboard_includes_project_scoped_recent_failures() {
+    let config_path = unique_temp_path("storage-service-dashboard-failures");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project_a = service.create_project("A").expect("project should create");
+    let project_b = service.create_project("B").expect("project should create");
+
+    let mut failed_a = completed_transfer("ftp:a-failed", "DCIM/100/IMG_2001.JPG", 40);
+    failed_a.status = TransferStatus::Failed;
+    failed_a.error = Some("publish failed".to_string());
+    service
+        .record_project_transfer(&project_a.project_id, failed_a)
+        .expect("project failure should record");
+
+    let mut failed_b = completed_transfer("ftp:b-failed", "DCIM/100/IMG_2002.JPG", 50);
+    failed_b.status = TransferStatus::Failed;
+    failed_b.error = Some("other project failed".to_string());
+    service
+        .record_project_transfer(&project_b.project_id, failed_b)
+        .expect("other project failure should record");
+
+    let dashboard = service
+        .project_dashboard(
+            &project_a.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+            false,
+        )
+        .expect("project dashboard should build");
+
+    assert_eq!(dashboard.recent_failures.len(), 1);
+    assert_eq!(
+        dashboard.recent_failures[0].record.transfer_id,
+        "ftp:a-failed"
+    );
+    assert_eq!(
+        dashboard.recent_failures[0].record.error.as_deref(),
+        Some("publish failed")
+    );
+
+    let _ = std::fs::remove_file(config_path);
+}
+
 fn completed_transfer(
     transfer_id: &str,
     original_path: &str,

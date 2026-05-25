@@ -493,6 +493,23 @@ impl CameraConnectorService {
         Ok(views)
     }
 
+    pub fn project_recent_failed_transfers(
+        &self,
+        project_id: &str,
+        query: TransferQuery,
+        limit: usize,
+    ) -> Result<Vec<TransferRecordView>> {
+        let mut views = self.project_transfers(
+            project_id,
+            TransferQuery {
+                status: Some(TransferStatus::Failed),
+                ..query
+            },
+        )?;
+        views.truncate(limit);
+        Ok(views)
+    }
+
     pub fn connected_devices(
         &self,
         output_dir: impl AsRef<Path>,
@@ -600,7 +617,11 @@ impl CameraConnectorService {
                 completed_count,
                 failed_count,
             },
-            recent_failures: Vec::new(),
+            recent_failures: self.project_recent_failed_transfers(
+                project_id,
+                transfer_query_from_asset_query(&asset_query),
+                5,
+            )?,
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
