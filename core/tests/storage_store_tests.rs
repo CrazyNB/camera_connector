@@ -1,0 +1,199 @@
+use camera_connector_core::{
+    AssetGroupQuery, ObjectFormat, SqliteStore, StoredObjectLocation, TransferRecord,
+    TransferStatus,
+};
+
+#[test]
+fn sqlite_store_creates_projects_and_tracks_active_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+
+    let project = store
+        .create_project("Studio Product Shoot")
+        .expect("project should create");
+    store
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let active = store
+        .active_project()
+        .expect("active project should load")
+        .expect("active project should exist");
+    let projects = store.list_projects().expect("projects should list");
+
+    assert_eq!(active.project_id, project.project_id);
+    assert_eq!(active.name, "Studio Product Shoot");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].status.as_str(), "active");
+}
+
+#[test]
+fn sqlite_store_rejects_transfer_without_existing_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+
+    let result = store.record_transfer(
+        "missing-project",
+        completed_transfer("ftp:1", "IMG_0001.JPG", 10),
+    );
+
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .expect("error should exist")
+        .to_string()
+        .contains("project not found"));
+}
+
+#[test]
+fn sqlite_store_indexes_assets_and_groups_by_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project_a = store
+        .create_project("Wedding")
+        .expect("project should create");
+    let project_b = store
+        .create_project("Street")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project_a.project_id,
+            completed_transfer("ftp:jpg", "DCIM/100/IMG_2222.JPG", 20),
+        )
+        .expect("jpg transfer should record");
+    store
+        .record_transfer(
+            &project_a.project_id,
+            completed_transfer("ftp:raw", "DCIM/100/IMG_2222.NEF", 21),
+        )
+        .expect("raw transfer should record");
+    store
+        .record_transfer(
+            &project_b.project_id,
+            completed_transfer("ftp:other", "DCIM/100/IMG_2222.JPG", 22),
+        )
+        .expect("other project transfer should record");
+
+    let page = store
+        .asset_group_page(&project_a.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("groups should query");
+    let assets = store
+        .assets_for_group(&project_a.project_id, &page.groups[0].group_key)
+        .expect("group assets should query");
+
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.groups[0].group_key, "IMG_2222");
+    assert!(page.groups[0].jpeg.is_some());
+    assert!(page.groups[0].raw.is_some());
+    assert_eq!(page.summary.asset_count, 2);
+    assert_eq!(assets.len(), 2);
+    assert!(assets.iter().all(|asset| asset.group_id.is_some()));
+
+    let other_page = store
+        .asset_group_page(&project_b.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("other project groups should query");
+    assert_eq!(other_page.total_groups, 1);
+    assert_eq!(other_page.summary.asset_count, 1);
+}
+
+#[test]
+fn sqlite_store_preserves_duplicate_uploads_as_separate_assets() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Duplicates")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:first", "DCIM/100/IMG_7777.CR3", 10),
+        )
+        .expect("first transfer should record");
+    let mut duplicate = completed_transfer("ftp:second", "DCIM/100/IMG_7777.CR3", 20);
+    duplicate.final_filename = "IMG_7777 (1).CR3".to_string();
+    duplicate.final_location = Some(StoredObjectLocation::local_path(
+        temp_dir.path().join("IMG_7777 (1).CR3"),
+    ));
+    store
+        .record_transfer(&project.project_id, duplicate)
+        .expect("second transfer should record");
+
+    let page = store
+        .asset_group_page(
+            &project.project_id,
+            AssetGroupQuery {
+                format: Some(ObjectFormat::Cr3),
+                ..AssetGroupQuery::default()
+            },
+            0,
+            25,
+        )
+        .expect("groups should query");
+
+    assert_eq!(page.total_groups, 2);
+    assert_eq!(page.summary.asset_count, 2);
+    assert_eq!(page.groups[0].primary.duplicate_count, Some(2));
+    assert_eq!(page.groups[1].primary.duplicate_count, Some(2));
+}
+
+#[test]
+fn sqlite_store_tracks_publish_queue_retry_state() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Queue")
+        .expect("project should create");
+
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:queued",
+            "staged/ftp-queued.tmp",
+            "IMG_9000.NEF",
+            123,
+        )
+        .expect("publish item should enqueue");
+    store
+        .mark_publish_failed(&item.queue_id, "permission revoked")
+        .expect("publish failure should save");
+
+    let failed = store
+        .pending_publish_items()
+        .expect("pending publish items should load");
+
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].queue_id, item.queue_id);
+    assert_eq!(failed[0].attempt_count, 1);
+    assert_eq!(failed[0].last_error.as_deref(), Some("permission revoked"));
+    assert_eq!(failed[0].state.as_str(), "failed");
+}
+
+fn completed_transfer(
+    transfer_id: &str,
+    original_path: &str,
+    completed_at_ms: i64,
+) -> TransferRecord {
+    let final_filename = original_path
+        .rsplit('/')
+        .next()
+        .expect("filename should exist")
+        .to_string();
+    TransferRecord {
+        transfer_id: transfer_id.to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: original_path.to_string(),
+        final_filename: final_filename.clone(),
+        final_path: None,
+        final_location: Some(StoredObjectLocation::local_path(final_filename)),
+        size_bytes: 100,
+        username: Some("z5".to_string()),
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: Some("Studio Z5".to_string()),
+        started_at_ms: completed_at_ms - 1,
+        completed_at_ms: Some(completed_at_ms),
+        error: None,
+    }
+}
