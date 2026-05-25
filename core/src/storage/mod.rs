@@ -173,6 +173,50 @@ impl SqliteStore {
         })
     }
 
+    pub fn ensure_inbox_project(&self) -> Result<Project> {
+        self.with_connection(|connection| {
+            let existing = connection
+                .query_row(
+                    "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
+                            archived_at_ms, default_output_target_id, default_strategy_profile_id
+                     FROM projects
+                     WHERE project_id = ?1",
+                    params!["project-inbox"],
+                    project_from_row,
+                )
+                .optional()?;
+            if let Some(project) = existing {
+                return Ok(project);
+            }
+            let now = current_time_ms();
+            connection.execute(
+                "INSERT INTO projects (
+                    project_id, name, slug, status, created_at_ms, updated_at_ms,
+                    archived_at_ms, default_output_target_id, default_strategy_profile_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    "project-inbox",
+                    "Inbox",
+                    "inbox",
+                    ProjectStatus::Active.as_str(),
+                    now,
+                    now,
+                    Option::<i64>::None,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                ],
+            )?;
+            connection.query_row(
+                "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
+                        archived_at_ms, default_output_target_id, default_strategy_profile_id
+                 FROM projects
+                 WHERE project_id = ?1",
+                params!["project-inbox"],
+                project_from_row,
+            )
+        })
+    }
+
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(

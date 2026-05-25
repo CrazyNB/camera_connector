@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use camera_connector_core::{
-    read_connected_devices, read_transfer_log, PushProtocol, PushReceiverConfig, ReceiverAccount,
-    SftpPushServer,
+    read_connected_devices, read_transfer_log, AssetGroupQuery, PushProtocol, PushReceiverConfig,
+    ReceiverAccount, SftpPushServer, SqliteStore,
 };
 use russh::client;
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
@@ -128,6 +128,13 @@ async fn sftp_server_accepts_password_upload() {
     assert!(!temp_dir.path().join("connected-devices.json").exists());
     assert!(!temp_dir.path().join("sftp-host-key").exists());
     assert!(state_dir.path().join("sftp-host-key").exists());
+
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let page = store
+        .asset_group_page("project-inbox", AssetGroupQuery::default(), 0, 25)
+        .expect("inbox project groups should query");
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.groups[0].group_key, "IMG_1001");
 }
 
 #[tokio::test]

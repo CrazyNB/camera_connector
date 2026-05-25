@@ -420,25 +420,24 @@ async fn handle_stor(
                 .then(|| state.pending_user.clone())
                 .flatten()
         });
-    append_transfer_record(
-        &config.state_dir,
-        &TransferRecord {
-            transfer_id,
-            protocol: "ftp".to_string(),
-            status: TransferStatus::Completed,
-            original_path: upload_path,
-            final_filename: progress.filename,
-            final_path: Some(final_path),
-            final_location: progress.output_location,
-            size_bytes: progress.bytes_written,
-            username,
-            remote_addr,
-            source_name,
-            started_at_ms,
-            completed_at_ms: Some(current_time_ms()),
-            error: None,
-        },
-    )?;
+    let record = TransferRecord {
+        transfer_id,
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: upload_path,
+        final_filename: progress.filename,
+        final_path: Some(final_path),
+        final_location: progress.output_location,
+        size_bytes: progress.bytes_written,
+        username,
+        remote_addr,
+        source_name,
+        started_at_ms,
+        completed_at_ms: Some(current_time_ms()),
+        error: None,
+    };
+    append_transfer_record(&config.state_dir, &record)?;
+    config.record_storage_transfer(&record)?;
     reply(reader, "226 Transfer complete").await
 }
 

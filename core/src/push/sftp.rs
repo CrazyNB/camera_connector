@@ -349,26 +349,26 @@ impl russh_sftp::server::Handler for SftpSession {
     async fn close(&mut self, id: u32, handle: String) -> std::result::Result<Status, Self::Error> {
         let upload = self.uploads.remove(&handle).ok_or(StatusCode::NoSuchFile)?;
         let progress = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
-        append_transfer_record(
-            &self.config.state_dir,
-            &TransferRecord {
-                transfer_id: upload.transfer_id,
-                protocol: "sftp".to_string(),
-                status: TransferStatus::Completed,
-                original_path: upload.original_path,
-                final_filename: progress.filename,
-                final_path: progress.output_path,
-                final_location: progress.output_location,
-                size_bytes: progress.bytes_written,
-                username: self.username.clone(),
-                remote_addr: self.remote_addr.clone(),
-                source_name: self.source_name.clone(),
-                started_at_ms: upload.started_at_ms,
-                completed_at_ms: Some(current_time_ms()),
-                error: None,
-            },
-        )
-        .map_err(|_| StatusCode::Failure)?;
+        let record = TransferRecord {
+            transfer_id: upload.transfer_id,
+            protocol: "sftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: upload.original_path,
+            final_filename: progress.filename,
+            final_path: progress.output_path,
+            final_location: progress.output_location,
+            size_bytes: progress.bytes_written,
+            username: self.username.clone(),
+            remote_addr: self.remote_addr.clone(),
+            source_name: self.source_name.clone(),
+            started_at_ms: upload.started_at_ms,
+            completed_at_ms: Some(current_time_ms()),
+            error: None,
+        };
+        append_transfer_record(&self.config.state_dir, &record).map_err(|_| StatusCode::Failure)?;
+        self.config
+            .record_storage_transfer(&record)
+            .map_err(|_| StatusCode::Failure)?;
         Ok(ok_status(id))
     }
 }

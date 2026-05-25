@@ -199,6 +199,7 @@ impl CameraConnectorService {
             request.password.as_deref(),
             config.source_name.as_deref(),
         )?;
+        config.active_project_id = self.active_project()?.map(|project| project.project_id);
         Ok(config)
     }
 

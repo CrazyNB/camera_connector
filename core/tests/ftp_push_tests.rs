@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use camera_connector_core::{
     read_connected_devices, read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig,
-    ReceiverAccount, TransferStatus,
+    ReceiverAccount, SqliteStore, TransferStatus,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::time::{sleep, Duration};
@@ -109,6 +109,71 @@ async fn ftp_server_accepts_passive_stor_upload() {
     assert!(!disconnected[0].online);
     assert!(!temp_dir.path().join("transfer-log.jsonl").exists());
     assert!(!temp_dir.path().join("connected-devices.json").exists());
+}
+
+#[tokio::test]
+async fn ftp_server_indexes_uploads_under_active_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let state_dir = tempfile::tempdir().expect("state dir should be created");
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let project = store
+        .create_project("FTP Project")
+        .expect("project should create");
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path())
+        .with_active_project(project.project_id.clone());
+    let server = FtpPushServer::bind(config)
+        .await
+        .expect("server should bind");
+    let control_addr = server.local_addr();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+    let server_task = tokio::spawn(async move {
+        server
+            .run_until(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+    });
+
+    let mut control = BufReader::new(
+        tokio::net::TcpStream::connect(control_addr)
+            .await
+            .expect("control connection should open"),
+    );
+
+    assert_reply(&mut control, "220").await;
+    command(&mut control, "PASV").await;
+    let passive_reply = read_reply(&mut control).await;
+    let data_addr = passive_addr_from_reply(&passive_reply);
+    let mut data = tokio::net::TcpStream::connect(data_addr)
+        .await
+        .expect("data connection should open");
+    command(&mut control, "STOR IMG_5001.JPG").await;
+    assert_reply(&mut control, "150").await;
+    data.write_all(&[1, 2, 3]).await.expect("data should write");
+    data.shutdown().await.expect("data should close");
+    assert_reply(&mut control, "226").await;
+    command(&mut control, "QUIT").await;
+    assert_reply(&mut control, "221").await;
+
+    let _ = shutdown_tx.send(());
+    server_task
+        .await
+        .expect("server task should join")
+        .expect("server should stop cleanly");
+
+    let page = store
+        .asset_group_page(
+            &project.project_id,
+            camera_connector_core::AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .expect("indexed groups should query");
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.summary.asset_count, 1);
+    assert_eq!(page.groups[0].group_key, "IMG_5001");
 }
 
 #[tokio::test]

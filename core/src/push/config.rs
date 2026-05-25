@@ -7,7 +7,7 @@ use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use password_hash::PasswordHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{ImporterError, Result};
+use crate::{ImporterError, Result, SqliteStore, TransferRecord};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushProtocol {
@@ -381,6 +381,7 @@ pub struct PushReceiverConfig {
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
     pub accounts: Vec<ReceiverAccount>,
+    pub active_project_id: Option<String>,
 }
 
 impl PushReceiverConfig {
@@ -402,6 +403,7 @@ impl PushReceiverConfig {
             advertised_host: None,
             source_name: None,
             accounts: Vec::new(),
+            active_project_id: None,
         }
     }
 
@@ -435,6 +437,11 @@ impl PushReceiverConfig {
         self
     }
 
+    pub fn with_active_project(mut self, project_id: impl Into<String>) -> Self {
+        self.active_project_id = Some(project_id.into());
+        self
+    }
+
     pub fn resolved_source_name(&self, _remote_addr: Option<&str>) -> Option<String> {
         self.source_name.clone()
     }
@@ -450,5 +457,14 @@ impl PushReceiverConfig {
             account.validate()?;
         }
         Ok(())
+    }
+
+    pub fn record_storage_transfer(&self, record: &TransferRecord) -> Result<()> {
+        let store = SqliteStore::open_state_dir(&self.state_dir)?;
+        let project_id = match self.active_project_id.as_deref() {
+            Some(project_id) => project_id.to_string(),
+            None => store.ensure_inbox_project()?.project_id,
+        };
+        store.record_transfer(&project_id, record.clone())
     }
 }
