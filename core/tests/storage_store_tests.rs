@@ -176,6 +176,46 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
 }
 
 #[test]
+fn sqlite_store_exposes_asset_group_rollup_model() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Rollups")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:jpg", "DCIM/100/IMG_2222.JPG", 20),
+        )
+        .expect("jpg transfer should record");
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:raw", "DCIM/100/IMG_2222.NEF", 21),
+        )
+        .expect("raw transfer should record");
+
+    let groups = store
+        .stored_asset_groups(&project.project_id)
+        .expect("stored groups should query");
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].project_id, project.project_id);
+    assert_eq!(groups[0].display_key, "IMG_2222");
+    assert_eq!(groups[0].source_identity.as_deref(), Some("Studio Z5"));
+    assert_eq!(groups[0].original_parent_path.as_deref(), Some("DCIM/100"));
+    assert_eq!(groups[0].member_count, 2);
+    assert!(groups[0].has_jpeg);
+    assert!(groups[0].has_raw);
+    assert!(!groups[0].has_video);
+    assert_eq!(groups[0].primary_asset_id.as_deref(), Some("ftp:jpg"));
+    assert_eq!(groups[0].preview_asset_id.as_deref(), Some("ftp:jpg"));
+    assert_eq!(groups[0].first_received_at_ms, Some(20));
+    assert_eq!(groups[0].last_received_at_ms, Some(21));
+}
+
+#[test]
 fn sqlite_store_lists_project_transfers_by_latest_time() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");

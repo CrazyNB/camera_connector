@@ -84,6 +84,28 @@ pub struct StoredAsset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredAssetGroup {
+    pub group_id: String,
+    pub project_id: String,
+    pub group_identity: String,
+    pub display_key: String,
+    pub source_identity: Option<String>,
+    pub original_parent_path: Option<String>,
+    pub primary_asset_id: Option<String>,
+    pub preview_asset_id: Option<String>,
+    pub member_count: usize,
+    pub has_raw: bool,
+    pub has_jpeg: bool,
+    pub has_video: bool,
+    pub first_capture_at_ms: Option<i64>,
+    pub last_capture_at_ms: Option<i64>,
+    pub first_received_at_ms: Option<i64>,
+    pub last_received_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishQueueItem {
     pub queue_id: String,
     pub project_id: String,
@@ -380,6 +402,25 @@ impl SqliteStore {
                 params![project_id, group_id_or_display_key],
                 stored_asset_from_row,
             )?;
+            collect_rows(rows)
+        })
+    }
+
+    pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let mut statement = connection.prepare(
+                "SELECT group_id, project_id, group_identity, display_key, source_identity,
+                        original_parent_path, primary_asset_id, preview_asset_id, member_count,
+                        has_raw, has_jpeg, has_video, first_capture_at_ms, last_capture_at_ms,
+                        first_received_at_ms, last_received_at_ms, created_at_ms, updated_at_ms
+                 FROM asset_groups
+                 WHERE project_id = ?1
+                 ORDER BY COALESCE(last_received_at_ms, updated_at_ms) DESC,
+                          display_key ASC,
+                          group_id ASC",
+            )?;
+            let rows = statement.query_map(params![project_id], stored_asset_group_from_row)?;
             collect_rows(rows)
         })
     }
@@ -982,6 +1023,31 @@ fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusq
         remote_addr: row.get(18)?,
         duplicate_index: row.get::<_, Option<i64>>(19)?.map(|value| value as usize),
         duplicate_count: row.get::<_, Option<i64>>(20)?.map(|value| value as usize),
+    })
+}
+
+fn stored_asset_group_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<StoredAssetGroup, rusqlite::Error> {
+    Ok(StoredAssetGroup {
+        group_id: row.get(0)?,
+        project_id: row.get(1)?,
+        group_identity: row.get(2)?,
+        display_key: row.get(3)?,
+        source_identity: row.get(4)?,
+        original_parent_path: row.get(5)?,
+        primary_asset_id: row.get(6)?,
+        preview_asset_id: row.get(7)?,
+        member_count: row.get::<_, i64>(8)? as usize,
+        has_raw: row.get::<_, i64>(9)? != 0,
+        has_jpeg: row.get::<_, i64>(10)? != 0,
+        has_video: row.get::<_, i64>(11)? != 0,
+        first_capture_at_ms: row.get(12)?,
+        last_capture_at_ms: row.get(13)?,
+        first_received_at_ms: row.get(14)?,
+        last_received_at_ms: row.get(15)?,
+        created_at_ms: row.get(16)?,
+        updated_at_ms: row.get(17)?,
     })
 }
 
