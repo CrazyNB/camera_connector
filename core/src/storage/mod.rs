@@ -295,6 +295,16 @@ impl SqliteStore {
         })
     }
 
+    pub fn transfer_counts(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let total = count_transfers(connection, project_id, None)?;
+            let completed = count_transfers(connection, project_id, Some("completed"))?;
+            let failed = count_transfers(connection, project_id, Some("failed"))?;
+            Ok((total as usize, completed as usize, failed as usize))
+        })
+    }
+
     pub fn enqueue_publish(
         &self,
         project_id: &str,
@@ -398,6 +408,25 @@ impl SqliteStore {
         let mut connection = Connection::open(&self.db_path)
             .map_err(|error| ImporterError::internal(error.to_string()))?;
         operation(&mut connection).map_err(|error| ImporterError::internal(error.to_string()))
+    }
+}
+
+fn count_transfers(
+    connection: &Connection,
+    project_id: &str,
+    status: Option<&str>,
+) -> std::result::Result<i64, rusqlite::Error> {
+    match status {
+        Some(status) => connection.query_row(
+            "SELECT COUNT(*) FROM transfers WHERE project_id = ?1 AND status = ?2",
+            params![project_id, status],
+            |row| row.get(0),
+        ),
+        None => connection.query_row(
+            "SELECT COUNT(*) FROM transfers WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get(0),
+        ),
     }
 }
 

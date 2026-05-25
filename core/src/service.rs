@@ -7,7 +7,8 @@ use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
     PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, TransferRecord, TransferStatus,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, TransferRecord,
+    TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -201,6 +202,30 @@ impl CameraConnectorService {
         Ok(config)
     }
 
+    pub fn storage_store(&self) -> Result<SqliteStore> {
+        SqliteStore::open_state_dir(self.state_dir())
+    }
+
+    pub fn create_project(&self, name: impl AsRef<str>) -> Result<crate::Project> {
+        self.storage_store()?.create_project(name)
+    }
+
+    pub fn set_active_project(&self, project_id: &str) -> Result<()> {
+        self.storage_store()?.set_active_project(project_id)
+    }
+
+    pub fn active_project(&self) -> Result<Option<crate::Project>> {
+        self.storage_store()?.active_project()
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<crate::Project>> {
+        self.storage_store()?.list_projects()
+    }
+
+    pub fn record_project_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
+        self.storage_store()?.record_transfer(project_id, record)
+    }
+
     pub fn set_account(
         &self,
         username: impl Into<String>,
@@ -332,6 +357,17 @@ impl CameraConnectorService {
             total_groups,
             has_more: offset.saturating_add(limit) < total_groups,
         })
+    }
+
+    pub fn project_asset_group_page_with_query(
+        &self,
+        project_id: &str,
+        query: AssetGroupQuery,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        self.storage_store()?
+            .asset_group_page(project_id, query, offset, limit)
     }
 
     pub fn receiver_status(
@@ -476,6 +512,48 @@ impl CameraConnectorService {
                 offset,
                 limit,
             )?,
+        })
+    }
+
+    pub fn project_dashboard(
+        &self,
+        project_id: &str,
+        asset_query: AssetGroupQuery,
+        offset: usize,
+        limit: usize,
+        online_devices_only: bool,
+    ) -> Result<CameraConnectorDashboard> {
+        let state_dir = self.state_dir();
+        let config = self.load_config()?;
+        let receiver_settings = config.receiver.clone();
+        let receiver_status = self.receiver_status(&state_dir)?;
+        let devices = self.connected_devices(
+            &state_dir,
+            asset_query.username.as_deref(),
+            online_devices_only,
+        )?;
+        let accounts = accounts_with_devices(self.accounts()?, &devices);
+        let store = self.storage_store()?;
+        let (total_count, completed_count, failed_count) = store.transfer_counts(project_id)?;
+        Ok(CameraConnectorDashboard {
+            receiver_settings,
+            paths: SystemPathsView {
+                config_path: self.config_path(),
+                state_dir: state_dir.clone(),
+                output_dir: receiver_status
+                    .as_ref()
+                    .and_then(|status| status.output_dir.clone()),
+            },
+            receiver_status,
+            accounts,
+            devices,
+            transfers: TransferSummary {
+                total_count,
+                completed_count,
+                failed_count,
+            },
+            recent_failures: Vec::new(),
+            assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
 }
