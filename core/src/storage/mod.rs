@@ -362,7 +362,8 @@ impl SqliteStore {
             for stored_group in stored_groups {
                 let assets =
                     received_assets_for_group(connection, project_id, &stored_group.group_id)?;
-                if let Some(group) = group_received_assets(assets).into_iter().next() {
+                if let Some(mut group) = group_received_assets(assets).into_iter().next() {
+                    group.group_id = Some(stored_group.group_id);
                     if asset_group_matches(&group, &query) {
                         groups.push(group);
                     }

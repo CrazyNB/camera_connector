@@ -275,7 +275,10 @@ class NativeCoreGateway(
                 val video = group.optJSONObject("video")
                 add(
                     InboxAsset(
-                        id = primary.optString("id"),
+                        id = inboxStableId(
+                            group.optString("group_id"),
+                            primary.optString("id"),
+                        ),
                         groupKey = group.optString("group_key")
                             .ifBlank { primary.optString("id") },
                         displayPath = primary.optString("virtual_display_path")
@@ -414,3 +417,6 @@ class NativeCoreGateway(
         const val CONTINUOUS_INBOX_LIMIT = 2_000
     }
 }
+
+internal fun inboxStableId(groupId: String, primaryAssetId: String): String =
+    groupId.ifBlank { primaryAssetId }

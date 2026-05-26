@@ -2048,6 +2048,7 @@ mod tests {
             }],
             assets: AssetGroupPage {
                 groups: vec![ReceivedAssetGroup {
+                    group_id: None,
                     group_key: "IMG_0001".to_string(),
                     primary: asset.clone(),
                     jpeg: None,
@@ -2169,6 +2170,7 @@ mod tests {
         asset.original_path = Some("DCIM/IMG_0001.CR3".to_string());
         asset.virtual_display_path = Some("Z5_2/DCIM/IMG_0001.CR3".to_string());
         let group = ReceivedAssetGroup {
+            group_id: None,
             group_key: "IMG_0001".to_string(),
             primary: asset.clone(),
             jpeg: None,

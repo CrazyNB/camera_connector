@@ -24,4 +24,10 @@ class NativeMobileCorePatchTest {
         assertFalse(patch.containsKey("output_dir"))
         assertFalse(patch.toString().contains("content://picked-tree"))
     }
+
+    @Test
+    fun inboxStableIdPrefersGroupIdentity() {
+        assertEquals("group-123", inboxStableId("group-123", "asset-1"))
+        assertEquals("asset-1", inboxStableId("", "asset-1"))
+    }
 }

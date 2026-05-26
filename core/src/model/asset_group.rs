@@ -6,6 +6,8 @@ use super::{ObjectFormat, ReceivedAsset};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceivedAssetGroup {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub group_key: String,
     pub primary: ReceivedAsset,
     pub jpeg: Option<ReceivedAsset>,
@@ -45,6 +47,7 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
                 .unwrap_or_else(|| members[0].clone());
 
             ReceivedAssetGroup {
+                group_id: None,
                 group_key,
                 primary,
                 jpeg,

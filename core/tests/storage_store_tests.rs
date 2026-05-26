@@ -242,6 +242,8 @@ fn sqlite_store_keeps_same_stem_groups_separate_by_source_and_parent() {
 
     assert_eq!(page.total_groups, 2);
     assert_eq!(page.groups.len(), 2);
+    assert!(page.groups.iter().all(|group| group.group_id.is_some()));
+    assert_ne!(page.groups[0].group_id, page.groups[1].group_id);
     assert_eq!(page.summary.asset_count, 2);
     assert!(page
         .summary
