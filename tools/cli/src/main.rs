@@ -9,8 +9,8 @@ use camera_connector_core::{
     CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
     LocalFileSink, ObjectFormat, Project, PushProtocol, PushReceiverConfig, ReceivedAsset,
     ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
-    Result, SqliteStore, StoredObjectLocation, TransferQuery, TransferRecord, TransferRecordView,
-    TransferStatus,
+    Result, SqliteStore, StoredAsset, StoredObjectLocation, TransferQuery, TransferRecord,
+    TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -259,6 +259,12 @@ enum ProjectCommand {
     Restore {
         #[arg(long, alias = "project-id")]
         id: String,
+    },
+    GroupAssets {
+        #[arg(long, alias = "project-id")]
+        id: String,
+        #[arg(long = "group-id")]
+        group_id: String,
     },
 }
 
@@ -744,6 +750,14 @@ fn load_project_inbox_page(
         .project_asset_group_page_with_query(project_id, query, offset, limit)
 }
 
+fn load_project_group_assets(
+    config: Option<PathBuf>,
+    project_id: &str,
+    group_id: &str,
+) -> Result<Vec<StoredAsset>> {
+    CameraConnectorService::new(config).project_group_assets(project_id, group_id)
+}
+
 fn load_transfers(
     config: Option<PathBuf>,
     state: Option<PathBuf>,
@@ -774,6 +788,12 @@ fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
 fn print_asset_groups(groups: Vec<ReceivedAssetGroup>) {
     for group in groups {
         println!("{}", asset_group_line(&group));
+    }
+}
+
+fn print_stored_assets(assets: Vec<StoredAsset>) {
+    for asset in assets {
+        println!("{}", stored_asset_line(&asset));
     }
 }
 
@@ -987,8 +1007,9 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
     let primary_location = group.primary.storage_location.as_ref();
 
     format!(
-        "{}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tdisplay={}\tduplicate={}\tprimary_location_kind={}\tprimary_location={}",
+        "{}\tgroup_id={}\tprimary={}\tjpeg={}\traw={}\tvideo={}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tdisplay={}\tduplicate={}\tprimary_location_kind={}\tprimary_location={}",
         group.group_key,
+        group.group_id.as_deref().unwrap_or("-"),
         group.primary.filename,
         jpeg,
         raw,
@@ -1004,6 +1025,30 @@ fn asset_group_line(group: &ReceivedAssetGroup) -> String {
             .map(StoredObjectLocation::kind)
             .unwrap_or("-"),
         primary_location
+            .map(StoredObjectLocation::display_label)
+            .unwrap_or_else(|| "-".to_string())
+    )
+}
+
+fn stored_asset_line(asset: &StoredAsset) -> String {
+    let final_location = asset.final_location.as_ref();
+    format!(
+        "asset\tid={}\tproject={}\tgroup_id={}\trole={}\tfilename={}\tformat={:?}\t{} bytes\tusername={}\tsource={}\tremote={}\toriginal={}\tlocation_kind={}\tlocation={}",
+        asset.asset_id,
+        asset.project_id,
+        asset.group_id.as_deref().unwrap_or("-"),
+        asset.group_role,
+        asset.final_filename,
+        asset.format,
+        asset.size_bytes,
+        asset.username.as_deref().unwrap_or("-"),
+        asset.source_identity.as_deref().unwrap_or("-"),
+        asset.remote_addr.as_deref().unwrap_or("-"),
+        asset.original_path,
+        final_location
+            .map(StoredObjectLocation::kind)
+            .unwrap_or("-"),
+        final_location
             .map(StoredObjectLocation::display_label)
             .unwrap_or_else(|| "-".to_string())
     )
@@ -1205,6 +1250,11 @@ fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) ->
                 .as_ref()
                 .map(|project| project.project_id.as_str());
             println!("{}", project_line(&project, active_project_id));
+        }
+        ProjectCommand::GroupAssets { id, group_id } => {
+            let assets =
+                load_project_group_assets(config_path.map(Path::to_path_buf), &id, &group_id)?;
+            print_stored_assets(assets);
         }
     }
     Ok(())
@@ -1499,6 +1549,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_project_group_assets_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "group-assets",
+            "--id",
+            "project-1",
+            "--group-id",
+            "group-1",
+        ])
+        .expect("project group assets command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Project {
+                action: ProjectCommand::GroupAssets {
+                    id,
+                    group_id,
+                },
+                ..
+            }) if id == "project-1" && group_id == "group-1"
+        ));
+    }
+
+    #[test]
     fn project_inbox_loads_asset_page_from_sqlite() {
         let root = std::env::temp_dir().join(format!(
             "camera-connector-project-inbox-{}",
@@ -1557,6 +1634,76 @@ mod tests {
             page.groups[0].primary.display_source.as_deref(),
             Some("Verify Camera")
         );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_group_assets_loads_members_from_sqlite() {
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-project-group-assets-{}",
+            current_time_ms()
+        ));
+        let config_path = root.join("config.json");
+        let state_dir = root.join("state");
+        std::fs::create_dir_all(&root).expect("temp root should create");
+        let service = CameraConnectorService::new(Some(config_path.clone()));
+        service
+            .set_receiver_settings(ReceiverSettingsUpdate {
+                state_dir: Some(state_dir),
+                ..ReceiverSettingsUpdate::default()
+            })
+            .expect("receiver settings should save");
+        let project = service
+            .create_project("Project Group Assets")
+            .expect("project should create");
+        service
+            .record_project_transfer(
+                &project.project_id,
+                TransferRecord {
+                    transfer_id: "ftp:project-group-jpg".to_string(),
+                    protocol: "ftp".to_string(),
+                    status: TransferStatus::Completed,
+                    original_path: "DCIM/100/IMG_0303.JPG".to_string(),
+                    final_filename: "IMG_0303.JPG".to_string(),
+                    final_path: None,
+                    final_location: Some(StoredObjectLocation::local_path(
+                        root.join("IMG_0303.JPG"),
+                    )),
+                    size_bytes: 42,
+                    username: Some("verify".to_string()),
+                    remote_addr: None,
+                    source_name: Some("Verify Camera".to_string()),
+                    started_at_ms: 10,
+                    completed_at_ms: Some(20),
+                    error: None,
+                },
+            )
+            .expect("project transfer should record");
+        let group_id = service
+            .project_asset_group_page_with_query(
+                &project.project_id,
+                AssetGroupQuery::default(),
+                0,
+                50,
+            )
+            .expect("group page should query")
+            .groups[0]
+            .group_id
+            .clone()
+            .expect("group id should exist");
+
+        let assets =
+            load_project_group_assets(Some(config_path.clone()), &project.project_id, &group_id)
+                .expect("project group assets should load");
+        let ambiguous =
+            load_project_group_assets(Some(config_path.clone()), &project.project_id, "IMG_0303")
+                .expect("display key should not query members");
+
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].final_filename, "IMG_0303.JPG");
+        assert_eq!(assets[0].group_id.as_deref(), Some(group_id.as_str()));
+        assert!(ambiguous.is_empty());
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -2170,7 +2317,7 @@ mod tests {
         asset.original_path = Some("DCIM/IMG_0001.CR3".to_string());
         asset.virtual_display_path = Some("Z5_2/DCIM/IMG_0001.CR3".to_string());
         let group = ReceivedAssetGroup {
-            group_id: None,
+            group_id: Some("group-stable-1".to_string()),
             group_key: "IMG_0001".to_string(),
             primary: asset.clone(),
             jpeg: None,
@@ -2180,6 +2327,7 @@ mod tests {
 
         let line = asset_group_line(&group);
 
+        assert!(line.contains("group_id=group-stable-1"));
         assert!(line.contains("primary_location_kind=document_uri"));
         assert!(line.contains("primary_location=content://camera-connector/IMG_0001.CR3"));
         assert!(line.contains("username=z5"));
