@@ -1,3 +1,6 @@
+use camera_connector_core::{
+    AssetGroupQuery, CameraConnectorService, StoredObjectLocation, TransferRecord, TransferStatus,
+};
 use camera_connector_ffi::{MobileCore, MobileReceiverSettingsPatch};
 use serde_json::Value;
 
@@ -219,6 +222,41 @@ fn mobile_core_returns_project_dashboard_json() {
 }
 
 #[test]
+fn mobile_core_returns_project_group_assets_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile Members").unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:mobile-jpg", "DCIM/100/IMG_5001.JPG", 20),
+        )
+        .unwrap();
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let group_id = page.groups[0].group_id.clone().unwrap();
+
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    let json = core
+        .project_group_assets_json(project.project_id.clone(), group_id.clone())
+        .unwrap();
+    let value: Value = serde_json::from_str(&json).unwrap();
+    let assets = value.as_array().unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["project_id"], project.project_id);
+    assert_eq!(assets[0]["group_id"], group_id);
+    assert_eq!(assets[0]["final_filename"], "IMG_5001.JPG");
+
+    let ambiguous_json = core
+        .project_group_assets_json(project.project_id, "IMG_5001".to_string())
+        .unwrap();
+    let ambiguous: Value = serde_json::from_str(&ambiguous_json).unwrap();
+    assert!(ambiguous.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn mobile_core_starts_and_stops_receiver_as_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
@@ -247,4 +285,32 @@ fn mobile_core_starts_and_stops_receiver_as_json() {
     let stopped_json = core.stop_receiver_json().unwrap();
     let stopped: Value = serde_json::from_str(&stopped_json).unwrap();
     assert_eq!(stopped["phase"], "Stopped");
+}
+
+fn completed_transfer(
+    transfer_id: &str,
+    original_path: &str,
+    completed_at_ms: i64,
+) -> TransferRecord {
+    let final_filename = original_path
+        .rsplit('/')
+        .next()
+        .expect("filename should exist")
+        .to_string();
+    TransferRecord {
+        transfer_id: transfer_id.to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: original_path.to_string(),
+        final_filename: final_filename.clone(),
+        final_path: None,
+        final_location: Some(StoredObjectLocation::local_path(final_filename)),
+        size_bytes: 100,
+        username: Some("z5".to_string()),
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: Some("Studio Z5".to_string()),
+        started_at_ms: completed_at_ms - 1,
+        completed_at_ms: Some(completed_at_ms),
+        error: None,
+    }
 }

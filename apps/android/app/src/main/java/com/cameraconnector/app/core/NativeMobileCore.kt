@@ -12,6 +12,10 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     fun projectDashboardJson(projectId: String, offset: Int, limit: Int): JSONObject =
         call { projectDashboardJson(handle, projectId, offset, limit) }
 
+    fun projectGroupAssetsJson(projectId: String, groupId: String): JSONArray =
+        call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
+            ?: JSONArray()
+
     fun createProject(name: String): JSONObject =
         call { createProjectJson(handle, name) }
 
@@ -92,6 +96,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     private external fun destroy(handle: Long)
     private external fun dashboardJson(handle: Long, stateDir: String?, offset: Int, limit: Int): String
     private external fun projectDashboardJson(handle: Long, projectId: String, offset: Int, limit: Int): String
+    private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String

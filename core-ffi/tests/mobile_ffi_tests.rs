@@ -2,6 +2,9 @@ use std::ffi::{CStr, CString};
 
 use serde_json::Value;
 
+use camera_connector_core::{
+    AssetGroupQuery, CameraConnectorService, StoredObjectLocation, TransferRecord, TransferStatus,
+};
 use camera_connector_ffi::{
     camera_connector_mobile_core_active_project_json,
     camera_connector_mobile_core_archive_project_json, camera_connector_mobile_core_create,
@@ -9,6 +12,7 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_destroy, camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_project_dashboard_json,
+    camera_connector_mobile_core_project_group_assets_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_save_device_account_json,
@@ -274,6 +278,46 @@ fn ffi_returns_project_dashboard_json_envelope() {
 }
 
 #[test]
+fn ffi_returns_project_group_assets_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Members").unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:ffi-jpg", "DCIM/100/IMG_6001.JPG", 20),
+        )
+        .unwrap();
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let group_id = page.groups[0].group_id.clone().unwrap();
+
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let project_id = CString::new(project.project_id).unwrap();
+    let group_id = CString::new(group_id).unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let response = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_group_assets_json(
+            core,
+            project_id.as_ptr(),
+            group_id.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], true);
+    let assets = value["value"].as_array().unwrap();
+    assert_eq!(assets.len(), 1);
+    assert_eq!(assets[0]["final_filename"], "IMG_6001.JPG");
+    assert_eq!(assets[0]["group_id"], group_id.to_str().unwrap());
+}
+
+#[test]
 fn ffi_rejects_null_core_pointer() {
     let response_ptr = unsafe {
         camera_connector_mobile_core_dashboard_json(std::ptr::null(), std::ptr::null(), 0, 25)
@@ -322,6 +366,34 @@ fn ffi_starts_and_stops_receiver_with_envelopes() {
     assert_eq!(stopped["value"]["phase"], "Stopped");
 
     unsafe { camera_connector_mobile_core_destroy(core) };
+}
+
+fn completed_transfer(
+    transfer_id: &str,
+    original_path: &str,
+    completed_at_ms: i64,
+) -> TransferRecord {
+    let final_filename = original_path
+        .rsplit('/')
+        .next()
+        .expect("filename should exist")
+        .to_string();
+    TransferRecord {
+        transfer_id: transfer_id.to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: original_path.to_string(),
+        final_filename: final_filename.clone(),
+        final_path: None,
+        final_location: Some(StoredObjectLocation::local_path(final_filename)),
+        size_bytes: 100,
+        username: Some("z5".to_string()),
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: Some("Studio Z5".to_string()),
+        started_at_ms: completed_at_ms - 1,
+        completed_at_ms: Some(completed_at_ms),
+        error: None,
+    }
 }
 
 fn take_ffi_string(ptr: *mut std::os::raw::c_char) -> String {

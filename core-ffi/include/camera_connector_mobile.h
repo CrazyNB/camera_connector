@@ -72,6 +72,12 @@ char *camera_connector_mobile_core_project_dashboard_json(
     uint32_t limit
 );
 
+char *camera_connector_mobile_core_project_group_assets_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *group_id
+);
+
 char *camera_connector_mobile_core_save_receiver_settings_json(
     const CameraConnectorMobileCore *core,
     const char *patch_json

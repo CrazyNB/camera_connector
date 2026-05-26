@@ -162,6 +162,15 @@ impl MobileCore {
         Ok(serde_json::to_string(&dashboard)?)
     }
 
+    pub fn project_group_assets_json(
+        &self,
+        project_id: String,
+        group_id: String,
+    ) -> MobileCoreResult<String> {
+        let assets = self.service.project_group_assets(&project_id, &group_id)?;
+        Ok(serde_json::to_string(&assets)?)
+    }
+
     pub fn save_receiver_settings_json(
         &self,
         patch: MobileReceiverSettingsPatch,
@@ -438,6 +447,24 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_dashboard_json(
         let project_id = required_c_string(project_id, "project_id")?;
         let dashboard = core_ref(core)?.project_dashboard_json(project_id, offset, limit)?;
         parse_json_value(&dashboard)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` and `group_id` must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_project_group_assets_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+    group_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let group_id = required_c_string(group_id, "group_id")?;
+        let assets = core_ref(core)?.project_group_assets_json(project_id, group_id)?;
+        parse_json_value(&assets)
     })
 }
 
@@ -769,6 +796,26 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
                 limit.max(0) as u32,
             )?;
             parse_json_value(&dashboard)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projectGroupAssetsJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    group_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        let group_id = required_java_string(env, group_id, "group_id");
+        java_response(env, || {
+            let assets = mobile_core_from_handle(handle)?
+                .project_group_assets_json(project_id?, group_id?)?;
+            parse_json_value(&assets)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()
