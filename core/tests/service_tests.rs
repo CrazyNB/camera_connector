@@ -19,13 +19,13 @@ fn service_builds_receiver_config_from_saved_accounts() {
     app_config.receiver.state_dir = Some(configured_state_dir.clone());
     app_config.receiver.advertised_host = Some("192.168.137.1".to_string());
     app_config
-        .set_account("z5", Some("secret"), "Z5_2")
-        .expect("account should save");
-    app_config
         .save(Some(&config_path))
         .expect("config should save");
 
     let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_account("z5", Some("secret"), "Z5_2")
+        .expect("account should save");
     let receiver = service
         .receiver_config(ReceiverConfigRequest {
             protocol: None,
@@ -286,13 +286,16 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
     let config_path = unique_temp_path("service-transfer-account-config");
     let state_dir = unique_temp_dir("service-transfer-account-state");
     std::fs::create_dir_all(&state_dir).expect("state dir should create");
-    let mut app_config = CameraConnectorConfig::default();
-    app_config
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+    service
         .set_account("z5", Some("secret"), "Renamed Z5")
         .expect("account should save");
-    app_config
-        .save(Some(&config_path))
-        .expect("config should save");
     append_transfer_record(
         &state_dir,
         &TransferRecord {
@@ -316,7 +319,6 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
     )
     .expect("transfer record should append");
 
-    let service = CameraConnectorService::new(Some(config_path.clone()));
     let transfers = service
         .transfers(
             &state_dir,
@@ -357,25 +359,27 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
 fn service_maps_connected_devices_to_account_device_names() {
     let config_path = unique_temp_path("service-device-config");
     let output_dir = unique_temp_dir("service-devices");
-    let mut app_config = CameraConnectorConfig::default();
-    app_config
-        .set_account("z5", Some("secret"), "Z5_2")
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(output_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+    service
+        .set_account("z5", Some("secret"), "Account Z5")
         .expect("account should save");
-    app_config
-        .save(Some(&config_path))
-        .expect("config should save");
     record_device_connected(&output_dir, "192.168.137.56", Some(50123), None, None)
         .expect("device should connect");
-    record_device_authenticated(&output_dir, "192.168.137.56", Some("Z5_2"), Some("z5"))
+    record_device_authenticated(&output_dir, "192.168.137.56", Some("Old Z5"), Some("z5"))
         .expect("device should authenticate");
 
-    let service = CameraConnectorService::new(Some(config_path.clone()));
     let devices = service
         .connected_devices(&output_dir, None, false)
         .expect("devices should load");
 
     assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].display_source, "Z5_2");
+    assert_eq!(devices[0].display_source, "Account Z5");
     assert_eq!(devices[0].device.username.as_deref(), Some("z5"));
 
     let _ = std::fs::remove_file(config_path);
@@ -915,12 +919,14 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     app_config.receiver.bind_host = "192.168.137.1".to_string();
     app_config.receiver.ftp_port = 2121;
     app_config.receiver.sftp_port = 2121;
-    app_config
-        .set_account("z5", Some("secret"), "Studio Z5")
-        .expect("account should save");
+    app_config.receiver.state_dir = Some(state_dir.clone());
     app_config
         .save(Some(&config_path))
         .expect("config should save");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_account("z5", Some("secret"), "Studio Z5")
+        .expect("account should save");
     write_receiver_runtime_status(
         &state_dir,
         &ReceiverRuntimeStatus {
@@ -982,7 +988,6 @@ fn service_builds_dashboard_from_receiver_state_devices_and_assets() {
     )
     .expect("failed transfer should append");
 
-    let service = CameraConnectorService::new(Some(config_path.clone()));
     let dashboard = service
         .dashboard(
             &state_dir,

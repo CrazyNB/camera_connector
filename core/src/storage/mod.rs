@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     group_received_assets, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup, Result,
-    StoredObjectLocation, TransferRecord, TransferStatus,
+    ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
+    ReceiverAccountConfig, Result, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
@@ -103,6 +103,28 @@ pub struct StoredAssetGroup {
     pub last_received_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredReceiverAccount {
+    pub username: String,
+    pub password_hash: Option<String>,
+    pub device_name: String,
+    pub enabled: bool,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+impl StoredReceiverAccount {
+    pub fn into_account_config(self) -> Result<ReceiverAccountConfig> {
+        ReceiverAccountConfig {
+            username: self.username,
+            password_hash: self.password_hash,
+            password: None,
+            device_name: self.device_name,
+        }
+        .validated()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -332,6 +354,67 @@ impl SqliteStore {
                     project_from_row,
                 )
                 .optional()
+        })
+    }
+
+    pub fn upsert_receiver_account(
+        &self,
+        account: ReceiverAccountConfig,
+    ) -> Result<StoredReceiverAccount> {
+        let account = account.validated()?;
+        let now = current_time_ms();
+        self.with_connection(|connection| {
+            let created_at_ms = connection
+                .query_row(
+                    "SELECT created_at_ms FROM receiver_accounts WHERE username = ?1",
+                    params![&account.username],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .unwrap_or(now);
+            connection.execute(
+                "INSERT INTO receiver_accounts (
+                    username, password_hash, device_name, enabled, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, 1, ?4, ?5)
+                 ON CONFLICT(username) DO UPDATE SET
+                    password_hash = excluded.password_hash,
+                    device_name = excluded.device_name,
+                    enabled = 1,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![
+                    &account.username,
+                    account.password_hash.as_deref(),
+                    &account.device_name,
+                    created_at_ms,
+                    now,
+                ],
+            )?;
+            receiver_account_by_username(connection, &account.username)?.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("receiver account not found".to_string())
+            })
+        })
+    }
+
+    pub fn remove_receiver_account(&self, username: &str) -> Result<bool> {
+        self.with_connection(|connection| {
+            let changed = connection.execute(
+                "DELETE FROM receiver_accounts WHERE username = ?1",
+                params![username],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    pub fn receiver_accounts(&self) -> Result<Vec<StoredReceiverAccount>> {
+        self.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT username, password_hash, device_name, enabled, created_at_ms, updated_at_ms
+                 FROM receiver_accounts
+                 WHERE enabled = 1
+                 ORDER BY username ASC",
+            )?;
+            let rows = statement.query_map([], receiver_account_from_row)?;
+            collect_rows(rows)
         })
     }
 
@@ -627,6 +710,15 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS receiver_accounts (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT,
+            device_name TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS transfers (
             transfer_id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -710,9 +802,38 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
 
         CREATE INDEX IF NOT EXISTS idx_assets_project_group ON assets(project_id, group_id);
         CREATE INDEX IF NOT EXISTS idx_asset_groups_project ON asset_groups(project_id, updated_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_receiver_accounts_enabled ON receiver_accounts(enabled, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_publish_queue_state ON publish_queue(state, created_at_ms);
         ",
     )
+}
+
+fn receiver_account_by_username(
+    connection: &Connection,
+    username: &str,
+) -> std::result::Result<Option<StoredReceiverAccount>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT username, password_hash, device_name, enabled, created_at_ms, updated_at_ms
+             FROM receiver_accounts
+             WHERE username = ?1",
+            params![username],
+            receiver_account_from_row,
+        )
+        .optional()
+}
+
+fn receiver_account_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<StoredReceiverAccount, rusqlite::Error> {
+    Ok(StoredReceiverAccount {
+        username: row.get(0)?,
+        password_hash: row.get(1)?,
+        device_name: row.get(2)?,
+        enabled: row.get::<_, i64>(3)? != 0,
+        created_at_ms: row.get(4)?,
+        updated_at_ms: row.get(5)?,
+    })
 }
 
 fn ensure_project_exists(

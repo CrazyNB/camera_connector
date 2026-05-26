@@ -1,9 +1,9 @@
 use std::net::TcpListener;
 
 use camera_connector_core::{
-    read_receiver_runtime_status, write_receiver_runtime_status, CameraConnectorConfig,
-    CameraConnectorRuntime, CameraConnectorService, PushProtocol, ReceiverAuthMode,
-    ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus,
+    read_receiver_runtime_status, write_receiver_runtime_status, CameraConnectorRuntime,
+    CameraConnectorService, PushProtocol, ReceiverAuthMode, ReceiverConfigRequest,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
 };
 
 #[tokio::test]
@@ -70,15 +70,17 @@ async fn runtime_status_reports_account_authentication_mode() {
     let config_path = unique_temp_path("runtime-auth-config");
     let output_dir = unique_temp_dir("runtime-auth-output");
     let state_dir = unique_temp_dir("runtime-auth-state");
-    let mut app_config = CameraConnectorConfig::default();
-    app_config
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+    service
         .set_account("z5", Some("secret"), "Z5_2")
         .expect("account should save");
-    app_config
-        .save(Some(&config_path))
-        .expect("config should save");
-    let runtime =
-        CameraConnectorRuntime::new(CameraConnectorService::new(Some(config_path.clone())));
+    let runtime = CameraConnectorRuntime::new(service);
 
     let running = runtime
         .start_receiver(ReceiverConfigRequest {

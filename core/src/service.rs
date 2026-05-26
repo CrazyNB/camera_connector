@@ -170,7 +170,7 @@ impl CameraConnectorService {
     }
 
     pub fn receiver_config(&self, request: ReceiverConfigRequest) -> Result<PushReceiverConfig> {
-        let app_config = self.load_config()?;
+        let mut app_config = self.load_config()?;
         let receiver_settings = app_config.receiver.clone();
         let protocol = request.protocol.unwrap_or(receiver_settings.protocol);
         let bind_host = request
@@ -194,6 +194,11 @@ impl CameraConnectorService {
             .advertised_host
             .or(receiver_settings.advertised_host);
         config.source_name = request.source_name.or(receiver_settings.source_name);
+        let account_state_dir = receiver_settings
+            .state_dir
+            .clone()
+            .unwrap_or_else(|| self.state_dir());
+        app_config.accounts = receiver_account_configs_from_state_dir(account_state_dir)?;
         config.accounts = app_config.effective_accounts(
             request.username.as_deref(),
             request.password.as_deref(),
@@ -214,6 +219,10 @@ impl CameraConnectorService {
 
     pub fn storage_store(&self) -> Result<SqliteStore> {
         SqliteStore::open_state_dir(self.storage_state_dir()?)
+    }
+
+    fn receiver_account_configs(&self) -> Result<BTreeMap<String, ReceiverAccountConfig>> {
+        receiver_account_configs_from_state_dir(self.storage_state_dir()?)
     }
 
     pub fn create_project(&self, name: impl AsRef<str>) -> Result<crate::Project> {
@@ -254,17 +263,14 @@ impl CameraConnectorService {
         password: Option<&str>,
         device_name: impl Into<String>,
     ) -> Result<(ReceiverAccountConfig, PathBuf)> {
-        let mut config = self.load_config()?;
-        let account = config.set_account(username, password, device_name)?.clone();
-        let path = self.save_config(&config)?;
-        Ok((account, path))
+        let account = ReceiverAccountConfig::new(username, password, device_name)?;
+        let stored = self.storage_store()?.upsert_receiver_account(account)?;
+        Ok((stored.into_account_config()?, self.config_path()))
     }
 
     pub fn remove_account(&self, username: &str) -> Result<(bool, PathBuf)> {
-        let mut config = self.load_config()?;
-        let removed = config.remove_account(username).is_some();
-        let path = self.save_config(&config)?;
-        Ok((removed, path))
+        let removed = self.storage_store()?.remove_receiver_account(username)?;
+        Ok((removed, self.config_path()))
     }
 
     pub fn set_receiver_settings(
@@ -303,8 +309,7 @@ impl CameraConnectorService {
 
     pub fn accounts(&self) -> Result<Vec<AccountView>> {
         Ok(self
-            .load_config()?
-            .accounts
+            .receiver_account_configs()?
             .into_values()
             .map(account_view)
             .collect())
@@ -330,7 +335,7 @@ impl CameraConnectorService {
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
     ) -> Result<Vec<ReceivedAssetGroup>> {
-        let accounts = self.load_config()?.accounts;
+        let accounts = self.receiver_account_configs()?;
         let records = read_transfer_log(state_dir)?
             .into_iter()
             .filter(|record| record.status == TransferStatus::Completed)
@@ -412,7 +417,7 @@ impl CameraConnectorService {
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
     ) -> Result<Vec<TransferRecordView>> {
-        let accounts = self.load_config()?.accounts;
+        let accounts = self.receiver_account_configs()?;
         let views = read_transfer_log(output_dir)?
             .into_iter()
             .filter(|record| transfer_matches(record, &query, &accounts))
@@ -436,7 +441,7 @@ impl CameraConnectorService {
         project_id: &str,
         query: TransferQuery,
     ) -> Result<Vec<TransferRecordView>> {
-        let accounts = self.load_config()?.accounts;
+        let accounts = self.receiver_account_configs()?;
         let views = self
             .storage_store()?
             .transfer_records(project_id)?
@@ -462,7 +467,7 @@ impl CameraConnectorService {
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
     ) -> Result<TransferSummary> {
-        let accounts = self.load_config()?.accounts;
+        let accounts = self.receiver_account_configs()?;
         let records = read_transfer_log(output_dir)?
             .into_iter()
             .filter(|record| transfer_matches(record, &query, &accounts))
@@ -537,7 +542,7 @@ impl CameraConnectorService {
         username: Option<&str>,
         online: bool,
     ) -> Result<Vec<ConnectedDeviceView>> {
-        let accounts = self.load_config()?.accounts;
+        let accounts = self.receiver_account_configs()?;
         let views = read_connected_devices(output_dir)?
             .into_iter()
             .filter(|device| device_matches(device, username, online))
@@ -650,6 +655,19 @@ fn ensure_active_project_in_state_dir(state_dir: impl AsRef<Path>) -> Result<cra
     let project = store.ensure_inbox_project()?;
     store.set_active_project(&project.project_id)?;
     Ok(project)
+}
+
+fn receiver_account_configs_from_state_dir(
+    state_dir: impl AsRef<Path>,
+) -> Result<BTreeMap<String, ReceiverAccountConfig>> {
+    SqliteStore::open_state_dir(state_dir)?
+        .receiver_accounts()?
+        .into_iter()
+        .map(|account| {
+            let account = account.into_account_config()?;
+            Ok((account.username.clone(), account))
+        })
+        .collect()
 }
 
 fn transfer_query_from_asset_query(query: &AssetGroupQuery) -> TransferQuery {

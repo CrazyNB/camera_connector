@@ -1153,17 +1153,17 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
     let service = CameraConnectorService::new(config_path.map(Path::to_path_buf));
     match action {
         AccountCommand::List => {
-            let config = service.load_config()?;
+            let accounts = service.accounts()?;
             println!("config: {}", service.config_path().display());
-            if config.accounts.is_empty() {
+            if accounts.is_empty() {
                 println!("accounts: -");
             } else {
-                for account in config.accounts.values() {
+                for account in accounts {
                     println!(
                         "{}\tdevice={}\tpassword={}",
                         account.username,
                         account.device_name,
-                        if account.password_configured() {
+                        if account.password_configured {
                             "configured"
                         } else {
                             "not required"

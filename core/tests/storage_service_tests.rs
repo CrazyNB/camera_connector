@@ -1,6 +1,7 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, ProjectStatus, ReceiverSettingsUpdate, SqliteStore,
-    StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorConfig, CameraConnectorService, ProjectStatus,
+    ReceiverConfigRequest, ReceiverSettingsUpdate, SqliteStore, StoredObjectLocation,
+    TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -155,6 +156,122 @@ fn service_uses_configured_state_dir_for_project_storage() {
     assert_eq!(dashboard.paths.state_dir, configured_state_dir);
 
     let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_persists_receiver_accounts_in_sqlite_store() {
+    let config_path = unique_temp_path("storage-service-account-model");
+    let state_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("account-state");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+
+    let (account, saved_path) = service
+        .set_account(" z5 ", Some("secret"), " Z5 II ")
+        .expect("account should save");
+
+    assert_eq!(saved_path, config_path);
+    assert_eq!(account.username, "z5");
+    assert_eq!(account.device_name, "Z5 II");
+    assert!(account.password_configured());
+    assert!(CameraConnectorConfig::load(Some(&config_path))
+        .expect("json config should load")
+        .accounts
+        .is_empty());
+
+    let stored_accounts = SqliteStore::open_state_dir(&state_dir)
+        .expect("store should open")
+        .receiver_accounts()
+        .expect("accounts should load from sqlite");
+    let account_views = service.accounts().expect("account views should load");
+    let receiver_config = service
+        .receiver_config(ReceiverConfigRequest {
+            protocol: None,
+            bind_host: None,
+            port: None,
+            output_dir: None,
+            state_dir: None,
+            username: None,
+            password: None,
+            advertised_host: None,
+            source_name: None,
+        })
+        .expect("receiver config should build");
+
+    assert_eq!(stored_accounts.len(), 1);
+    assert_eq!(stored_accounts[0].username, "z5");
+    assert_eq!(stored_accounts[0].device_name, "Z5 II");
+    assert!(stored_accounts[0].enabled);
+    assert_eq!(account_views.len(), 1);
+    assert_eq!(account_views[0].username, "z5");
+    assert_eq!(account_views[0].device_name, "Z5 II");
+    assert_eq!(receiver_config.accounts.len(), 1);
+    assert_eq!(receiver_config.accounts[0].username, "z5");
+    assert_eq!(receiver_config.accounts[0].device_name, "Z5 II");
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn receiver_config_keeps_accounts_in_configured_state_when_runtime_state_is_overridden() {
+    let config_path = unique_temp_path("storage-service-account-runtime-state");
+    let account_state_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("account-state");
+    let runtime_state_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("runtime-state");
+    let output_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("runtime-output");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(account_state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+    service
+        .set_account("z5", Some("secret"), "Configured Account")
+        .expect("account should save");
+
+    let receiver_config = service
+        .receiver_config(ReceiverConfigRequest {
+            protocol: None,
+            bind_host: None,
+            port: None,
+            output_dir: Some(output_dir.clone()),
+            state_dir: Some(runtime_state_dir.clone()),
+            username: None,
+            password: None,
+            advertised_host: None,
+            source_name: None,
+        })
+        .expect("receiver config should build");
+
+    assert_eq!(receiver_config.state_dir, runtime_state_dir);
+    assert_eq!(receiver_config.accounts.len(), 1);
+    assert_eq!(receiver_config.accounts[0].username, "z5");
+    assert_eq!(
+        receiver_config.accounts[0].device_name,
+        "Configured Account"
+    );
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(account_state_dir);
+    let _ = std::fs::remove_dir_all(runtime_state_dir);
+    let _ = std::fs::remove_dir_all(output_dir);
 }
 
 #[test]

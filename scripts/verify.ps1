@@ -73,23 +73,6 @@ New-Item -ItemType Directory -Force -Path $sftpSmokeState | Out-Null
 $sample = Join-Path $pushInput "IMG_1234.CR3"
 [System.IO.File]::WriteAllBytes($sample, [byte[]](1, 2, 3, 4, 5))
 
-& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera"
-if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
-$configRaw = Get-Content -Raw -LiteralPath $configPath
-if ($configRaw -like "*secret*") { throw "account config leaked plaintext password" }
-if ($configRaw -notlike "*password_hash*") { throw "account config did not store a password hash" }
-$configJson = $configRaw | ConvertFrom-Json
-if ($configJson.receiver.protocol -ne "Ftp" -or $configJson.receiver.ftp_port -ne 2121 -or $configJson.receiver.sftp_port -ne 2222) {
-    throw "receiver settings were not persisted in config"
-}
-
-$accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
-if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }
-if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*" }).Count -lt 1) {
-    throw "account list did not include Verify Camera"
-}
-Write-Output $accountList
-
 $receiverSettings = & (Join-Path $root "target\debug\camera-connector.exe") receiver-settings --config $configPath --protocol ftp --bind-host "0.0.0.0" --ftp-port 2121 --sftp-port 2222 --output $pushOutput --state $pushState --advertised-host "192.168.137.1" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receiver-settings smoke failed" }
 if (($receiverSettings | Where-Object { $_ -like "config: $configPath*" }).Count -lt 1) {
@@ -100,6 +83,19 @@ $configJson = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
 if ($configJson.receiver.output_dir -ne $pushOutput -or $configJson.receiver.state_dir -ne $pushState -or $configJson.receiver.source_name -ne "Verify Camera") {
     throw "receiver-settings did not persist updated receiver paths"
 }
+
+& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username "verify" --password "secret" --device-name "Verify Camera"
+if ($LASTEXITCODE -ne 0) { throw "account set smoke failed" }
+$configRaw = Get-Content -Raw -LiteralPath $configPath
+if ($configRaw -like "*secret*") { throw "account config leaked plaintext password" }
+if ($configRaw -like "*password_hash*") { throw "account config should not persist account hashes in JSON" }
+
+$accountList = & (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath list
+if ($LASTEXITCODE -ne 0) { throw "account list smoke failed" }
+if (($accountList | Where-Object { $_ -like "*verify*Verify Camera*" }).Count -lt 1) {
+    throw "account list did not include Verify Camera"
+}
+Write-Output $accountList
 
 $projectCreate = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath create --name "Verify Shoot"
 if ($LASTEXITCODE -ne 0) { throw "project create smoke failed" }

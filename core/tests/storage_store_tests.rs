@@ -1,6 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, ObjectFormat, ProjectStatus, SqliteStore, StoredObjectLocation,
-    TransferRecord, TransferStatus,
+    AssetGroupQuery, ObjectFormat, ProjectStatus, ReceiverAccountConfig, SqliteStore,
+    StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -103,6 +103,71 @@ fn sqlite_store_rejects_archiving_system_inbox_project() {
             .status,
         ProjectStatus::Active
     );
+}
+
+#[test]
+fn sqlite_store_upserts_receiver_accounts() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+
+    let created = store
+        .upsert_receiver_account(
+            ReceiverAccountConfig::new(" z5 ", Some("secret"), " Z5 II ")
+                .expect("account should build"),
+        )
+        .expect("account should upsert");
+
+    assert_eq!(created.username, "z5");
+    assert_eq!(created.device_name, "Z5 II");
+    assert!(created.enabled);
+    assert!(created
+        .password_hash
+        .as_deref()
+        .expect("password hash should exist")
+        .starts_with("$argon2id$"));
+    assert!(created.created_at_ms > 0);
+    assert!(created.updated_at_ms >= created.created_at_ms);
+
+    let updated = store
+        .upsert_receiver_account(
+            ReceiverAccountConfig::new("z5", Some("new-secret"), "Studio Z5")
+                .expect("account should build"),
+        )
+        .expect("account should update");
+    let accounts = store
+        .receiver_accounts()
+        .expect("accounts should list from sqlite");
+
+    assert_eq!(updated.username, "z5");
+    assert_eq!(updated.device_name, "Studio Z5");
+    assert_eq!(updated.created_at_ms, created.created_at_ms);
+    assert!(updated.updated_at_ms >= created.updated_at_ms);
+    assert_ne!(updated.password_hash, created.password_hash);
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0], updated);
+}
+
+#[test]
+fn sqlite_store_removes_receiver_accounts() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    store
+        .upsert_receiver_account(
+            ReceiverAccountConfig::new("z5", Some("secret"), "Z5 II")
+                .expect("account should build"),
+        )
+        .expect("account should upsert");
+
+    assert!(store
+        .remove_receiver_account("z5")
+        .expect("account should remove"));
+    assert!(!store
+        .remove_receiver_account("z5")
+        .expect("missing account should be reported"));
+    assert!(store
+        .receiver_accounts()
+        .expect("accounts should list")
+        .is_empty());
 }
 
 #[test]
