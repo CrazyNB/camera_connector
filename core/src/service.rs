@@ -7,8 +7,8 @@ use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
     PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, TransferRecord,
-    TransferStatus,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, StoredAsset,
+    TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -390,6 +390,14 @@ impl CameraConnectorService {
     ) -> Result<AssetGroupPage> {
         self.storage_store()?
             .asset_group_page(project_id, query, offset, limit)
+    }
+
+    pub fn project_group_assets(
+        &self,
+        project_id: &str,
+        group_id: &str,
+    ) -> Result<Vec<StoredAsset>> {
+        self.storage_store()?.assets_for_group(project_id, group_id)
     }
 
     pub fn receiver_status(

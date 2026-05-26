@@ -198,6 +198,57 @@ fn service_queries_storage_asset_groups_inside_project_scope() {
 }
 
 #[test]
+fn service_queries_project_group_members_by_stable_group_id() {
+    let config_path = unique_temp_path("storage-service-project-group-members");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Group Members")
+        .expect("project should create");
+
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:z5", "DCIM/100/IMG_4001.JPG", 20),
+        )
+        .expect("first transfer should record");
+    let mut second = completed_transfer("ftp:z6", "DCIM/200/IMG_4001.JPG", 21);
+    second.username = Some("z6".to_string());
+    second.source_name = Some("Studio Z6".to_string());
+    service
+        .record_project_transfer(&project.project_id, second)
+        .expect("second transfer should record");
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("project groups should query");
+    let first_group_id = page.groups[0]
+        .group_id
+        .as_deref()
+        .expect("first group should expose stable id");
+    let second_group_id = page.groups[1]
+        .group_id
+        .as_deref()
+        .expect("second group should expose stable id");
+
+    let first_assets = service
+        .project_group_assets(&project.project_id, first_group_id)
+        .expect("first group members should query");
+    let second_assets = service
+        .project_group_assets(&project.project_id, second_group_id)
+        .expect("second group members should query");
+    let ambiguous_assets = service
+        .project_group_assets(&project.project_id, "IMG_4001")
+        .expect("display key should not query members");
+
+    assert_eq!(first_assets.len(), 1);
+    assert_eq!(second_assets.len(), 1);
+    assert_ne!(first_assets[0].group_id, second_assets[0].group_id);
+    assert!(ambiguous_assets.is_empty());
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_filters_project_transfers_from_sqlite() {
     let config_path = unique_temp_path("storage-service-project-transfers");
     let service = CameraConnectorService::new(Some(config_path.clone()));
