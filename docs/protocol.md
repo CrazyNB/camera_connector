@@ -64,7 +64,7 @@ Not yet implemented:
 
 - System config, receiver state/logs, and uploaded assets are separate:
   - Config: receiver and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
-  - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `receiver-status.json`, `sftp-host-key`, and the `staging` directory.
+  - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `sftp-host-key`, and the `staging` directory.
   - Output/inbox location: completed camera files only.
 - The core records final save targets as `StoredObjectLocation`, not only as local filesystem paths:
   - Desktop: `local_path`.
@@ -98,7 +98,7 @@ The receiver writes `transfer-log.jsonl` in the state/log directory as an audit 
 - `source_name`: optional user-set camera/source label.
 - `started_at_ms` and `completed_at_ms`.
 
-The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, `publish_queue`, `receiver_accounts`, and `connected_devices` tables for project-scoped dashboard queries and mutable receiver state. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
+The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, `publish_queue`, `receiver_accounts`, `connected_devices`, and `receiver_status` tables for project-scoped dashboard queries and mutable receiver state. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 For display, the UI builds a virtual path from metadata:
 
@@ -125,7 +125,7 @@ When the FTP or SFTP receiver starts, it marks any previously online device reco
 
 ## Receiver Runtime Status
 
-The receiver writes `receiver-status.json` in the state/log directory. It records:
+The receiver writes runtime status to the SQLite `receiver_status` table in the state/log directory. It records:
 
 - `phase`: stopped, starting, running, stopping, or failed.
 - `protocol`: FTP or SFTP when known.

@@ -1,4 +1,3 @@
-use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -10,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     CameraConnectorService, ImporterError, PushProtocol, PushReceiverServer, ReceiverConfigRequest,
-    Result,
+    Result, SqliteStore,
 };
 
 pub const RECEIVER_STATUS_FILENAME: &str = "receiver-status.json";
@@ -260,29 +259,16 @@ pub fn receiver_runtime_status_path(output_dir: impl AsRef<Path>) -> PathBuf {
 pub fn read_receiver_runtime_status(
     output_dir: impl AsRef<Path>,
 ) -> Result<Option<ReceiverRuntimeStatus>> {
-    let path = receiver_runtime_status_path(output_dir);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = fs::read(path)?;
-    let status = serde_json::from_slice(&bytes)
-        .map_err(|error| ImporterError::internal(error.to_string()))?;
-    Ok(Some(observe_receiver_runtime_status(status)))
+    Ok(SqliteStore::open_state_dir(output_dir.as_ref())?
+        .read_receiver_runtime_status()?
+        .map(observe_receiver_runtime_status))
 }
 
 pub fn write_receiver_runtime_status(
     output_dir: impl AsRef<Path>,
     status: &ReceiverRuntimeStatus,
 ) -> Result<()> {
-    let output_dir = output_dir.as_ref();
-    fs::create_dir_all(output_dir)?;
-    let path = receiver_runtime_status_path(output_dir);
-    let temp_path = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec_pretty(status)
-        .map_err(|error| ImporterError::internal(error.to_string()))?;
-    fs::write(&temp_path, bytes)?;
-    fs::rename(temp_path, path)?;
-    Ok(())
+    SqliteStore::open_state_dir(output_dir.as_ref())?.write_receiver_runtime_status(status)
 }
 
 fn stopped_status() -> ReceiverRuntimeStatus {

@@ -1,5 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, ObjectFormat, ProjectStatus, ReceiverAccountConfig, SqliteStore,
+    AssetGroupQuery, ObjectFormat, ProjectStatus, PushProtocol, ReceiverAccountConfig,
+    ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, SqliteStore,
     StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
@@ -209,6 +210,38 @@ fn sqlite_store_records_connected_device_state() {
     assert_eq!(disconnected[0].active_connections, 0);
     assert!(!disconnected[0].online);
     assert!(disconnected[0].last_disconnected_at_ms.is_some());
+}
+
+#[test]
+fn sqlite_store_persists_receiver_runtime_status() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open_state_dir(temp_dir.path()).expect("store should open");
+    let status = ReceiverRuntimeStatus {
+        phase: ReceiverRuntimePhase::Running,
+        protocol: Some(PushProtocol::Ftp),
+        auth_mode: ReceiverAuthMode::Accounts,
+        local_addr: Some("127.0.0.1:2121".parse().expect("addr should parse")),
+        output_dir: Some(temp_dir.path().join("output")),
+        state_dir: Some(temp_dir.path().to_path_buf()),
+        account_count: 1,
+        message: None,
+    };
+
+    store
+        .write_receiver_runtime_status(&status)
+        .expect("runtime status should write");
+    let loaded = store
+        .read_receiver_runtime_status()
+        .expect("runtime status should read")
+        .expect("runtime status should exist");
+
+    assert_eq!(loaded.phase, ReceiverRuntimePhase::Running);
+    assert_eq!(loaded.protocol, Some(PushProtocol::Ftp));
+    assert_eq!(loaded.auth_mode, ReceiverAuthMode::Accounts);
+    assert_eq!(loaded.local_addr, status.local_addr);
+    assert_eq!(loaded.output_dir, status.output_dir);
+    assert_eq!(loaded.state_dir, status.state_dir);
+    assert_eq!(loaded.account_count, 1);
 }
 
 #[test]

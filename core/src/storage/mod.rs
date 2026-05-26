@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     group_received_assets, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
     ConnectedDevice, ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, Result, StoredObjectLocation, TransferRecord, TransferStatus,
+    ReceiverAccountConfig, ReceiverRuntimeStatus, Result, StoredObjectLocation, TransferRecord,
+    TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
@@ -571,6 +572,38 @@ impl SqliteStore {
         })
     }
 
+    pub fn write_receiver_runtime_status(&self, status: &ReceiverRuntimeStatus) -> Result<()> {
+        let payload = serde_json::to_string(status)
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
+        self.with_connection(|connection| {
+            connection.execute(
+                "INSERT INTO receiver_status (key, payload, updated_at_ms)
+                 VALUES ('current', ?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![payload, current_time_ms()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn read_receiver_runtime_status(&self) -> Result<Option<ReceiverRuntimeStatus>> {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT payload FROM receiver_status WHERE key = 'current'",
+                    [],
+                    |row| {
+                        let payload = row.get::<_, String>(0)?;
+                        serde_json::from_str::<ReceiverRuntimeStatus>(&payload)
+                            .map_err(sqlite_data_error)
+                    },
+                )
+                .optional()
+        })
+    }
+
     pub fn record_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
@@ -884,6 +917,12 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             online INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS receiver_status (
+            key TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS transfers (
             transfer_id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -1066,6 +1105,10 @@ fn sort_connected_devices(devices: &mut [ConnectedDevice]) {
             .then_with(|| right.last_seen_at_ms.cmp(&left.last_seen_at_ms))
             .then_with(|| left.remote_addr.cmp(&right.remote_addr))
     });
+}
+
+fn sqlite_data_error(error: impl ToString) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(error.to_string())
 }
 
 fn ensure_project_exists(

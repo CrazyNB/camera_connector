@@ -1,9 +1,9 @@
 use std::net::TcpListener;
 
 use camera_connector_core::{
-    read_receiver_runtime_status, write_receiver_runtime_status, CameraConnectorRuntime,
-    CameraConnectorService, PushProtocol, ReceiverAuthMode, ReceiverConfigRequest,
-    ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
+    read_receiver_runtime_status, receiver_runtime_status_path, write_receiver_runtime_status,
+    CameraConnectorRuntime, CameraConnectorService, PushProtocol, ReceiverAuthMode,
+    ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
 };
 
 #[tokio::test]
@@ -184,6 +184,37 @@ fn read_receiver_runtime_status_marks_dead_running_listener_stopped() {
         status.message.as_deref(),
         Some("receiver process is not listening")
     );
+}
+
+#[test]
+fn receiver_runtime_status_is_stored_in_sqlite() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+
+    write_receiver_runtime_status(
+        temp_dir.path(),
+        &ReceiverRuntimeStatus {
+            phase: ReceiverRuntimePhase::Stopped,
+            protocol: Some(PushProtocol::Sftp),
+            auth_mode: ReceiverAuthMode::Accounts,
+            local_addr: None,
+            output_dir: Some(temp_dir.path().join("output")),
+            state_dir: Some(temp_dir.path().to_path_buf()),
+            account_count: 2,
+            message: Some("stopped for test".to_string()),
+        },
+    )
+    .expect("runtime status should write");
+
+    assert!(!receiver_runtime_status_path(temp_dir.path()).exists());
+    let status = read_receiver_runtime_status(temp_dir.path())
+        .expect("runtime status should read")
+        .expect("runtime status should exist");
+
+    assert_eq!(status.phase, ReceiverRuntimePhase::Stopped);
+    assert_eq!(status.protocol, Some(PushProtocol::Sftp));
+    assert_eq!(status.auth_mode, ReceiverAuthMode::Accounts);
+    assert_eq!(status.account_count, 2);
+    assert_eq!(status.message.as_deref(), Some("stopped for test"));
 }
 
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {
