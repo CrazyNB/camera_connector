@@ -63,8 +63,8 @@ Not yet implemented:
 ## Storage Rules
 
 - System config, receiver state/logs, and uploaded assets are separate:
-  - Config: account and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
-  - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `connected-devices.json`, `receiver-status.json`, `sftp-host-key`, and the `staging` directory.
+  - Config: receiver and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
+  - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `receiver-status.json`, `sftp-host-key`, and the `staging` directory.
   - Output/inbox location: completed camera files only.
 - The core records final save targets as `StoredObjectLocation`, not only as local filesystem paths:
   - Desktop: `local_path`.
@@ -98,7 +98,7 @@ The receiver writes `transfer-log.jsonl` in the state/log directory as an audit 
 - `source_name`: optional user-set camera/source label.
 - `started_at_ms` and `completed_at_ms`.
 
-The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, and `publish_queue` tables for project-scoped dashboard queries. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
+The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, `publish_queue`, `receiver_accounts`, and `connected_devices` tables for project-scoped dashboard queries and mutable receiver state. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 For display, the UI builds a virtual path from metadata:
 
@@ -111,7 +111,7 @@ Camera accounts are user configuration. They map push-login credentials to a dev
 
 ## Connected Devices
 
-The receiver writes `connected-devices.json` in the state/log directory. It records current and recently seen FTP control connections and SFTP sessions:
+The receiver writes connected-device state to the SQLite `connected_devices` table in the state/log directory. It records current and recently seen FTP control connections and SFTP sessions:
 
 - `remote_addr` and last remote port.
 - authenticated login `username` when the device has logged in.
@@ -119,7 +119,7 @@ The receiver writes `connected-devices.json` in the state/log directory. It reco
 - first seen, last seen, and last disconnected timestamps.
 - source name resolved from the authenticated account when available.
 
-This file powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
+This table powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
 
 When the FTP or SFTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old sessions still exist, so the device view only returns to online after the camera opens a new connection.
 

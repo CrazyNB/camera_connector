@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     group_received_assets, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
+    ConnectedDevice, ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
     ReceiverAccountConfig, Result, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
@@ -418,6 +418,159 @@ impl SqliteStore {
         })
     }
 
+    pub fn record_connected_device(
+        &self,
+        remote_addr: &str,
+        remote_port: Option<u16>,
+        source_name: Option<&str>,
+        username: Option<&str>,
+    ) -> Result<()> {
+        let now = current_time_ms();
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let mut devices = connected_devices_from_connection(&transaction)?;
+            if let Some(device) = devices
+                .iter_mut()
+                .find(|device| device.remote_addr == remote_addr)
+            {
+                device.last_seen_at_ms = now;
+                device.last_remote_port = remote_port;
+                device.active_connections = device.active_connections.saturating_add(1);
+                device.online = true;
+                if let Some(source_name) = source_name {
+                    device.source_name = Some(source_name.to_string());
+                }
+                if let Some(username) = username {
+                    device.username = Some(username.to_string());
+                }
+            } else {
+                devices.push(ConnectedDevice {
+                    remote_addr: remote_addr.to_string(),
+                    source_name: source_name.map(ToOwned::to_owned),
+                    username: username.map(ToOwned::to_owned),
+                    first_seen_at_ms: now,
+                    last_seen_at_ms: now,
+                    last_disconnected_at_ms: None,
+                    last_remote_port: remote_port,
+                    active_connections: 1,
+                    online: true,
+                });
+            }
+            replace_connected_devices(&transaction, &devices)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn record_authenticated_device(
+        &self,
+        remote_addr: &str,
+        source_name: Option<&str>,
+        username: Option<&str>,
+    ) -> Result<()> {
+        let now = current_time_ms();
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let mut devices = connected_devices_from_connection(&transaction)?;
+            let previous_for_username = username.and_then(|username| {
+                devices
+                    .iter()
+                    .filter(|device| {
+                        device.username.as_deref() == Some(username)
+                            && device.remote_addr != remote_addr
+                    })
+                    .fold(None, |previous: Option<ConnectedDevice>, device| {
+                        Some(match previous {
+                            Some(previous)
+                                if previous.first_seen_at_ms <= device.first_seen_at_ms =>
+                            {
+                                previous
+                            }
+                            _ => device.clone(),
+                        })
+                    })
+            });
+
+            if let Some(username) = username {
+                devices.retain(|device| {
+                    device.remote_addr == remote_addr
+                        || device.username.as_deref() != Some(username)
+                });
+            }
+
+            if let Some(device) = devices
+                .iter_mut()
+                .find(|device| device.remote_addr == remote_addr)
+            {
+                if let Some(previous) = previous_for_username {
+                    device.first_seen_at_ms =
+                        device.first_seen_at_ms.min(previous.first_seen_at_ms);
+                    if device.source_name.is_none() {
+                        device.source_name = previous.source_name;
+                    }
+                }
+                device.last_seen_at_ms = now;
+                if let Some(source_name) = source_name {
+                    device.source_name = Some(source_name.to_string());
+                }
+                if let Some(username) = username {
+                    device.username = Some(username.to_string());
+                }
+            }
+
+            replace_connected_devices(&transaction, &devices)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn record_disconnected_device(&self, remote_addr: &str) -> Result<()> {
+        let now = current_time_ms();
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let mut devices = connected_devices_from_connection(&transaction)?;
+            if let Some(device) = devices
+                .iter_mut()
+                .find(|device| device.remote_addr == remote_addr)
+            {
+                device.active_connections = device.active_connections.saturating_sub(1);
+                device.online = device.active_connections > 0;
+                device.last_seen_at_ms = now;
+                if !device.online {
+                    device.last_disconnected_at_ms = Some(now);
+                }
+            }
+            replace_connected_devices(&transaction, &devices)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn mark_all_connected_devices_offline(&self) -> Result<()> {
+        let now = current_time_ms();
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let mut devices = connected_devices_from_connection(&transaction)?;
+            for device in devices.iter_mut().filter(|device| device.online) {
+                device.active_connections = 0;
+                device.online = false;
+                device.last_seen_at_ms = now;
+                device.last_disconnected_at_ms = Some(now);
+            }
+            replace_connected_devices(&transaction, &devices)?;
+            transaction.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn connected_devices(&self) -> Result<Vec<ConnectedDevice>> {
+        self.with_connection(|connection| {
+            let mut devices = connected_devices_from_connection(connection)?;
+            sort_connected_devices(&mut devices);
+            Ok(devices)
+        })
+    }
+
     pub fn record_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
@@ -719,6 +872,18 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             updated_at_ms INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS connected_devices (
+            remote_addr TEXT PRIMARY KEY,
+            source_name TEXT,
+            username TEXT,
+            first_seen_at_ms INTEGER NOT NULL,
+            last_seen_at_ms INTEGER NOT NULL,
+            last_disconnected_at_ms INTEGER,
+            last_remote_port INTEGER,
+            active_connections INTEGER NOT NULL,
+            online INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS transfers (
             transfer_id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL REFERENCES projects(project_id),
@@ -802,6 +967,8 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
 
         CREATE INDEX IF NOT EXISTS idx_assets_project_group ON assets(project_id, group_id);
         CREATE INDEX IF NOT EXISTS idx_asset_groups_project ON asset_groups(project_id, updated_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_connected_devices_username ON connected_devices(username);
+        CREATE INDEX IF NOT EXISTS idx_connected_devices_sort ON connected_devices(online, last_seen_at_ms);
         CREATE INDEX IF NOT EXISTS idx_receiver_accounts_enabled ON receiver_accounts(enabled, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_publish_queue_state ON publish_queue(state, created_at_ms);
         ",
@@ -834,6 +1001,71 @@ fn receiver_account_from_row(
         created_at_ms: row.get(4)?,
         updated_at_ms: row.get(5)?,
     })
+}
+
+fn connected_devices_from_connection(
+    connection: &Connection,
+) -> std::result::Result<Vec<ConnectedDevice>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT remote_addr, source_name, username, first_seen_at_ms, last_seen_at_ms,
+                last_disconnected_at_ms, last_remote_port, active_connections, online
+         FROM connected_devices",
+    )?;
+    let rows = statement.query_map([], connected_device_from_row)?;
+    collect_rows(rows)
+}
+
+fn connected_device_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<ConnectedDevice, rusqlite::Error> {
+    Ok(ConnectedDevice {
+        remote_addr: row.get(0)?,
+        source_name: row.get(1)?,
+        username: row.get(2)?,
+        first_seen_at_ms: row.get(3)?,
+        last_seen_at_ms: row.get(4)?,
+        last_disconnected_at_ms: row.get(5)?,
+        last_remote_port: row.get::<_, Option<i64>>(6)?.map(|port| port as u16),
+        active_connections: row.get::<_, i64>(7)? as u32,
+        online: row.get::<_, i64>(8)? != 0,
+    })
+}
+
+fn replace_connected_devices(
+    connection: &Connection,
+    devices: &[ConnectedDevice],
+) -> std::result::Result<(), rusqlite::Error> {
+    connection.execute("DELETE FROM connected_devices", [])?;
+    for device in devices {
+        connection.execute(
+            "INSERT INTO connected_devices (
+                remote_addr, source_name, username, first_seen_at_ms, last_seen_at_ms,
+                last_disconnected_at_ms, last_remote_port, active_connections, online
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &device.remote_addr,
+                device.source_name.as_deref(),
+                device.username.as_deref(),
+                device.first_seen_at_ms,
+                device.last_seen_at_ms,
+                device.last_disconnected_at_ms,
+                device.last_remote_port.map(|port| port as i64),
+                device.active_connections as i64,
+                if device.online { 1_i64 } else { 0_i64 },
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn sort_connected_devices(devices: &mut [ConnectedDevice]) {
+    devices.sort_by(|left, right| {
+        right
+            .online
+            .cmp(&left.online)
+            .then_with(|| right.last_seen_at_ms.cmp(&left.last_seen_at_ms))
+            .then_with(|| left.remote_addr.cmp(&right.remote_addr))
+    });
 }
 
 fn ensure_project_exists(

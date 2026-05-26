@@ -171,6 +171,47 @@ fn sqlite_store_removes_receiver_accounts() {
 }
 
 #[test]
+fn sqlite_store_records_connected_device_state() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open_state_dir(temp_dir.path()).expect("store should open");
+
+    store
+        .record_connected_device("192.168.137.56", Some(51120), None, None)
+        .expect("device should connect");
+    store
+        .record_authenticated_device("192.168.137.56", Some("Studio Z5"), Some("z5"))
+        .expect("device should authenticate");
+    store
+        .record_connected_device("192.168.137.44", Some(51121), None, None)
+        .expect("new IP should connect");
+    store
+        .record_authenticated_device("192.168.137.44", Some("Studio Z5"), Some("z5"))
+        .expect("new IP should authenticate");
+
+    let devices = store
+        .connected_devices()
+        .expect("connected devices should load");
+
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].remote_addr, "192.168.137.44");
+    assert_eq!(devices[0].last_remote_port, Some(51121));
+    assert_eq!(devices[0].username.as_deref(), Some("z5"));
+    assert_eq!(devices[0].source_name.as_deref(), Some("Studio Z5"));
+    assert_eq!(devices[0].active_connections, 1);
+    assert!(devices[0].online);
+
+    store
+        .record_disconnected_device("192.168.137.44")
+        .expect("device should disconnect");
+    let disconnected = store
+        .connected_devices()
+        .expect("connected devices should load");
+    assert_eq!(disconnected[0].active_connections, 0);
+    assert!(!disconnected[0].online);
+    assert!(disconnected[0].last_disconnected_at_ms.is_some());
+}
+
+#[test]
 fn sqlite_store_rejects_transfer_without_existing_project() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
