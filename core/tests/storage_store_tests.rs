@@ -156,8 +156,12 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
     let page = store
         .asset_group_page(&project_a.project_id, AssetGroupQuery::default(), 0, 25)
         .expect("groups should query");
+    let group_id = page.groups[0]
+        .group_id
+        .as_deref()
+        .expect("project group should expose stable id");
     let assets = store
-        .assets_for_group(&project_a.project_id, &page.groups[0].group_key)
+        .assets_for_group(&project_a.project_id, group_id)
         .expect("group assets should query");
 
     assert_eq!(page.total_groups, 1);
@@ -245,6 +249,30 @@ fn sqlite_store_keeps_same_stem_groups_separate_by_source_and_parent() {
     assert!(page.groups.iter().all(|group| group.group_id.is_some()));
     assert_ne!(page.groups[0].group_id, page.groups[1].group_id);
     assert_eq!(page.summary.asset_count, 2);
+
+    let first_group_id = page.groups[0]
+        .group_id
+        .as_deref()
+        .expect("first group should expose id");
+    let second_group_id = page.groups[1]
+        .group_id
+        .as_deref()
+        .expect("second group should expose id");
+    let first_assets = store
+        .assets_for_group(&project.project_id, first_group_id)
+        .expect("first group members should query");
+    let second_assets = store
+        .assets_for_group(&project.project_id, second_group_id)
+        .expect("second group members should query");
+    let ambiguous_assets = store
+        .assets_for_group(&project.project_id, "IMG_4001")
+        .expect("display key should not be treated as a group identity");
+
+    assert_eq!(first_assets.len(), 1);
+    assert_eq!(second_assets.len(), 1);
+    assert_ne!(first_assets[0].group_id, second_assets[0].group_id);
+    assert!(ambiguous_assets.is_empty());
+
     assert!(page
         .summary
         .source_counts

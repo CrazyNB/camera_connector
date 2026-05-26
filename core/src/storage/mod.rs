@@ -389,11 +389,7 @@ impl SqliteStore {
         })
     }
 
-    pub fn assets_for_group(
-        &self,
-        project_id: &str,
-        group_id_or_display_key: &str,
-    ) -> Result<Vec<StoredAsset>> {
+    pub fn assets_for_group(&self, project_id: &str, group_id: &str) -> Result<Vec<StoredAsset>> {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
@@ -402,16 +398,10 @@ impl SqliteStore {
                         published_at_ms, source_identity, username, remote_addr,
                         duplicate_index, duplicate_count
                  FROM assets
-                 WHERE group_id IN (
-                    SELECT group_id FROM asset_groups
-                    WHERE project_id = ?1 AND (group_id = ?2 OR display_key = ?2)
-                 )
+                 WHERE project_id = ?1 AND group_id = ?2
                  ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
             )?;
-            let rows = statement.query_map(
-                params![project_id, group_id_or_display_key],
-                stored_asset_from_row,
-            )?;
+            let rows = statement.query_map(params![project_id, group_id], stored_asset_from_row)?;
             collect_rows(rows)
         })
     }
