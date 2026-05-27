@@ -88,25 +88,6 @@ impl MobileCore {
         self.service.state_dir().to_string_lossy().into_owned()
     }
 
-    pub fn dashboard_json(
-        &self,
-        state_dir: Option<String>,
-        offset: u32,
-        limit: u32,
-    ) -> MobileCoreResult<String> {
-        let state_dir = state_dir
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.service.state_dir());
-        let dashboard: CameraConnectorDashboard = self.service.dashboard(
-            state_dir,
-            AssetGroupQuery::default(),
-            offset as usize,
-            limit as usize,
-            false,
-        )?;
-        Ok(serde_json::to_string(&dashboard)?)
-    }
-
     pub fn create_project_json(&self, name: String) -> MobileCoreResult<String> {
         let project = self.service.create_project(name)?;
         Ok(serde_json::to_string(&project)?)
@@ -309,24 +290,6 @@ pub unsafe extern "C" fn camera_connector_mobile_core_default_state_dir(
     core: *const MobileCore,
 ) -> *mut c_char {
     ffi_response(|| Ok(json!(core_ref(core)?.default_state_dir())))
-}
-
-/// # Safety
-///
-/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
-/// `state_dir` must be either null or a valid, null-terminated UTF-8 C string.
-#[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_dashboard_json(
-    core: *const MobileCore,
-    state_dir: *const c_char,
-    offset: u32,
-    limit: u32,
-) -> *mut c_char {
-    ffi_response(|| {
-        let dashboard =
-            core_ref(core)?.dashboard_json(optional_c_string(state_dir)?, offset, limit)?;
-        parse_json_value(&dashboard)
-    })
 }
 
 /// # Safety
@@ -640,29 +603,6 @@ pub unsafe extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore
     if handle != 0 {
         drop(Box::from_raw(handle as *mut MobileCore));
     }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_dashboardJson(
-    mut env: EnvUnowned,
-    _class: JClass,
-    handle: jlong,
-    state_dir: JString,
-    offset: jint,
-    limit: jint,
-) -> jstring {
-    env.with_env(|env| {
-        let state_dir = optional_java_string(env, state_dir);
-        java_response(env, || {
-            let dashboard = mobile_core_from_handle(handle)?.dashboard_json(
-                state_dir?,
-                offset.max(0) as u32,
-                limit.max(0) as u32,
-            )?;
-            parse_json_value(&dashboard)
-        })
-    })
-    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[no_mangle]

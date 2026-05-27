@@ -32,12 +32,12 @@ Do not make Receiver Settings or Device Accounts bottom-tab destinations. They a
 
 | Mobile surface | Core capability | Notes |
 | --- | --- | --- |
-| Overview | `CameraConnectorService::dashboard` | Single read model for status, paths, accounts, devices, transfers, failures, and assets |
+| Overview | `CameraConnectorService::project_dashboard` | Single project-scoped read model for status, paths, accounts, devices, transfers, failures, and assets |
 | Receiver Settings | `CameraConnectorService::set_receiver_settings` | Patch-style updates; unspecified values remain unchanged |
 | Device Accounts | `set_account`, `remove_account`, dashboard `accounts` | Password is write-only during setup; display configured/not required |
 | Start/Stop Receiver | `CameraConnectorRuntime::start_receiver`, `stop_receiver`, `status` | Mobile shell owns foreground/background lifecycle |
-| Inbox | dashboard `assets` or `transfer_asset_group_page_with_query` | Prefer transfer-log backed groups where platform storage scanning is limited |
-| Transfers | `transfers`, `transfer_summary_with_query`, `recent_failed_transfers` | Failed rows must show error text and retry guidance |
+| Inbox | project dashboard `assets` or `project_asset_group_page_with_query` | Use the active project as the required viewing scope |
+| Transfers | `project_transfers`, `project_transfer_summary_with_query`, `project_recent_failed_transfers` | Failed rows must show error text and retry guidance |
 | Connected Devices | dashboard `accounts` and `devices` | Account is identity; IP is mutable connection state |
 
 ## 4. Platform Storage Contract

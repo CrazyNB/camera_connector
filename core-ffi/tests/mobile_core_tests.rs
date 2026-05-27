@@ -90,43 +90,11 @@ fn mobile_core_removes_account_as_json() {
     let value: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(value["username"], "camera01");
     assert_eq!(value["removed"], true);
-    let dashboard: Value = serde_json::from_str(
-        &core
-            .dashboard_json(
-                Some(temp.path().join("state").to_string_lossy().into_owned()),
-                0,
-                25,
-            )
-            .unwrap(),
-    )
-    .unwrap();
+    let project: Value = serde_json::from_str(&core.ensure_active_project_json().unwrap()).unwrap();
+    let project_id = project["project_id"].as_str().unwrap().to_string();
+    let dashboard: Value =
+        serde_json::from_str(&core.project_dashboard_json(project_id, 0, 25).unwrap()).unwrap();
     assert_eq!(dashboard["accounts"].as_array().unwrap().len(), 0);
-}
-
-#[test]
-fn mobile_core_returns_dashboard_json() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let state_dir = temp.path().join("state");
-    std::fs::create_dir_all(&state_dir).unwrap();
-    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
-    core.save_device_account_json(
-        "camera01".to_string(),
-        Some("secret".to_string()),
-        "Camera 01".to_string(),
-    )
-    .unwrap();
-
-    let json = core
-        .dashboard_json(Some(state_dir.to_string_lossy().into_owned()), 0, 25)
-        .unwrap();
-
-    let value: Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(value["receiver_settings"]["protocol"], "Ftp");
-    assert_eq!(value["accounts"][0]["username"], "camera01");
-    assert_eq!(value["accounts"][0]["device_name"], "Camera 01");
-    assert_eq!(value["assets"]["limit"], 25);
-    assert!(json.contains("config_path"));
 }
 
 #[test]

@@ -17,7 +17,6 @@ $requiredFunctions = @(
     "camera_connector_mobile_core_free_string",
     "camera_connector_mobile_core_config_path",
     "camera_connector_mobile_core_default_state_dir",
-    "camera_connector_mobile_core_dashboard_json",
     "camera_connector_mobile_core_create_project_json",
     "camera_connector_mobile_core_list_projects_json",
     "camera_connector_mobile_core_set_active_project_json",
@@ -36,7 +35,6 @@ $requiredFunctions = @(
 $requiredJniFunctions = @(
     "Java_com_cameraconnector_app_core_NativeMobileCore_create",
     "Java_com_cameraconnector_app_core_NativeMobileCore_destroy",
-    "Java_com_cameraconnector_app_core_NativeMobileCore_dashboardJson",
     "Java_com_cameraconnector_app_core_NativeMobileCore_createProjectJson",
     "Java_com_cameraconnector_app_core_NativeMobileCore_listProjectsJson",
     "Java_com_cameraconnector_app_core_NativeMobileCore_setActiveProjectJson",

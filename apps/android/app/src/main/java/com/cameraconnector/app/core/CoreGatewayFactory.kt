@@ -25,7 +25,6 @@ object CoreGatewayFactory {
 
             NativeCoreGateway(
                 nativeCore = nativeCore,
-                stateDir = stateDir.absolutePath,
                 receiverServiceController = ReceiverServiceController(
                     appContext,
                     configFile.absolutePath,

@@ -82,7 +82,8 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_create`
 - `camera_connector_mobile_core_destroy`
 - `camera_connector_mobile_core_free_string`
-- `camera_connector_mobile_core_dashboard_json`
+- `camera_connector_mobile_core_project_dashboard_json`
+- `camera_connector_mobile_core_project_group_assets_json`
 - `camera_connector_mobile_core_save_receiver_settings_json`
 - `camera_connector_mobile_core_save_device_account_json`
 - `camera_connector_mobile_core_start_receiver_json`
@@ -111,7 +112,7 @@ Android JNI bindings keep this envelope at the native boundary, then map it into
 The Android source now has the Kotlin side of that bridge:
 
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
-- `NativeCoreGateway` adapts native dashboard JSON into the existing `CoreGateway` model used by Compose.
+- `NativeCoreGateway` ensures an active project and adapts project dashboard JSON into the existing `CoreGateway` model used by Compose.
 - `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`; release-facing verification builds use the native gateway.
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
@@ -136,7 +137,8 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
 - `create`
 - `destroy`
-- `dashboardJson`
+- `projectDashboardJson`
+- `projectGroupAssetsJson`
 - `saveReceiverSettingsJson`
 - `saveDeviceAccountJson`
 - `startReceiverJson`

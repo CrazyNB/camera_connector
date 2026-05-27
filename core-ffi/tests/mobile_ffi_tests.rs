@@ -8,8 +8,8 @@ use camera_connector_core::{
 use camera_connector_ffi::{
     camera_connector_mobile_core_active_project_json,
     camera_connector_mobile_core_archive_project_json, camera_connector_mobile_core_create,
-    camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_dashboard_json,
-    camera_connector_mobile_core_destroy, camera_connector_mobile_core_ensure_active_project_json,
+    camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
+    camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_group_assets_json,
@@ -138,27 +138,6 @@ fn ffi_returns_error_envelope_for_invalid_protocol() {
         .as_str()
         .unwrap()
         .contains("invalid protocol: ftps"));
-}
-
-#[test]
-fn ffi_returns_dashboard_json_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
-        .expect("config path should not contain nul");
-    let state_dir = temp.path().join("state");
-    std::fs::create_dir_all(&state_dir).unwrap();
-    let state_dir = CString::new(state_dir.to_string_lossy().as_bytes()).unwrap();
-
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-    let response_ptr =
-        unsafe { camera_connector_mobile_core_dashboard_json(core, state_dir.as_ptr(), 0, 25) };
-    let response = take_ffi_string(response_ptr);
-    unsafe { camera_connector_mobile_core_destroy(core) };
-
-    let value: Value = serde_json::from_str(&response).unwrap();
-    assert_eq!(value["ok"], true);
-    assert_eq!(value["value"]["assets"]["limit"], 25);
-    assert!(value["value"]["paths"]["config_path"].is_string());
 }
 
 #[test]
@@ -319,8 +298,14 @@ fn ffi_returns_project_group_assets_json_envelope() {
 
 #[test]
 fn ffi_rejects_null_core_pointer() {
+    let project_id = CString::new("project-inbox").unwrap();
     let response_ptr = unsafe {
-        camera_connector_mobile_core_dashboard_json(std::ptr::null(), std::ptr::null(), 0, 25)
+        camera_connector_mobile_core_project_dashboard_json(
+            std::ptr::null(),
+            project_id.as_ptr(),
+            0,
+            25,
+        )
     };
     let response = take_ffi_string(response_ptr);
     let value: Value = serde_json::from_str(&response).unwrap();

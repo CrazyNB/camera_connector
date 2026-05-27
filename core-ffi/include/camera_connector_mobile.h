@@ -32,13 +32,6 @@ char *camera_connector_mobile_core_config_path(const CameraConnectorMobileCore *
 
 char *camera_connector_mobile_core_default_state_dir(const CameraConnectorMobileCore *core);
 
-char *camera_connector_mobile_core_dashboard_json(
-    const CameraConnectorMobileCore *core,
-    const char *state_dir,
-    uint32_t offset,
-    uint32_t limit
-);
-
 char *camera_connector_mobile_core_create_project_json(
     const CameraConnectorMobileCore *core,
     const char *name

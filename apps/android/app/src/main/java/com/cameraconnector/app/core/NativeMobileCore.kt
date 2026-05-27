@@ -6,9 +6,6 @@ import org.json.JSONObject
 class NativeMobileCore(configPath: String?) : AutoCloseable {
     private var handle: Long = create(configPath)
 
-    fun dashboardJson(stateDir: String?, offset: Int, limit: Int): JSONObject =
-        call { dashboardJson(handle, stateDir, offset, limit) }
-
     fun projectDashboardJson(projectId: String, offset: Int, limit: Int): JSONObject =
         call { projectDashboardJson(handle, projectId, offset, limit) }
 
@@ -94,7 +91,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
 
     private external fun create(configPath: String?): Long
     private external fun destroy(handle: Long)
-    private external fun dashboardJson(handle: Long, stateDir: String?, offset: Int, limit: Int): String
     private external fun projectDashboardJson(handle: Long, projectId: String, offset: Int, limit: Int): String
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun createProjectJson(handle: Long, name: String): String

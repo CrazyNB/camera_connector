@@ -17,7 +17,6 @@ import org.json.JSONObject
 
 class NativeCoreGateway(
     private val nativeCore: NativeMobileCore,
-    private val stateDir: String?,
     private val receiverServiceController: ReceiverServiceController,
 ) : CoreGateway, AutoCloseable {
     private val gatewayScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -115,9 +114,14 @@ class NativeCoreGateway(
     private fun loadDashboard(
         activeProjectId: String? = loadProjects().activeProjectId,
     ): DashboardState {
-        val dashboardJson = activeProjectId
-            ?.let { nativeCore.projectDashboardJson(it, offset = 0, limit = CONTINUOUS_INBOX_LIMIT) }
-            ?: nativeCore.dashboardJson(stateDir, offset = 0, limit = CONTINUOUS_INBOX_LIMIT)
+        val projectId = activeProjectId
+            ?: loadProjects().activeProjectId
+            ?: return emptyDashboard()
+        val dashboardJson = nativeCore.projectDashboardJson(
+            projectId,
+            offset = 0,
+            limit = CONTINUOUS_INBOX_LIMIT,
+        )
         return mapDashboard(dashboardJson)
     }
 
