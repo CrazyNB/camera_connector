@@ -12,15 +12,22 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.cameraconnector.app.MainActivity
 import com.cameraconnector.app.core.NativeMobileCore
+import com.cameraconnector.app.storage.AndroidPublishWorker
+import com.cameraconnector.app.storage.FilePublishTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 
 class ReceiverForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var nativeCore: NativeMobileCore? = null
+    private var publishWorkerJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -63,6 +70,7 @@ class ReceiverForegroundService : Service() {
         runCatching {
             if (nativeCore != null) {
                 Log.i(LOG_TAG, "receiver start ignored because native core is already running")
+                nativeCore?.let(::startPublishWorker)
                 startForeground(NOTIFICATION_ID, notification("接收服务已在运行"))
                 return
             }
@@ -70,14 +78,19 @@ class ReceiverForegroundService : Service() {
             val status = core.startReceiver()
             val localAddr = status.optString("local_addr").ifBlank { "就绪" }
             Log.i(LOG_TAG, "receiver started localAddr=$localAddr")
+            startPublishWorker(core)
             startForeground(NOTIFICATION_ID, notification("接收服务运行中：$localAddr"))
         }.onFailure { error ->
             Log.e(LOG_TAG, "receiver start failed", error)
+            stopPublishWorker()
+            nativeCore?.close()
+            nativeCore = null
             startForeground(NOTIFICATION_ID, notification("接收服务失败：${error.message}"))
         }
     }
 
     private fun stopNativeReceiver() {
+        stopPublishWorker()
         runCatching {
             nativeCore?.stopReceiver()
             Log.i(LOG_TAG, "receiver stopped")
@@ -86,6 +99,40 @@ class ReceiverForegroundService : Service() {
         }
         nativeCore?.close()
         nativeCore = null
+    }
+
+    private fun startPublishWorker(core: NativeMobileCore) {
+        if (publishWorkerJob?.isActive == true) {
+            return
+        }
+
+        val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
+        val worker = AndroidPublishWorker(
+            core = core,
+            publishTarget = FilePublishTarget(outputDir),
+        )
+        publishWorkerJob = serviceScope.launch {
+            while (isActive) {
+                runCatching {
+                    worker.drainOnce()
+                }.onSuccess { result ->
+                    if (result.completedCount > 0 || result.failedCount > 0) {
+                        Log.i(
+                            LOG_TAG,
+                            "publish queue drained completed=${result.completedCount} failed=${result.failedCount}",
+                        )
+                    }
+                }.onFailure { error ->
+                    Log.e(LOG_TAG, "publish queue drain failed", error)
+                }
+                delay(PUBLISH_QUEUE_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopPublishWorker() {
+        publishWorkerJob?.cancel()
+        publishWorkerJob = null
     }
 
     private fun notification(message: String) =
@@ -141,6 +188,7 @@ class ReceiverForegroundService : Service() {
         private const val NOTIFICATION_ID = 1201
         private const val OPEN_APP_REQUEST_CODE = 1202
         private const val STOP_RECEIVER_REQUEST_CODE = 1203
+        private const val PUBLISH_QUEUE_POLL_INTERVAL_MS = 2_000L
         private const val EXTRA_CONFIG_PATH = "config_path"
         private const val EXTRA_STATE_DIR = "state_dir"
 

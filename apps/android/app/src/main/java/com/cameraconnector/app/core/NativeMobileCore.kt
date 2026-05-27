@@ -1,9 +1,10 @@
 package com.cameraconnector.app.core
 
+import com.cameraconnector.app.storage.PublishQueueCore
 import org.json.JSONArray
 import org.json.JSONObject
 
-class NativeMobileCore(configPath: String?) : AutoCloseable {
+class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private var handle: Long = create(configPath)
 
     fun projectDashboardJson(projectId: String, offset: Int, limit: Int): JSONObject =
@@ -13,7 +14,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
             ?: JSONArray()
 
-    fun claimNextPublishItem(): JSONObject? {
+    override fun claimNextPublishItem(): JSONObject? {
         val value = call { claimNextPublishItemJson(handle) }
         return if (value.has("value") && value.isNull("value")) {
             null
@@ -22,10 +23,10 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         }
     }
 
-    fun markPublishCompleted(queueId: String): JSONObject =
+    override fun markPublishCompleted(queueId: String): JSONObject =
         call { markPublishCompletedJson(handle, queueId) }
 
-    fun markPublishFailed(queueId: String, error: String): JSONObject =
+    override fun markPublishFailed(queueId: String, error: String): JSONObject =
         call { markPublishFailedJson(handle, queueId, error) }
 
     fun createProject(name: String): JSONObject =
