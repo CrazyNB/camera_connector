@@ -144,6 +144,37 @@ class AndroidPublishWorkerTest {
         assertTrue("staged file should remain retryable", staged.exists())
     }
 
+    @Test
+    fun resolvingPublishTargetUsesLatestTargetForRetryAfterOutputSelectionChanges() {
+        val outputDir = temporaryFolder.newFolder("retry-output")
+        val staged = File(temporaryFolder.newFolder("retry-staging"), "upload.staged").also {
+            it.writeBytes(byteArrayOf(2, 4, 6))
+        }
+        val item = publishItemJson(
+            queueId = "queue-retry-target",
+            stagedPath = staged.absolutePath,
+            finalFilename = "IMG_0300.JPG",
+        )
+        val core = FakePublishQueueCore(claimedItems = listOf(item))
+        var currentTarget: PublishTarget = FailingPublishTarget("old output permission revoked")
+        val worker = AndroidPublishWorker(
+            core = core,
+            publishTarget = ResolvingPublishTarget { currentTarget },
+        )
+
+        val failed = worker.drainOnce(maxItems = 1)
+        currentTarget = FilePublishTarget(outputDir)
+        core.enqueueClaim(item)
+        val retried = worker.drainOnce(maxItems = 1)
+
+        assertEquals(1, failed.failedCount)
+        assertEquals(1, retried.completedCount)
+        assertEquals(listOf("queue-retry-target"), core.completedQueueIds)
+        assertEquals(listOf("queue-retry-target"), core.failedQueueIds)
+        assertTrue(File(outputDir, "IMG_0300.JPG").readBytes().contentEquals(byteArrayOf(2, 4, 6)))
+        assertTrue("staged file should be removed after retry succeeds", !staged.exists())
+    }
+
 
     private fun publishItemJson(
         queueId: String,
@@ -171,6 +202,10 @@ class AndroidPublishWorkerTest {
 
         override fun claimNextPublishItem(): JSONObject? =
             claims.removeFirstOrNull()
+
+        fun enqueueClaim(item: JSONObject) {
+            claims.addLast(item)
+        }
 
         override fun completePublish(queueId: String, publishedObject: PublishedObject): JSONObject {
             if (failCompletedUpdate) {
@@ -217,4 +252,9 @@ class AndroidPublishWorkerTest {
         val mimeType: String,
         val bytes: ByteArray,
     )
+
+    private class FailingPublishTarget(private val message: String) : PublishTarget {
+        override fun publish(item: PublishQueueItem): PublishedObject =
+            error(message)
+    }
 }

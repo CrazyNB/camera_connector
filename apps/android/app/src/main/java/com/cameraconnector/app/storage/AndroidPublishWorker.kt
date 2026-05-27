@@ -55,6 +55,13 @@ interface PublishTarget {
     fun publish(item: PublishQueueItem): PublishedObject
 }
 
+class ResolvingPublishTarget(
+    private val resolve: () -> PublishTarget,
+) : PublishTarget {
+    override fun publish(item: PublishQueueItem): PublishedObject =
+        resolve().publish(item)
+}
+
 class AndroidPublishWorker(
     private val core: PublishQueueCore,
     private val publishTarget: PublishTarget,
