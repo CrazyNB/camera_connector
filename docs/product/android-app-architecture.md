@@ -122,13 +122,14 @@ The Android source now has the Kotlin side of that bridge:
 - Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, inbox photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
 - The same upload verifier accepts `-RealAssetDirectory`, selects a matching RAW/JPEG filename stem from the folder, and uploads the real bytes. It has been exercised with Nikon `.NEF + .JPG` files from `D:\ps\Photos\2026\5\5.4`.
 - Device account setup flows through the same gateway: Compose collects device name, camera login username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
-- Receiver setup also flows through the gateway: Compose can save protocol, bind host, and one unified camera-facing port while leaving Android output storage on the current app-private inbox until SAF or MediaStore selection is wired. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
+- Receiver setup also flows through the gateway: Compose can save protocol, bind host, and one unified camera-facing port while keeping Android output storage behind the platform publish boundary. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
 - The native dashboard includes both runtime status and saved receiver settings. Android uses runtime status while the receiver is running, and falls back to saved settings while stopped so saved protocol/host/port changes are reflected immediately in Overview.
 - Emulator UI verification now covers saving SFTP settings and confirming the Overview endpoint updates before switching the emulator-only bind host to `0.0.0.0` for start/stop verification.
 - Transfer diagnostics are mapped from the native dashboard into Compose: transfer counts remain visible and recent failed transfers show the core-provided virtual display path plus error text.
 - Account connection diagnostics are also mapped: Overview can show active connection count, latest remote endpoint, last seen time, and last disconnected time without treating IP address as account identity.
 - Receiver runtime diagnostics are mapped as well: Overview shows phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
-- Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. This is not yet treated as a filesystem `output_dir`; the native smoke inbox remains app-private until the storage backend writes through SAF or MediaStore.
+- Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. Native imports stage into app-private storage first, then the Android publish worker writes to the selected SAF tree and records `document_uri`; without a selected tree it falls back to app-private file storage.
+- Android maps the native dashboard `publish_queue` summary into its UI model. The Overview receiver tags surface pending or failed publishes so storage permission loss and other recoverable publish failures are visible without inspecting logs.
 - UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible Overview error card.
 - UI actions also publish an in-flight label while native gateway calls are running. Related controls are disabled during that window to avoid duplicate start, stop, settings, or account operations.
 - The Inbox UI is photo-first: it defaults to a persisted 3-column grid, allows a 2-column switch, keeps tile metadata compact, uses JPEG previews when available, and moves full path/source/RAW-JPEG detail into the photo detail screen.
@@ -168,7 +169,7 @@ Native gateway builds can be produced without editing source code:
 gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 ```
 
-The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. Account setup and receiver network settings also cross the gateway, keeping authentication and config persistence in the shared core. The remaining bridge work is storage directory selection and native gateway device smoke testing.
+The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. Account setup, receiver network settings, project state, SAF publishing, and publish queue visibility also cross the gateway, keeping authentication, import state, and dashboard persistence in the shared core. The remaining bridge work is native gateway device smoke testing and optional MediaStore publishing.
 
 `NativeCoreGateway` polls the native dashboard every 2 seconds while it is open. This keeps receiver status, connected accounts, transfer failures, and newly imported assets moving into Compose without coupling the UI to service internals.
 
@@ -182,7 +183,7 @@ MVP strategy:
 
 - Config/state: app-private storage.
 - Current native smoke inbox: app-private `filesDir/inbox`.
-- Future user-facing output/inbox: user-selected SAF document tree.
+- User-facing output/inbox: user-selected SAF document tree when configured, otherwise app-private fallback.
 - Display path: virtual camera path from transfer log, not Android filesystem path.
 
 The Android bootstrap only seeds `output_dir` and `state_dir` into native receiver settings. It must not reset protocol, host, or ports on app startup because those are user-configurable receiver settings.

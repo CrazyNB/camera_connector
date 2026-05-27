@@ -207,6 +207,7 @@ class NativeCoreGateway(
             accounts = mapAccounts(value),
             inbox = mapInbox(assets),
             transfers = mapTransfers(transfers, assets, value.optJSONArray("recent_failures")),
+            publishQueue = mapPublishQueueState(value.optJSONObject("publish_queue")),
         )
     }
 
@@ -424,3 +425,13 @@ class NativeCoreGateway(
 
 internal fun inboxStableId(groupId: String, primaryAssetId: String): String =
     groupId.ifBlank { primaryAssetId }
+
+internal fun mapPublishQueueState(value: JSONObject?): PublishQueueState =
+    PublishQueueState(
+        totalCount = value?.optInt("total_count") ?: 0,
+        pendingCount = value?.optInt("pending_count") ?: 0,
+        stagedCount = value?.optInt("staged_count") ?: 0,
+        publishingCount = value?.optInt("publishing_count") ?: 0,
+        completedCount = value?.optInt("completed_count") ?: 0,
+        failedCount = value?.optInt("failed_count") ?: 0,
+    )

@@ -1,5 +1,6 @@
 package com.cameraconnector.app.ui
 
+import com.cameraconnector.app.core.PublishQueueState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -16,3 +17,9 @@ internal fun formatEpochMillisForDisplay(
 
 internal fun formatEpochMillisTextForDisplay(value: String): String =
     value.toLongOrNull()?.let { formatEpochMillisForDisplay(it) } ?: value
+
+internal fun publishQueueAttentionLabel(state: PublishQueueState): String? = when {
+    state.failedCount > 0 -> "发布失败 ${state.failedCount}"
+    state.pendingCount > 0 -> "待发布 ${state.pendingCount}"
+    else -> null
+}

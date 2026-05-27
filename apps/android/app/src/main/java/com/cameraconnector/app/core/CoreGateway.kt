@@ -23,6 +23,7 @@ data class DashboardState(
     val accounts: List<DeviceAccount>,
     val inbox: List<InboxAsset>,
     val transfers: List<TransferRow>,
+    val publishQueue: PublishQueueState = PublishQueueState(),
 )
 
 data class ProjectState(
@@ -57,6 +58,15 @@ data class ReceiverSettings(
     val ftpPort: Int,
     val sftpPort: Int,
     val outputLabel: String,
+)
+
+data class PublishQueueState(
+    val totalCount: Int = 0,
+    val pendingCount: Int = 0,
+    val stagedCount: Int = 0,
+    val publishingCount: Int = 0,
+    val completedCount: Int = 0,
+    val failedCount: Int = 0,
 )
 
 data class DeviceAccount(

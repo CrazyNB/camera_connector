@@ -107,6 +107,7 @@ import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.core.InboxAsset
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
 import com.cameraconnector.app.storage.AndroidStorageGateway
@@ -543,6 +544,7 @@ private fun OverviewScreen(
                 endpoint = "${dashboard.receiver.protocol} $displayHost:${dashboard.receiver.port}",
                 onlineConnections = onlineConnections,
                 accountCount = dashboard.accounts.size,
+                publishQueue = dashboard.publishQueue,
                 message = dashboard.receiver.message,
                 enabled = actionsEnabled && (dashboard.receiver.running || notificationPermissionGranted),
                 onToggleReceiver = onToggleReceiver,
@@ -801,6 +803,7 @@ private fun ReceiverHeroControl(
     endpoint: String,
     onlineConnections: Int,
     accountCount: Int,
+    publishQueue: PublishQueueState,
     message: String?,
     enabled: Boolean,
     onToggleReceiver: () -> Unit,
@@ -833,6 +836,12 @@ private fun ReceiverHeroControl(
                 color = if (onlineConnections > 0) ElementSuccess else ElementInfo,
             )
             ElementTag(text = "已配置账号 $accountCount", color = ElementBlue)
+            publishQueueAttentionLabel(publishQueue)?.let { label ->
+                ElementTag(
+                    text = label,
+                    color = if (publishQueue.failedCount > 0) ElementDanger else ElementInfo,
+                )
+            }
         }
         message?.let {
             Spacer(Modifier.height(8.dp))
