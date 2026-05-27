@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
@@ -311,6 +312,11 @@ fun CameraConnectorApp(
                                     coreGateway.saveReceiverSettings(settings)
                                 }
                             },
+                            onRetryFailedPublishes = {
+                                runAction("正在重试发布") {
+                                    coreGateway.retryFailedPublishes()
+                                }
+                            },
                             modifier = Modifier.padding(padding),
                         )
 
@@ -481,6 +487,7 @@ private fun OverviewScreen(
     onOpenProjects: () -> Unit,
     onToggleReceiver: () -> Unit,
     onSaveReceiverSettings: (ReceiverSettings) -> Unit,
+    onRetryFailedPublishes: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var protocol by remember(dashboard.receiver.protocol) {
@@ -547,7 +554,9 @@ private fun OverviewScreen(
                 publishQueue = dashboard.publishQueue,
                 message = dashboard.receiver.message,
                 enabled = actionsEnabled && (dashboard.receiver.running || notificationPermissionGranted),
+                retryEnabled = actionsEnabled,
                 onToggleReceiver = onToggleReceiver,
+                onRetryFailedPublishes = onRetryFailedPublishes,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -806,7 +815,9 @@ private fun ReceiverHeroControl(
     publishQueue: PublishQueueState,
     message: String?,
     enabled: Boolean,
+    retryEnabled: Boolean,
     onToggleReceiver: () -> Unit,
+    onRetryFailedPublishes: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -841,6 +852,23 @@ private fun ReceiverHeroControl(
                     text = label,
                     color = if (publishQueue.failedCount > 0) ElementDanger else ElementInfo,
                 )
+            }
+        }
+        if (publishQueueRetryActionVisible(publishQueue)) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(
+                onClick = onRetryFailedPublishes,
+                enabled = retryEnabled,
+                shape = elementShape,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ElementDanger),
+            ) {
+                Icon(
+                    Icons.Outlined.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("重试发布")
             }
         }
         message?.let {

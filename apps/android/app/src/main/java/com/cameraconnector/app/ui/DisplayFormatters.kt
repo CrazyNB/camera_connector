@@ -23,3 +23,6 @@ internal fun publishQueueAttentionLabel(state: PublishQueueState): String? = whe
     state.pendingCount > 0 -> "待发布 ${state.pendingCount}"
     else -> null
 }
+
+internal fun publishQueueRetryActionVisible(state: PublishQueueState): Boolean =
+    state.failedCount > 0

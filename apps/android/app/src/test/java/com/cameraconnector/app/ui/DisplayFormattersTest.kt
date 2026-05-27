@@ -41,4 +41,11 @@ class DisplayFormattersTest {
 
         assertEquals(null, label)
     }
+
+    @Test
+    fun publishQueueRetryActionOnlyShowsForFailedPublishes() {
+        assertEquals(false, publishQueueRetryActionVisible(PublishQueueState(pendingCount = 2)))
+        assertEquals(false, publishQueueRetryActionVisible(PublishQueueState(completedCount = 4)))
+        assertEquals(true, publishQueueRetryActionVisible(PublishQueueState(failedCount = 1)))
+    }
 }
