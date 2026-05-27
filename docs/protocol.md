@@ -72,6 +72,7 @@ Not yet implemented:
   - iOS: `document_uri` or `photo_asset` through Files/Photos APIs.
 - Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then publish contract.
 - Publish workers must claim a pending `publish_queue` item before writing to final storage; claiming moves `staged` items, or `failed` items whose `next_attempt_at_ms` is due, to `publishing` so retry workers do not publish the same staged bytes twice or hammer revoked storage permissions.
+- App shells may clear `next_attempt_at_ms` for failed rows in the active project after the user explicitly retries or reauthorizes storage; the next worker poll can then claim those rows immediately.
 - Every completed upload is indexed under a project in SQLite. When no explicit active project is provided by the app shell, the core uses the system `Inbox` project, which remains non-archivable so fallback imports cannot be stranded. Dashboard and asset review views must name a project; audit-log diagnostics are separate from project views.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.

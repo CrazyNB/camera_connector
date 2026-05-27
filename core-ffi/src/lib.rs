@@ -194,6 +194,17 @@ impl MobileCore {
         }))?)
     }
 
+    pub fn release_failed_publish_retries_json(
+        &self,
+        project_id: String,
+    ) -> MobileCoreResult<String> {
+        let released_count = self.service.release_failed_publish_retries(&project_id)?;
+        Ok(serde_json::to_string(&json!({
+            "project_id": project_id,
+            "released_count": released_count,
+        }))?)
+    }
+
     pub fn save_receiver_settings_json(
         &self,
         patch: MobileReceiverSettingsPatch,
@@ -558,6 +569,22 @@ pub unsafe extern "C" fn camera_connector_mobile_core_mark_publish_failed_json(
         let queue_id = required_c_string(queue_id, "queue_id")?;
         let error = required_c_string(error, "error")?;
         let result = core_ref(core)?.mark_publish_failed_json(queue_id, error)?;
+        parse_json_value(&result)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` must be a valid, null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_release_failed_publish_retries_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let result = core_ref(core)?.release_failed_publish_retries_json(project_id)?;
         parse_json_value(&result)
     })
 }
@@ -966,6 +993,24 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_markPu
         java_response(env, || {
             let result =
                 mobile_core_from_handle(handle)?.mark_publish_failed_json(queue_id?, error?)?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_releaseFailedPublishRetriesJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?
+                .release_failed_publish_retries_json(project_id?)?;
             parse_json_value(&result)
         })
     })

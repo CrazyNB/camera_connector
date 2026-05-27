@@ -321,7 +321,7 @@ The optimized model must handle these cases:
 
 - Upload interrupted before staging completes: keep or remove incomplete temp file according to cleanup policy and record a failed receive when enough metadata exists.
 - Upload completes but publish fails: keep staged file, mark publish failed, show retry action.
-- Repeated publish failure: preserve the last error, increment attempt count, and delay the next automatic claim through `next_attempt_at_ms`; manual retry can clear the delay once a user reauthorizes storage.
+- Repeated publish failure: preserve the last error, increment attempt count, and delay the next automatic claim through `next_attempt_at_ms`; manual retry or storage reauthorization clears the delay for the affected project so the worker can claim it immediately.
 - App process dies after staging but before publish: recover queue on next startup.
 - Final object exists: reserve a duplicate filename before publish.
 - State write fails after final publish: preserve enough queue metadata to reconcile on next startup.

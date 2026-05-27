@@ -258,6 +258,48 @@ fn mobile_core_claims_and_completes_publish_queue_items_as_json() {
 }
 
 #[test]
+fn mobile_core_releases_failed_publish_retries_for_project() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile Retry").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:mobile-retry",
+            "staging/mobile-retry.tmp",
+            "IMG_6003.JPG",
+            44,
+        )
+        .unwrap();
+    store
+        .mark_publish_failed(&item.queue_id, "permission revoked")
+        .unwrap();
+
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    let deferred: Value =
+        serde_json::from_str(&core.claim_next_publish_item_json().unwrap()).unwrap();
+    assert!(deferred.is_null());
+
+    let released: Value = serde_json::from_str(
+        &core
+            .release_failed_publish_retries_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    let claimed: Value =
+        serde_json::from_str(&core.claim_next_publish_item_json().unwrap()).unwrap();
+
+    assert_eq!(released["project_id"], project.project_id);
+    assert_eq!(released["released_count"], 1);
+    assert_eq!(claimed["queue_id"], item.queue_id);
+    assert_eq!(claimed["state"], "Publishing");
+    assert_eq!(claimed["last_error"], Value::Null);
+    assert_eq!(claimed["next_attempt_at_ms"], Value::Null);
+}
+
+#[test]
 fn mobile_core_completes_publish_with_platform_location_into_project_assets() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

@@ -16,6 +16,7 @@ interface CoreGateway {
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
     suspend fun saveDeviceAccount(account: DeviceAccount, password: String?)
     suspend fun removeDeviceAccount(username: String)
+    suspend fun retryFailedPublishes()
 }
 
 data class DashboardState(
@@ -252,4 +253,6 @@ class PreviewCoreGateway : CoreGateway {
             receiver = dashboard.value.receiver.copy(accountCount = nextAccounts.size),
         )
     }
+
+    override suspend fun retryFailedPublishes() = Unit
 }

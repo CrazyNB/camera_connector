@@ -657,6 +657,67 @@ fn sqlite_store_claims_pending_publish_items_for_exclusive_work() {
 }
 
 #[test]
+fn sqlite_store_releases_failed_publish_retry_delay_for_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Retry Project")
+        .expect("project should create");
+    let other_project = store
+        .create_project("Other Retry Project")
+        .expect("other project should create");
+
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:retry",
+            "staged/ftp-retry.tmp",
+            "IMG_9100.NEF",
+            123,
+        )
+        .expect("publish item should enqueue");
+    let other_item = store
+        .enqueue_publish(
+            &other_project.project_id,
+            "ftp:other-retry",
+            "staged/ftp-other-retry.tmp",
+            "IMG_9101.NEF",
+            456,
+        )
+        .expect("other publish item should enqueue");
+    store
+        .mark_publish_failed(&item.queue_id, "permission revoked")
+        .expect("publish failure should save");
+    store
+        .mark_publish_failed(&other_item.queue_id, "other permission revoked")
+        .expect("other publish failure should save");
+
+    assert!(store
+        .claim_next_publish_item()
+        .expect("deferred claim should run")
+        .is_none());
+
+    let released = store
+        .release_failed_publish_retries(&project.project_id)
+        .expect("failed retries should release");
+    let claimed = store
+        .claim_next_publish_item()
+        .expect("retry claim should run")
+        .expect("released item should be claimable");
+    let empty = store
+        .claim_next_publish_item()
+        .expect("other project should remain deferred");
+
+    assert_eq!(released, 1);
+    assert_eq!(claimed.queue_id, item.queue_id);
+    assert_eq!(claimed.state.as_str(), "publishing");
+    assert_eq!(claimed.attempt_count, 1);
+    assert_eq!(claimed.last_error, None);
+    assert_eq!(claimed.next_attempt_at_ms, None);
+    assert!(empty.is_none());
+}
+
+#[test]
 fn sqlite_store_completes_publish_item_with_platform_location_into_asset_index() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");

@@ -1032,6 +1032,21 @@ impl SqliteStore {
         })
     }
 
+    pub fn release_failed_publish_retries(&self, project_id: &str) -> Result<usize> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let changed = connection.execute(
+                "UPDATE publish_queue
+                 SET next_attempt_at_ms = NULL, updated_at_ms = ?1
+                 WHERE project_id = ?2
+                   AND state = 'failed'
+                   AND next_attempt_at_ms IS NOT NULL",
+                params![current_time_ms(), project_id],
+            )?;
+            Ok(changed)
+        })
+    }
+
     pub fn claim_next_publish_item(&self) -> Result<Option<PublishQueueItem>> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;

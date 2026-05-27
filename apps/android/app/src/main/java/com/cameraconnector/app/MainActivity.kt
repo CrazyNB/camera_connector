@@ -1,15 +1,17 @@
 package com.cameraconnector.app
 
 import android.os.Bundle
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.CoreGatewayFactory
 import com.cameraconnector.app.permissions.AndroidPermissionGateway
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import com.cameraconnector.app.ui.CameraConnectorApp
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var coreGateway: CoreGateway
@@ -28,6 +30,9 @@ class MainActivity : ComponentActivity() {
         if (uri != null) {
             storageGateway.persistInboxDirectory(uri)
             selectedInboxLabel.value = storageGateway.selectedInboxLabel()
+            lifecycleScope.launch {
+                runCatching { coreGateway.retryFailedPublishes() }
+            }
         }
     }
 

@@ -41,6 +41,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     override fun markPublishFailed(queueId: String, error: String): JSONObject =
         call { markPublishFailedJson(handle, queueId, error) }
 
+    fun releaseFailedPublishRetries(projectId: String): JSONObject =
+        call { releaseFailedPublishRetriesJson(handle, projectId) }
+
     fun createProject(name: String): JSONObject =
         call { createProjectJson(handle, name) }
 
@@ -133,6 +136,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         location: String,
     ): String
     private external fun markPublishFailedJson(handle: Long, queueId: String, error: String): String
+    private external fun releaseFailedPublishRetriesJson(handle: Long, projectId: String): String
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String

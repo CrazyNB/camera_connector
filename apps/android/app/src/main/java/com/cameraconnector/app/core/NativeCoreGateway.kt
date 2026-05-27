@@ -106,6 +106,19 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun retryFailedPublishes() {
+        withContext(Dispatchers.IO) {
+            val projectId = loadProjects().activeProjectId
+                ?: nativeCore.ensureActiveProject()
+                    .optString("project_id")
+                    .takeIf { it.isNotBlank() }
+            if (projectId != null) {
+                nativeCore.releaseFailedPublishRetries(projectId)
+            }
+        }
+        refresh()
+    }
+
     override fun close() {
         gatewayScope.cancel()
         nativeCore.close()

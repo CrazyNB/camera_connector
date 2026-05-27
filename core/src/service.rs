@@ -304,6 +304,11 @@ impl CameraConnectorService {
         self.storage_store()?.mark_publish_failed(queue_id, error)
     }
 
+    pub fn release_failed_publish_retries(&self, project_id: &str) -> Result<usize> {
+        self.storage_store()?
+            .release_failed_publish_retries(project_id)
+    }
+
     pub fn set_account(
         &self,
         username: impl Into<String>,

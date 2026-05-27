@@ -18,6 +18,7 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_mark_publish_failed_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_group_assets_json,
+    camera_connector_mobile_core_release_failed_publish_retries_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_save_device_account_json,
@@ -364,6 +365,53 @@ fn ffi_claims_and_updates_publish_queue_json_envelopes() {
     let failed: Value = serde_json::from_str(&failed).unwrap();
     assert_eq!(failed["ok"], true);
     assert_eq!(failed["value"]["failed"], true);
+}
+
+#[test]
+fn ffi_releases_failed_publish_retries_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Retry").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:ffi-retry",
+            "staging/ffi-retry.tmp",
+            "IMG_7003.JPG",
+            45,
+        )
+        .unwrap();
+    store
+        .mark_publish_failed(&item.queue_id, "permission revoked")
+        .unwrap();
+
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let project_id = CString::new(project.project_id.clone()).unwrap();
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+
+    let deferred =
+        take_ffi_string(unsafe { camera_connector_mobile_core_claim_next_publish_item_json(core) });
+    let deferred: Value = serde_json::from_str(&deferred).unwrap();
+    assert_eq!(deferred["ok"], true);
+    assert!(deferred["value"].is_null());
+
+    let released = take_ffi_string(unsafe {
+        camera_connector_mobile_core_release_failed_publish_retries_json(core, project_id.as_ptr())
+    });
+    let claimed =
+        take_ffi_string(unsafe { camera_connector_mobile_core_claim_next_publish_item_json(core) });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let released: Value = serde_json::from_str(&released).unwrap();
+    let claimed: Value = serde_json::from_str(&claimed).unwrap();
+    assert_eq!(released["ok"], true);
+    assert_eq!(released["value"]["project_id"], project.project_id);
+    assert_eq!(released["value"]["released_count"], 1);
+    assert_eq!(claimed["value"]["queue_id"], item.queue_id);
+    assert_eq!(claimed["value"]["state"], "Publishing");
 }
 
 #[test]
