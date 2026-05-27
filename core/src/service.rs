@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, StoredAsset,
-    TransferRecord, TransferStatus,
+    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
+    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore,
+    StoredAsset, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -144,6 +144,7 @@ pub struct CameraConnectorDashboard {
     pub accounts: Vec<AccountView>,
     pub devices: Vec<ConnectedDeviceView>,
     pub transfers: TransferSummary,
+    pub publish_queue: PublishQueueSummary,
     pub recent_failures: Vec<TransferRecordView>,
     pub assets: AssetGroupPage,
 }
@@ -593,6 +594,7 @@ impl CameraConnectorService {
             accounts,
             devices,
             transfers,
+            publish_queue: store.publish_queue_summary(project_id)?,
             recent_failures: self.project_recent_failed_transfers(project_id, transfer_query, 5)?,
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })

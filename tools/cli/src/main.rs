@@ -855,6 +855,15 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
         dashboard.transfers.completed_count,
         dashboard.transfers.failed_count
     );
+    println!(
+        "publish_queue\ttotal={}\tpending={}\tstaged={}\tpublishing={}\tcompleted={}\tfailed={}",
+        dashboard.publish_queue.total_count,
+        dashboard.publish_queue.pending_count,
+        dashboard.publish_queue.staged_count,
+        dashboard.publish_queue.publishing_count,
+        dashboard.publish_queue.completed_count,
+        dashboard.publish_queue.failed_count
+    );
     for view in dashboard.recent_failures {
         println!("failure\t{}", transfer_view_line(&view));
     }
@@ -2219,6 +2228,14 @@ mod tests {
                 completed_count: 1,
                 failed_count: 1,
             },
+            publish_queue: camera_connector_core::PublishQueueSummary {
+                total_count: 3,
+                pending_count: 2,
+                staged_count: 1,
+                publishing_count: 0,
+                completed_count: 1,
+                failed_count: 1,
+            },
             recent_failures: vec![TransferRecordView {
                 record: TransferRecord {
                     transfer_id: "ftp:failed".to_string(),
@@ -2293,6 +2310,8 @@ mod tests {
         assert!(!json.contains("password_hash"));
         assert!(json.contains("\"transfers\""));
         assert!(json.contains("\"failed_count\": 1"));
+        assert!(json.contains("\"publish_queue\""));
+        assert!(json.contains("\"pending_count\": 2"));
         assert!(json.contains("\"recent_failures\""));
         assert!(json.contains("\"connection reset\""));
         assert!(json.contains("\"devices\""));

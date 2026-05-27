@@ -143,6 +143,16 @@ pub struct PublishQueueItem {
     pub updated_at_ms: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishQueueSummary {
+    pub total_count: usize,
+    pub pending_count: usize,
+    pub staged_count: usize,
+    pub publishing_count: usize,
+    pub completed_count: usize,
+    pub failed_count: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublishState {
     Staged,
@@ -825,6 +835,36 @@ impl SqliteStore {
             )?;
             let rows = statement.query_map([], publish_item_from_row)?;
             collect_rows(rows)
+        })
+    }
+
+    pub fn publish_queue_summary(&self, project_id: &str) -> Result<PublishQueueSummary> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let mut statement = connection.prepare(
+                "SELECT state, COUNT(*)
+                 FROM publish_queue
+                 WHERE project_id = ?1
+                 GROUP BY state",
+            )?;
+            let rows = statement.query_map(params![project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?;
+            let mut summary = PublishQueueSummary::default();
+            for row in rows {
+                let (state, count) = row?;
+                let count = count as usize;
+                summary.total_count += count;
+                match PublishState::from_str(&state) {
+                    PublishState::Staged => summary.staged_count += count,
+                    PublishState::Publishing => summary.publishing_count += count,
+                    PublishState::Completed => summary.completed_count += count,
+                    PublishState::Failed => summary.failed_count += count,
+                }
+            }
+            summary.pending_count =
+                summary.staged_count + summary.publishing_count + summary.failed_count;
+            Ok(summary)
         })
     }
 

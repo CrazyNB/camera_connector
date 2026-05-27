@@ -156,7 +156,7 @@ Read the project-scoped dashboard model in one command:
 target\debug\camera-connector.exe dashboard --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --limit 50
 ```
 
-Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, project transfer health counts, recent failed project transfers, connected devices, asset summary, and paged assets. `dashboard` requires `--project-id`; transfers and assets always come from the SQLite project model in the configured state directory.
+Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, project transfer health counts, publish queue health counts, recent failed project transfers, connected devices, asset summary, and paged assets. `dashboard` requires `--project-id`; transfers, publish queue state, and assets always come from the SQLite project model in the configured state directory.
 
 Use JSON output for UI shells or automation:
 

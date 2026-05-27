@@ -443,6 +443,86 @@ fn service_builds_project_dashboard_from_sqlite_assets() {
 }
 
 #[test]
+fn service_project_dashboard_includes_project_scoped_publish_queue_summary() {
+    let config_path = unique_temp_path("storage-service-dashboard-publish-queue");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project_a = service
+        .create_project("Publish Queue A")
+        .expect("project should create");
+    let project_b = service
+        .create_project("Publish Queue B")
+        .expect("other project should create");
+    service
+        .set_active_project(&project_a.project_id)
+        .expect("project should become active");
+    let store = service.storage_store().expect("store should open");
+
+    store
+        .enqueue_publish(
+            &project_a.project_id,
+            "ftp:staged",
+            "staging/staged.tmp",
+            "IMG_1000.JPG",
+            10,
+        )
+        .expect("staged publish should enqueue");
+    let failed = store
+        .enqueue_publish(
+            &project_a.project_id,
+            "ftp:failed",
+            "staging/failed.tmp",
+            "IMG_1001.JPG",
+            20,
+        )
+        .expect("failed publish should enqueue");
+    store
+        .mark_publish_failed(&failed.queue_id, "permission revoked")
+        .expect("publish should fail");
+    let completed = store
+        .enqueue_publish(
+            &project_a.project_id,
+            "ftp:completed",
+            "staging/completed.tmp",
+            "IMG_1002.JPG",
+            30,
+        )
+        .expect("completed publish should enqueue");
+    store
+        .mark_publish_completed(&completed.queue_id)
+        .expect("publish should complete");
+    service
+        .set_active_project(&project_b.project_id)
+        .expect("other project should become active");
+    store
+        .enqueue_publish(
+            &project_b.project_id,
+            "ftp:other",
+            "staging/other.tmp",
+            "IMG_2000.JPG",
+            40,
+        )
+        .expect("other project publish should enqueue");
+
+    let dashboard = service
+        .project_dashboard(
+            &project_a.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+            false,
+        )
+        .expect("project dashboard should build");
+
+    assert_eq!(dashboard.publish_queue.total_count, 3);
+    assert_eq!(dashboard.publish_queue.pending_count, 2);
+    assert_eq!(dashboard.publish_queue.staged_count, 1);
+    assert_eq!(dashboard.publish_queue.completed_count, 1);
+    assert_eq!(dashboard.publish_queue.failed_count, 1);
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_project_dashboard_filters_transfer_summary_by_query() {
     let config_path = unique_temp_path("storage-service-dashboard-summary-filter");
     let service = CameraConnectorService::new(Some(config_path.clone()));

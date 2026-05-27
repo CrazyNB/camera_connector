@@ -413,6 +413,9 @@ if (($projectDashboardOutput | Where-Object { $_ -like "paths*config=$configPath
 if (($projectDashboardOutput | Where-Object { $_ -like "transfers*total=2*completed=2*failed=0*" }).Count -lt 1) {
     throw "project dashboard did not expose SQLite transfer summary"
 }
+if (($projectDashboardOutput | Where-Object { $_ -like "publish_queue*total=0*pending=0*staged=0*completed=0*failed=0*" }).Count -lt 1) {
+    throw "project dashboard did not expose SQLite publish queue summary"
+}
 if (($projectDashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
     throw "project dashboard did not expose paged project asset summary"
 }
@@ -438,6 +441,9 @@ if ($dashboardJson.paths.config_path -ne $configPath -or $dashboardJson.paths.st
 }
 if ($dashboardJson.transfers.total_count -ne 2 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 0) {
     throw "project dashboard json did not expose project transfer summary"
+}
+if ($dashboardJson.publish_queue.total_count -ne 0 -or $dashboardJson.publish_queue.pending_count -ne 0) {
+    throw "project dashboard json did not expose project publish queue summary"
 }
 if ($dashboardJson.recent_failures.Count -ne 0) {
     throw "project dashboard json should not include transfer-log-only failures"
