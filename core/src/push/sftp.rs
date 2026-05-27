@@ -18,8 +18,8 @@ use tokio::sync::Mutex;
 use crate::{
     append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
     record_device_connected, record_device_disconnected, ImporterError, LocalFolderObjectStore,
-    LocalStagedUpload, LocalStagingStore, PushProtocol, PushReceiverConfig, ReceiverAccount,
-    Result, TransferRecord, TransferStatus,
+    LocalStagedUpload, LocalStagingStore, PublishTransferMetadata, PushProtocol,
+    PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 
 const SFTP_HOST_KEY_FILENAME: &str = "sftp-host-key";
@@ -351,11 +351,19 @@ impl russh_sftp::server::Handler for SftpSession {
         let staged = upload.upload.finish().map_err(|_| StatusCode::Failure)?;
         let queue_item = self
             .config
-            .enqueue_publish(
+            .enqueue_publish_with_metadata(
                 &staged.transfer_id,
                 &staged.staged_path.display().to_string(),
                 &staged.final_filename,
                 staged.bytes_written,
+                PublishTransferMetadata {
+                    protocol: "sftp".to_string(),
+                    original_path: upload.original_path.clone(),
+                    username: self.username.clone(),
+                    remote_addr: self.remote_addr.clone(),
+                    source_name: self.source_name.clone(),
+                    started_at_ms: upload.started_at_ms,
+                },
             )
             .map_err(|_| StatusCode::Failure)?;
         let progress = match LocalFolderObjectStore::new(&self.config.output_dir).publish(staged) {

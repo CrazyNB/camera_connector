@@ -80,6 +80,14 @@ char *camera_connector_mobile_core_mark_publish_completed_json(
     const char *queue_id
 );
 
+char *camera_connector_mobile_core_complete_publish_json(
+    const CameraConnectorMobileCore *core,
+    const char *queue_id,
+    const char *final_filename,
+    const char *location_kind,
+    const char *location
+);
+
 char *camera_connector_mobile_core_mark_publish_failed_json(
     const CameraConnectorMobileCore *core,
     const char *queue_id,

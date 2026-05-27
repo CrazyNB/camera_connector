@@ -5,7 +5,7 @@ import java.io.File
 
 interface PublishQueueCore {
     fun claimNextPublishItem(): JSONObject?
-    fun markPublishCompleted(queueId: String): JSONObject
+    fun completePublish(queueId: String, publishedObject: PublishedObject): JSONObject
     fun markPublishFailed(queueId: String, error: String): JSONObject
 }
 
@@ -68,8 +68,8 @@ class AndroidPublishWorker(
             val item = core.claimNextPublishItem()?.let(PublishQueueItem::fromJson) ?: break
             claimed += 1
             try {
-                publishTarget.publish(item)
-                core.markPublishCompleted(item.queueId)
+                val publishedObject = publishTarget.publish(item)
+                core.completePublish(item.queueId, publishedObject)
                 completed += 1
             } catch (error: Throwable) {
                 core.markPublishFailed(item.queueId, error.message ?: error.toString())

@@ -657,6 +657,70 @@ fn sqlite_store_claims_pending_publish_items_for_exclusive_work() {
     assert!(empty.is_none());
 }
 
+#[test]
+fn sqlite_store_completes_publish_item_with_platform_location_into_asset_index() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Platform Publish")
+        .expect("project should create");
+    let item = store
+        .enqueue_publish_with_metadata(
+            &project.project_id,
+            "ftp:platform",
+            "staged/platform.tmp",
+            "IMG_9100.JPG",
+            321,
+            camera_connector_core::PublishTransferMetadata {
+                protocol: "ftp".to_string(),
+                original_path: "DCIM/100/IMG_9100.JPG".to_string(),
+                username: Some("z5".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Studio Z5".to_string()),
+                started_at_ms: 42,
+            },
+        )
+        .expect("publish item should enqueue");
+
+    let record = store
+        .complete_publish(
+            &item.queue_id,
+            "IMG_9100.JPG",
+            StoredObjectLocation::document_uri("content://camera-connector/IMG_9100.JPG"),
+        )
+        .expect("publish should complete and index");
+
+    assert_eq!(record.transfer_id, "ftp:platform");
+    assert_eq!(record.original_path, "DCIM/100/IMG_9100.JPG");
+    assert_eq!(record.username.as_deref(), Some("z5"));
+    assert_eq!(record.source_name.as_deref(), Some("Studio Z5"));
+    assert_eq!(record.final_location_kind(), Some("document_uri"));
+    let page = store
+        .asset_group_page(
+            &project.project_id,
+            camera_connector_core::AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .expect("groups should query");
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(
+        page.groups[0]
+            .primary
+            .storage_location
+            .as_ref()
+            .map(|value| value.kind()),
+        Some("document_uri")
+    );
+    assert_eq!(
+        store
+            .publish_queue_summary(&project.project_id)
+            .expect("summary should load")
+            .completed_count,
+        1
+    );
+}
+
 fn completed_transfer(
     transfer_id: &str,
     original_path: &str,

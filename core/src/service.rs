@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
-    scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
-    PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig,
-    Result, SqliteStore, StoredAsset, TransferRecord, TransferStatus,
+    append_transfer_record, group_received_assets, read_connected_devices,
+    read_receiver_runtime_status, read_transfer_log, scan_inbox_groups, CameraConnectorConfig,
+    ConnectedDevice, ImportSource, ObjectFormat, PublishQueueItem, PublishQueueSummary,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, StoredAsset,
+    StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -264,6 +265,20 @@ impl CameraConnectorService {
 
     pub fn mark_publish_completed(&self, queue_id: &str) -> Result<()> {
         self.storage_store()?.mark_publish_completed(queue_id)
+    }
+
+    pub fn complete_publish(
+        &self,
+        queue_id: &str,
+        final_filename: &str,
+        final_location: StoredObjectLocation,
+    ) -> Result<TransferRecord> {
+        let state_dir = self.storage_state_dir()?;
+        let record =
+            self.storage_store()?
+                .complete_publish(queue_id, final_filename, final_location)?;
+        append_transfer_record(&state_dir, &record)?;
+        Ok(record)
     }
 
     pub fn mark_publish_failed(&self, queue_id: &str, error: &str) -> Result<()> {

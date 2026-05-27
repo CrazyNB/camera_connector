@@ -3,12 +3,14 @@ use std::ffi::{CStr, CString};
 use serde_json::Value;
 
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, StoredObjectLocation, TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorService, PublishTransferMetadata, StoredObjectLocation,
+    TransferRecord, TransferStatus,
 };
 use camera_connector_ffi::{
     camera_connector_mobile_core_active_project_json,
     camera_connector_mobile_core_archive_project_json,
-    camera_connector_mobile_core_claim_next_publish_item_json, camera_connector_mobile_core_create,
+    camera_connector_mobile_core_claim_next_publish_item_json,
+    camera_connector_mobile_core_complete_publish_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
     camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
@@ -360,6 +362,61 @@ fn ffi_claims_and_updates_publish_queue_json_envelopes() {
     let failed: Value = serde_json::from_str(&failed).unwrap();
     assert_eq!(failed["ok"], true);
     assert_eq!(failed["value"]["failed"], true);
+}
+
+#[test]
+fn ffi_completes_publish_with_platform_location_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Platform Publisher").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish_with_metadata(
+            &project.project_id,
+            "ftp:ffi-platform-publish",
+            "staging/ffi-platform-publish.tmp",
+            "IMG_7010.JPG",
+            42,
+            PublishTransferMetadata {
+                protocol: "ftp".to_string(),
+                original_path: "DCIM/100/IMG_7010.JPG".to_string(),
+                username: Some("z5".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Studio Z5".to_string()),
+                started_at_ms: 42,
+            },
+        )
+        .unwrap();
+
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let queue_id = CString::new(item.queue_id.clone()).unwrap();
+    let final_filename = CString::new("IMG_7010.JPG").unwrap();
+    let location_kind = CString::new("document_uri").unwrap();
+    let location = CString::new("content://camera-connector/IMG_7010.JPG").unwrap();
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let _ =
+        take_ffi_string(unsafe { camera_connector_mobile_core_claim_next_publish_item_json(core) });
+
+    let completed = take_ffi_string(unsafe {
+        camera_connector_mobile_core_complete_publish_json(
+            core,
+            queue_id.as_ptr(),
+            final_filename.as_ptr(),
+            location_kind.as_ptr(),
+            location.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let completed: Value = serde_json::from_str(&completed).unwrap();
+    assert_eq!(completed["ok"], true);
+    assert_eq!(
+        completed["value"]["transfer_id"],
+        "ftp:ffi-platform-publish"
+    );
+    assert_eq!(completed["value"]["final_location"]["kind"], "document_uri");
 }
 
 #[test]

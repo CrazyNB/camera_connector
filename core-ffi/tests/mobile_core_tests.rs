@@ -1,5 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, StoredObjectLocation, TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorService, PublishTransferMetadata, StoredObjectLocation,
+    TransferRecord, TransferStatus,
 };
 use camera_connector_ffi::{MobileCore, MobileReceiverSettingsPatch};
 use serde_json::Value;
@@ -252,6 +253,61 @@ fn mobile_core_claims_and_completes_publish_queue_items_as_json() {
     assert_eq!(dashboard["publish_queue"]["completed_count"], 1);
     assert_eq!(dashboard["publish_queue"]["failed_count"], 1);
     assert_eq!(dashboard["publish_queue"]["pending_count"], 1);
+}
+
+#[test]
+fn mobile_core_completes_publish_with_platform_location_into_project_assets() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile Platform Publisher").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish_with_metadata(
+            &project.project_id,
+            "ftp:mobile-platform-publish",
+            "staging/mobile-platform-publish.tmp",
+            "IMG_6010.JPG",
+            42,
+            PublishTransferMetadata {
+                protocol: "ftp".to_string(),
+                original_path: "DCIM/100/IMG_6010.JPG".to_string(),
+                username: Some("z5".to_string()),
+                remote_addr: Some("192.168.137.56".to_string()),
+                source_name: Some("Studio Z5".to_string()),
+                started_at_ms: 42,
+            },
+        )
+        .unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    let claimed: Value =
+        serde_json::from_str(&core.claim_next_publish_item_json().unwrap()).unwrap();
+    assert_eq!(claimed["queue_id"], item.queue_id);
+
+    let completed_json = core
+        .complete_publish_json(
+            item.queue_id.clone(),
+            "IMG_6010.JPG".to_string(),
+            "media_uri".to_string(),
+            "content://media/external/images/media/6010".to_string(),
+        )
+        .unwrap();
+    let completed: Value = serde_json::from_str(&completed_json).unwrap();
+    assert_eq!(completed["transfer_id"], "ftp:mobile-platform-publish");
+    assert_eq!(completed["final_location"]["kind"], "media_uri");
+
+    let dashboard: Value = serde_json::from_str(
+        &core
+            .project_dashboard_json(project.project_id.clone(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(dashboard["assets"]["total_groups"], 1);
+    assert_eq!(
+        dashboard["assets"]["groups"][0]["primary"]["storage_location"]["kind"],
+        "media_uri"
+    );
+    assert_eq!(dashboard["publish_queue"]["completed_count"], 1);
 }
 
 #[test]

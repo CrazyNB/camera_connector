@@ -10,8 +10,8 @@ use tokio::time::{timeout, Duration};
 use crate::{
     append_transfer_record, mark_all_connected_devices_offline, record_device_authenticated,
     record_device_connected, record_device_disconnected, ImporterError, LocalFileSink,
-    LocalFolderObjectStore, LocalStagingStore, PushProtocol, PushReceiverConfig, ReceiverAccount,
-    Result, TransferRecord, TransferStatus,
+    LocalFolderObjectStore, LocalStagingStore, PublishTransferMetadata, PushProtocol,
+    PushReceiverConfig, ReceiverAccount, Result, TransferRecord, TransferStatus,
 };
 
 const DATA_TIMEOUT: Duration = Duration::from_secs(60);
@@ -402,26 +402,6 @@ async fn handle_stor(
         upload.write_all(&buffer[..bytes_read])?;
     }
     let staged = upload.finish()?;
-    let queue_item = config.enqueue_publish(
-        &staged.transfer_id,
-        &staged.staged_path.display().to_string(),
-        &staged.final_filename,
-        staged.bytes_written,
-    )?;
-    let progress = match LocalFolderObjectStore::new(&config.output_dir).publish(staged) {
-        Ok(progress) => {
-            config.mark_publish_completed(&queue_item.queue_id)?;
-            progress
-        }
-        Err(error) => {
-            let _ = config.mark_publish_failed(&queue_item.queue_id, &error.to_string());
-            return Err(error);
-        }
-    };
-    let final_path = progress
-        .output_path
-        .clone()
-        .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
     let source_name = state
         .authenticated_account
         .as_ref()
@@ -437,6 +417,34 @@ async fn handle_stor(
                 .then(|| state.pending_user.clone())
                 .flatten()
         });
+    let queue_item = config.enqueue_publish_with_metadata(
+        &staged.transfer_id,
+        &staged.staged_path.display().to_string(),
+        &staged.final_filename,
+        staged.bytes_written,
+        PublishTransferMetadata {
+            protocol: "ftp".to_string(),
+            original_path: upload_path.clone(),
+            username: username.clone(),
+            remote_addr: remote_addr.clone(),
+            source_name: source_name.clone(),
+            started_at_ms,
+        },
+    )?;
+    let progress = match LocalFolderObjectStore::new(&config.output_dir).publish(staged) {
+        Ok(progress) => {
+            config.mark_publish_completed(&queue_item.queue_id)?;
+            progress
+        }
+        Err(error) => {
+            let _ = config.mark_publish_failed(&queue_item.queue_id, &error.to_string());
+            return Err(error);
+        }
+    };
+    let final_path = progress
+        .output_path
+        .clone()
+        .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
     let record = TransferRecord {
         transfer_id,
         protocol: "ftp".to_string(),

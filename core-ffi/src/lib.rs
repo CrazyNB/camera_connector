@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use camera_connector_core::{
     AssetGroupQuery, CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService,
     ImporterError, PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig,
-    ReceiverSettingsUpdate,
+    ReceiverSettingsUpdate, StoredObjectLocation,
 };
 use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JClass, JString};
@@ -20,6 +20,8 @@ pub enum MobileCoreError {
     Core(#[from] ImporterError),
     #[error("invalid protocol: {0}")]
     InvalidProtocol(String),
+    #[error("invalid storage location kind: {0}")]
+    InvalidLocationKind(String),
     #[error("mobile core pointer is null")]
     NullCore,
     #[error("input pointer is null: {0}")]
@@ -165,6 +167,20 @@ impl MobileCore {
         }))?)
     }
 
+    pub fn complete_publish_json(
+        &self,
+        queue_id: String,
+        final_filename: String,
+        location_kind: String,
+        location: String,
+    ) -> MobileCoreResult<String> {
+        let final_location = parse_storage_location(location_kind, location)?;
+        let record = self
+            .service
+            .complete_publish(&queue_id, &final_filename, final_location)?;
+        Ok(serde_json::to_string(&record)?)
+    }
+
     pub fn mark_publish_failed_json(
         &self,
         queue_id: String,
@@ -256,6 +272,19 @@ fn parse_protocol(protocol: String) -> MobileCoreResult<PushProtocol> {
         "ftp" => Ok(PushProtocol::Ftp),
         "sftp" => Ok(PushProtocol::Sftp),
         _ => Err(MobileCoreError::InvalidProtocol(protocol)),
+    }
+}
+
+fn parse_storage_location(
+    kind: String,
+    location: String,
+) -> MobileCoreResult<StoredObjectLocation> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "local_path" => Ok(StoredObjectLocation::local_path(location)),
+        "document_uri" => Ok(StoredObjectLocation::document_uri(location)),
+        "media_uri" => Ok(StoredObjectLocation::media_uri(location)),
+        "photo_asset" => Ok(StoredObjectLocation::photo_asset(location)),
+        _ => Err(MobileCoreError::InvalidLocationKind(kind)),
     }
 }
 
@@ -481,6 +510,33 @@ pub unsafe extern "C" fn camera_connector_mobile_core_mark_publish_completed_jso
     ffi_response(|| {
         let queue_id = required_c_string(queue_id, "queue_id")?;
         let result = core_ref(core)?.mark_publish_completed_json(queue_id)?;
+        parse_json_value(&result)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// All string pointers must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_complete_publish_json(
+    core: *const MobileCore,
+    queue_id: *const c_char,
+    final_filename: *const c_char,
+    location_kind: *const c_char,
+    location: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let queue_id = required_c_string(queue_id, "queue_id")?;
+        let final_filename = required_c_string(final_filename, "final_filename")?;
+        let location_kind = required_c_string(location_kind, "location_kind")?;
+        let location = required_c_string(location, "location")?;
+        let result = core_ref(core)?.complete_publish_json(
+            queue_id,
+            final_filename,
+            location_kind,
+            location,
+        )?;
         parse_json_value(&result)
     })
 }
@@ -859,6 +915,34 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_markPu
         let queue_id = required_java_string(env, queue_id, "queue_id");
         java_response(env, || {
             let result = mobile_core_from_handle(handle)?.mark_publish_completed_json(queue_id?)?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_completePublishJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    queue_id: JString,
+    final_filename: JString,
+    location_kind: JString,
+    location: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let queue_id = required_java_string(env, queue_id, "queue_id");
+        let final_filename = required_java_string(env, final_filename, "final_filename");
+        let location_kind = required_java_string(env, location_kind, "location_kind");
+        let location = required_java_string(env, location, "location");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?.complete_publish_json(
+                queue_id?,
+                final_filename?,
+                location_kind?,
+                location?,
+            )?;
             parse_json_value(&result)
         })
     })

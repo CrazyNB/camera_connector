@@ -7,7 +7,9 @@ use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use password_hash::PasswordHash;
 use serde::{Deserialize, Serialize};
 
-use crate::{ImporterError, PublishQueueItem, Result, SqliteStore, TransferRecord};
+use crate::{
+    ImporterError, PublishQueueItem, PublishTransferMetadata, Result, SqliteStore, TransferRecord,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PushProtocol {
@@ -483,6 +485,26 @@ impl PushReceiverConfig {
             staged_path,
             final_filename,
             size_bytes,
+        )
+    }
+
+    pub fn enqueue_publish_with_metadata(
+        &self,
+        transfer_id: &str,
+        staged_path: &str,
+        final_filename: &str,
+        size_bytes: u64,
+        metadata: PublishTransferMetadata,
+    ) -> Result<PublishQueueItem> {
+        let store = SqliteStore::open_state_dir(&self.state_dir)?;
+        let project_id = self.resolve_storage_project_id_with_store(&store)?;
+        store.enqueue_publish_with_metadata(
+            &project_id,
+            transfer_id,
+            staged_path,
+            final_filename,
+            size_bytes,
+            metadata,
         )
     }
 

@@ -123,12 +123,14 @@ class AndroidPublishWorkerTest {
         override fun claimNextPublishItem(): JSONObject? =
             claims.removeFirstOrNull()
 
-        override fun markPublishCompleted(queueId: String): JSONObject {
+        override fun completePublish(queueId: String, publishedObject: PublishedObject): JSONObject {
             if (failCompletedUpdate) {
                 error("completed update failed")
             }
             completedQueueIds += queueId
-            return JSONObject().put("queue_id", queueId).put("completed", true)
+            return JSONObject()
+                .put("queue_id", queueId)
+                .put("final_filename", publishedObject.finalFilename)
         }
 
         override fun markPublishFailed(queueId: String, error: String): JSONObject {

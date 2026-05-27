@@ -95,7 +95,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidStorageGateway.kt" "persistInboxGridColumnCount"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidPublishWorker.kt" "class AndroidPublishWorker"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidPublishWorker.kt" "FilePublishTarget"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidPublishWorker.kt" "markPublishCompleted"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidPublishWorker.kt" "completePublish"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\storage\AndroidPublishWorker.kt" "markPublishFailed"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "notificationPermissionGranted"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onRequestNotificationPermission"

@@ -1,6 +1,7 @@
 package com.cameraconnector.app.core
 
 import com.cameraconnector.app.storage.PublishQueueCore
+import com.cameraconnector.app.storage.PublishedObject
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -23,8 +24,19 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         }
     }
 
-    override fun markPublishCompleted(queueId: String): JSONObject =
+    fun markPublishCompleted(queueId: String): JSONObject =
         call { markPublishCompletedJson(handle, queueId) }
+
+    override fun completePublish(queueId: String, publishedObject: PublishedObject): JSONObject =
+        call {
+            completePublishJson(
+                handle,
+                queueId,
+                publishedObject.finalFilename,
+                publishedObject.locationKind,
+                publishedObject.location,
+            )
+        }
 
     override fun markPublishFailed(queueId: String, error: String): JSONObject =
         call { markPublishFailedJson(handle, queueId, error) }
@@ -111,6 +123,13 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun claimNextPublishItemJson(handle: Long): String
     private external fun markPublishCompletedJson(handle: Long, queueId: String): String
+    private external fun completePublishJson(
+        handle: Long,
+        queueId: String,
+        finalFilename: String,
+        locationKind: String,
+        location: String,
+    ): String
     private external fun markPublishFailedJson(handle: Long, queueId: String, error: String): String
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String

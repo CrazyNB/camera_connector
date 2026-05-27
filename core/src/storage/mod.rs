@@ -136,11 +136,27 @@ pub struct PublishQueueItem {
     pub staged_path: String,
     pub final_filename: String,
     pub size_bytes: u64,
+    pub protocol: Option<String>,
+    pub original_path: Option<String>,
+    pub username: Option<String>,
+    pub remote_addr: Option<String>,
+    pub source_name: Option<String>,
+    pub started_at_ms: Option<i64>,
     pub state: PublishState,
     pub attempt_count: u32,
     pub last_error: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishTransferMetadata {
+    pub protocol: String,
+    pub original_path: String,
+    pub username: Option<String>,
+    pub remote_addr: Option<String>,
+    pub source_name: Option<String>,
+    pub started_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,6 +771,12 @@ impl SqliteStore {
             staged_path: staged_path.to_string(),
             final_filename: final_filename.to_string(),
             size_bytes,
+            protocol: None,
+            original_path: None,
+            username: None,
+            remote_addr: None,
+            source_name: None,
+            started_at_ms: None,
             state: PublishState::Staged,
             attempt_count: 0,
             last_error: None,
@@ -783,6 +805,140 @@ impl SqliteStore {
                 ],
             )?;
             Ok(item)
+        })
+    }
+
+    pub fn enqueue_publish_with_metadata(
+        &self,
+        project_id: &str,
+        transfer_id: &str,
+        staged_path: &str,
+        final_filename: &str,
+        size_bytes: u64,
+        metadata: PublishTransferMetadata,
+    ) -> Result<PublishQueueItem> {
+        let now = current_time_ms();
+        let item = PublishQueueItem {
+            queue_id: format!("publish-{now}-{transfer_id}"),
+            project_id: project_id.to_string(),
+            transfer_id: transfer_id.to_string(),
+            staged_path: staged_path.to_string(),
+            final_filename: final_filename.to_string(),
+            size_bytes,
+            protocol: Some(metadata.protocol),
+            original_path: Some(metadata.original_path),
+            username: metadata.username,
+            remote_addr: metadata.remote_addr,
+            source_name: metadata.source_name,
+            started_at_ms: Some(metadata.started_at_ms),
+            state: PublishState::Staged,
+            attempt_count: 0,
+            last_error: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        self.with_connection(|connection| {
+            ensure_project_is_active(connection, project_id)?;
+            connection.execute(
+                "INSERT INTO publish_queue (
+                    queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                    protocol, original_path, username, remote_addr, source_name, started_at_ms,
+                    state, attempt_count, last_error, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    item.queue_id,
+                    item.project_id,
+                    item.transfer_id,
+                    item.staged_path,
+                    item.final_filename,
+                    item.size_bytes as i64,
+                    item.protocol,
+                    item.original_path,
+                    item.username,
+                    item.remote_addr,
+                    item.source_name,
+                    item.started_at_ms,
+                    item.state.as_str(),
+                    item.attempt_count as i64,
+                    item.last_error,
+                    item.created_at_ms,
+                    item.updated_at_ms,
+                ],
+            )?;
+            Ok(item)
+        })
+    }
+
+    pub fn complete_publish(
+        &self,
+        queue_id: &str,
+        final_filename: &str,
+        final_location: StoredObjectLocation,
+    ) -> Result<TransferRecord> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let item = transaction.query_row(
+                "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                        protocol, original_path, username, remote_addr, source_name, started_at_ms,
+                        state, attempt_count, last_error, created_at_ms, updated_at_ms
+                 FROM publish_queue
+                 WHERE queue_id = ?1",
+                params![queue_id],
+                publish_item_from_row,
+            )?;
+            ensure_project_is_active(&transaction, &item.project_id)?;
+            let protocol = item.protocol.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName(
+                    "publish queue item missing protocol".to_string(),
+                )
+            })?;
+            let original_path = item.original_path.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName(
+                    "publish queue item missing original path".to_string(),
+                )
+            })?;
+            let started_at_ms = item.started_at_ms.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName(
+                    "publish queue item missing started time".to_string(),
+                )
+            })?;
+            let final_path = final_location.as_local_path().map(Path::to_path_buf);
+            let record = TransferRecord {
+                transfer_id: item.transfer_id,
+                protocol,
+                status: TransferStatus::Completed,
+                original_path,
+                final_filename: final_filename.to_string(),
+                final_path,
+                final_location: Some(final_location),
+                size_bytes: item.size_bytes,
+                username: item.username,
+                remote_addr: item.remote_addr,
+                source_name: item.source_name,
+                started_at_ms,
+                completed_at_ms: Some(current_time_ms()),
+                error: None,
+            };
+            insert_transfer(&transaction, &item.project_id, &record)?;
+            insert_asset_for_transfer(&transaction, &item.project_id, &record)?;
+            refresh_duplicate_info(&transaction, &item.project_id)?;
+            let changed = transaction.execute(
+                "UPDATE publish_queue
+                 SET state = ?1, last_error = NULL, updated_at_ms = ?2
+                 WHERE queue_id = ?3",
+                params![
+                    PublishState::Completed.as_str(),
+                    current_time_ms(),
+                    queue_id
+                ],
+            )?;
+            if changed == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "publish queue item not found".to_string(),
+                ));
+            }
+            transaction.commit()?;
+            Ok(record)
         })
     }
 
@@ -828,6 +984,7 @@ impl SqliteStore {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                        protocol, original_path, username, remote_addr, source_name, started_at_ms,
                         state, attempt_count, last_error, created_at_ms, updated_at_ms
                  FROM publish_queue
                  WHERE state IN ('staged', 'failed')
@@ -868,6 +1025,7 @@ impl SqliteStore {
             )?;
             let item = transaction.query_row(
                 "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                        protocol, original_path, username, remote_addr, source_name, started_at_ms,
                         state, attempt_count, last_error, created_at_ms, updated_at_ms
                  FROM publish_queue
                  WHERE queue_id = ?1",
@@ -1107,6 +1265,12 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             staged_path TEXT NOT NULL,
             final_filename TEXT NOT NULL,
             size_bytes INTEGER NOT NULL,
+            protocol TEXT,
+            original_path TEXT,
+            username TEXT,
+            remote_addr TEXT,
+            source_name TEXT,
+            started_at_ms INTEGER,
             state TEXT NOT NULL,
             attempt_count INTEGER NOT NULL,
             last_error TEXT,
@@ -1671,7 +1835,7 @@ fn transfer_record_from_row(row: &Row<'_>) -> std::result::Result<TransferRecord
 }
 
 fn publish_item_from_row(row: &Row<'_>) -> std::result::Result<PublishQueueItem, rusqlite::Error> {
-    let state: String = row.get(6)?;
+    let state: String = row.get(12)?;
     Ok(PublishQueueItem {
         queue_id: row.get(0)?,
         project_id: row.get(1)?,
@@ -1679,11 +1843,17 @@ fn publish_item_from_row(row: &Row<'_>) -> std::result::Result<PublishQueueItem,
         staged_path: row.get(3)?,
         final_filename: row.get(4)?,
         size_bytes: row.get::<_, i64>(5)? as u64,
+        protocol: row.get(6)?,
+        original_path: row.get(7)?,
+        username: row.get(8)?,
+        remote_addr: row.get(9)?,
+        source_name: row.get(10)?,
+        started_at_ms: row.get(11)?,
         state: PublishState::from_str(&state),
-        attempt_count: row.get::<_, i64>(7)? as u32,
-        last_error: row.get(8)?,
-        created_at_ms: row.get(9)?,
-        updated_at_ms: row.get(10)?,
+        attempt_count: row.get::<_, i64>(13)? as u32,
+        last_error: row.get(14)?,
+        created_at_ms: row.get(15)?,
+        updated_at_ms: row.get(16)?,
     })
 }
 

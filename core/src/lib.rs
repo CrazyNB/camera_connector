@@ -36,6 +36,6 @@ pub use service::{
 };
 pub use storage::{
     LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectStatus,
-    PublishQueueItem, PublishQueueSummary, PublishState, SqliteStore, StagedObject, StoredAsset,
-    StoredAssetGroup, StoredReceiverAccount,
+    PublishQueueItem, PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore,
+    StagedObject, StoredAsset, StoredAssetGroup, StoredReceiverAccount,
 };
