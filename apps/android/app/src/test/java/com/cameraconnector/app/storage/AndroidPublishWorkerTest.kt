@@ -65,34 +65,83 @@ class AndroidPublishWorkerTest {
 
     @Test
     fun drainOnceMarksFailedWhenCompletedUpdateFails() {
+        val outputDir = temporaryFolder.newFolder("completion-failed-output")
+        val staged = File(temporaryFolder.newFolder("completion-failed-staging"), "upload.staged").also {
+            it.writeBytes(byteArrayOf(1, 3, 5))
+        }
         val core = FakePublishQueueCore(
             claimedItems = listOf(
                 publishItemJson(
                     queueId = "queue-update-failed",
-                    stagedPath = "already-published.staged",
+                    stagedPath = staged.absolutePath,
                     finalFilename = "IMG_0003.JPG",
                 ),
             ),
             failCompletedUpdate = true,
         )
-        val worker = AndroidPublishWorker(
-            core,
-            object : PublishTarget {
-                override fun publish(item: PublishQueueItem): PublishedObject =
-                    PublishedObject(
-                        finalFilename = item.finalFilename,
-                        locationKind = "local_path",
-                        location = item.stagedPath,
-                        sizeBytes = item.sizeBytes,
-                    )
-            },
-        )
+        val worker = AndroidPublishWorker(core, FilePublishTarget(outputDir))
 
         val result = worker.drainOnce(maxItems = 4)
 
         assertEquals(1, result.failedCount)
         assertEquals(listOf("queue-update-failed"), core.failedQueueIds)
         assertTrue(core.failedErrors.single().contains("completed update failed"))
+        assertTrue("staged file should remain retryable", staged.exists())
+    }
+
+    @Test
+    fun safPublishTargetWritesDocumentUriAndPreservesDuplicateFilenameUntilCompletion() {
+        val stagingDir = temporaryFolder.newFolder("saf-staging")
+        val staged = File(stagingDir, "upload.staged").also {
+            it.writeBytes(byteArrayOf(4, 5, 6))
+        }
+        val documentStore = FakeDocumentTreeStore(existingNames = setOf("IMG_0100.JPG"))
+        val target = SafPublishTarget(documentStore)
+
+        val published = target.publish(
+            PublishQueueItem(
+                queueId = "queue-saf",
+                projectId = "project-1",
+                transferId = "ftp:1:IMG_0100.JPG",
+                stagedPath = staged.absolutePath,
+                finalFilename = "IMG_0100.JPG",
+                sizeBytes = 3,
+                state = "Publishing",
+                attemptCount = 1,
+            ),
+        )
+
+        assertEquals("IMG_0100 (1).JPG", published.finalFilename)
+        assertEquals("document_uri", published.locationKind)
+        assertEquals("content://picked-tree/IMG_0100%20(1).JPG", published.location)
+        assertEquals(byteArrayOf(4, 5, 6).toList(), documentStore.writes.single().bytes.toList())
+        assertTrue("staged file is removed only after core completion", staged.exists())
+    }
+
+    @Test
+    fun safPublishTargetKeepsStagedFileWhenDocumentWriteFails() {
+        val staged = File(temporaryFolder.newFolder("saf-failed-staging"), "upload.staged").also {
+            it.writeBytes(byteArrayOf(7, 8, 9))
+        }
+        val target = SafPublishTarget(FakeDocumentTreeStore(failWrite = true))
+
+        val error = runCatching {
+            target.publish(
+                PublishQueueItem(
+                    queueId = "queue-saf-failed",
+                    projectId = "project-1",
+                    transferId = "ftp:1:IMG_0200.JPG",
+                    stagedPath = staged.absolutePath,
+                    finalFilename = "IMG_0200.JPG",
+                    sizeBytes = 3,
+                    state = "Publishing",
+                    attemptCount = 1,
+                ),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error?.message?.contains("document write failed") == true)
+        assertTrue("staged file should remain retryable", staged.exists())
     }
 
 
@@ -139,4 +188,33 @@ class AndroidPublishWorkerTest {
             return JSONObject().put("queue_id", queueId).put("failed", true)
         }
     }
+
+    private class FakeDocumentTreeStore(
+        existingNames: Set<String> = emptySet(),
+        private val failWrite: Boolean = false,
+    ) : DocumentTreeStore {
+        private val names = existingNames.toMutableSet()
+        val writes = mutableListOf<DocumentWrite>()
+
+        override fun exists(displayName: String): Boolean = names.contains(displayName)
+
+        override fun write(
+            displayName: String,
+            mimeType: String,
+            source: File,
+        ): String {
+            if (failWrite) {
+                error("document write failed")
+            }
+            names += displayName
+            writes += DocumentWrite(displayName, mimeType, source.readBytes())
+            return "content://picked-tree/${displayName.replace(" ", "%20")}"
+        }
+    }
+
+    private data class DocumentWrite(
+        val displayName: String,
+        val mimeType: String,
+        val bytes: ByteArray,
+    )
 }

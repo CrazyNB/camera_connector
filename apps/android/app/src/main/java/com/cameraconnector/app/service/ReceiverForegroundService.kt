@@ -12,8 +12,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.cameraconnector.app.MainActivity
 import com.cameraconnector.app.core.NativeMobileCore
+import com.cameraconnector.app.storage.AndroidDocumentTreeStore
 import com.cameraconnector.app.storage.AndroidPublishWorker
+import com.cameraconnector.app.storage.AndroidStorageGateway
 import com.cameraconnector.app.storage.FilePublishTarget
+import com.cameraconnector.app.storage.SafPublishTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -107,9 +110,13 @@ class ReceiverForegroundService : Service() {
         }
 
         val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
+        val storageGateway = AndroidStorageGateway(this)
+        val publishTarget = storageGateway.selectedInboxUri()
+            ?.let { uri -> SafPublishTarget(AndroidDocumentTreeStore(this, uri)) }
+            ?: FilePublishTarget(outputDir)
         val worker = AndroidPublishWorker(
             core = core,
-            publishTarget = FilePublishTarget(outputDir),
+            publishTarget = publishTarget,
         )
         publishWorkerJob = serviceScope.launch {
             while (isActive) {

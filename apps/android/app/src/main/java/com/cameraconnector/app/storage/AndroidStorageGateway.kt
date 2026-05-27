@@ -32,6 +32,9 @@ class AndroidStorageGateway(private val context: Context) {
         return preferences.getString(KEY_INBOX_LABEL, null)
     }
 
+    fun selectedInboxUri(): Uri? =
+        preferences.getString(KEY_INBOX_URI, null)?.let(Uri::parse)
+
     fun inboxGridColumnCount(): Int =
         preferences.getInt(KEY_INBOX_GRID_COLUMNS, DEFAULT_INBOX_GRID_COLUMNS).coerceIn(2, 3)
 

@@ -1,7 +1,11 @@
 package com.cameraconnector.app.storage
 
+import android.content.Context
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import org.json.JSONObject
 import java.io.File
+import java.util.Locale
 
 interface PublishQueueCore {
     fun claimNextPublishItem(): JSONObject?
@@ -70,6 +74,7 @@ class AndroidPublishWorker(
             try {
                 val publishedObject = publishTarget.publish(item)
                 core.completePublish(item.queueId, publishedObject)
+                deleteStagedFile(item)
                 completed += 1
             } catch (error: Throwable) {
                 core.markPublishFailed(item.queueId, error.message ?: error.toString())
@@ -86,6 +91,10 @@ class AndroidPublishWorker(
 
     private companion object {
         const val DEFAULT_MAX_ITEMS = 32
+
+        fun deleteStagedFile(item: PublishQueueItem) {
+            File(item.stagedPath).delete()
+        }
     }
 }
 
@@ -110,8 +119,6 @@ class FilePublishTarget(private val outputDir: File) : PublishTarget {
             tempFile.copyTo(finalFile, overwrite = true)
             tempFile.delete()
         }
-        stagedFile.delete()
-
         return PublishedObject(
             finalFilename = finalFile.name,
             locationKind = "local_path",
@@ -138,5 +145,93 @@ class FilePublishTarget(private val outputDir: File) : PublishTarget {
             }
             index += 1
         }
+    }
+}
+
+interface DocumentTreeStore {
+    fun exists(displayName: String): Boolean
+
+    fun write(displayName: String, mimeType: String, source: File): String
+}
+
+class SafPublishTarget(
+    private val documentStore: DocumentTreeStore,
+) : PublishTarget {
+    override fun publish(item: PublishQueueItem): PublishedObject {
+        val stagedFile = File(item.stagedPath)
+        require(stagedFile.isFile) { "staged file is missing: ${item.stagedPath}" }
+
+        val finalFilename = availableDocumentName(documentStore, item.finalFilename)
+        val location = documentStore.write(
+            displayName = finalFilename,
+            mimeType = mimeTypeFor(finalFilename),
+            source = stagedFile,
+        )
+        val sizeBytes = stagedFile.length()
+
+        return PublishedObject(
+            finalFilename = finalFilename,
+            locationKind = "document_uri",
+            location = location,
+            sizeBytes = sizeBytes,
+        )
+    }
+}
+
+class AndroidDocumentTreeStore(
+    private val context: Context,
+    private val treeUri: Uri,
+) : DocumentTreeStore {
+    private val root: DocumentFile
+        get() = DocumentFile.fromTreeUri(context, treeUri)
+            ?: error("selected document tree is unavailable: $treeUri")
+
+    override fun exists(displayName: String): Boolean =
+        root.findFile(displayName) != null
+
+    override fun write(displayName: String, mimeType: String, source: File): String {
+        val document = root.createFile(mimeType, displayName)
+            ?: error("failed to create document: $displayName")
+        val output = context.contentResolver.openOutputStream(document.uri, "wt")
+            ?: error("failed to open document for writing: $displayName")
+
+        source.inputStream().use { input ->
+            output.use { target ->
+                input.copyTo(target)
+            }
+        }
+        return document.uri.toString()
+    }
+}
+
+private fun availableDocumentName(store: DocumentTreeStore, requestedFilename: String): String {
+    val flattened = File(requestedFilename).name.ifBlank { "upload" }
+    if (!store.exists(flattened) && !store.exists("$flattened.tmp")) {
+        return flattened
+    }
+
+    val extensionStart = flattened.lastIndexOf('.').takeIf { it > 0 }
+    val stem = extensionStart?.let { flattened.substring(0, it) } ?: flattened
+    val extension = extensionStart?.let { flattened.substring(it) }.orEmpty()
+    var index = 1
+    while (true) {
+        val candidate = "$stem ($index)$extension"
+        if (!store.exists(candidate) && !store.exists("$candidate.tmp")) {
+            return candidate
+        }
+        index += 1
+    }
+}
+
+private fun mimeTypeFor(filename: String): String {
+    val extension = filename.substringAfterLast('.', "").lowercase(Locale.US)
+    return when (extension) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "heic", "heif" -> "image/heif"
+        "dng" -> "image/x-adobe-dng"
+        "mp4" -> "video/mp4"
+        "mov" -> "video/quicktime"
+        else -> "application/octet-stream"
     }
 }

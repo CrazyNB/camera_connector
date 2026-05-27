@@ -19,7 +19,7 @@ The Android source now has a native gateway boundary:
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
 - `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/inbox` and `filesDir/state`.
 - `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
-- `ReceiverForegroundService` also runs a publish queue worker that claims staged items from Rust and publishes them through the Android storage boundary; the current target is app-private file storage until SAF or MediaStore publishing is enabled.
+- `ReceiverForegroundService` also runs a publish queue worker that claims staged items from Rust and publishes them through the Android storage boundary; when the user has selected a document tree it publishes to SAF and records `document_uri`, otherwise it falls back to app-private file storage.
 - The foreground notification can reopen the app and exposes a Stop action so receiver shutdown is available outside the Compose UI.
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
 - The Overview screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
@@ -27,7 +27,7 @@ The Android source now has a native gateway boundary:
 - The Transfers screen reads native dashboard transfer counts and recent failure rows, including virtual display paths and core error messages.
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
-- The Output card launches Android's document tree picker and persists the selected inbox URI label; native smoke imports still use app-private storage until the Android storage backend writes through SAF or MediaStore.
+- The Output card launches Android's document tree picker and persists the selected inbox URI label; native imports use that selected SAF tree as the final publish target when it is available.
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
