@@ -31,4 +31,25 @@ class NativeDashboardMappingTest {
 
         assertEquals(PublishQueueState(), state)
     }
+
+    @Test
+    fun recentPublishFailuresMapToTransferRowsWithErrors() {
+        val rows = mapPublishFailureTransfers(
+            org.json.JSONArray()
+                .put(
+                    JSONObject()
+                        .put("queue_id", "publish-1")
+                        .put("transfer_id", "ftp:1:IMG_1100.JPG")
+                        .put("final_filename", "IMG_1100.JPG")
+                        .put("attempt_count", 2)
+                        .put("last_error", "SAF permission revoked"),
+                ),
+        )
+
+        assertEquals(1, rows.size)
+        assertEquals("publish-1", rows[0].id)
+        assertEquals("Failed", rows[0].status)
+        assertEquals("IMG_1100.JPG", rows[0].displayPath)
+        assertEquals("SAF permission revoked", rows[0].message)
+    }
 }

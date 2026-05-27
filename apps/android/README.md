@@ -29,6 +29,7 @@ The Android source now has a native gateway boundary:
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
 - The Output card launches Android's document tree picker and persists the selected inbox URI label; native imports use that selected SAF tree as the final publish target when it is available.
 - The Overview receiver tags surface pending and failed publish queue counts from the Rust dashboard, so SAF permission loss or other retryable publish failures are visible in-app.
+- The Transfers screen includes recent publish queue failures with the affected filename and last error, alongside completed imports and failed receiver transfers.
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.

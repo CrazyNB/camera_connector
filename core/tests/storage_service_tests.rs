@@ -525,6 +525,71 @@ fn service_project_dashboard_includes_project_scoped_publish_queue_summary() {
 }
 
 #[test]
+fn service_project_dashboard_includes_project_scoped_recent_publish_failures() {
+    let config_path = unique_temp_path("storage-service-dashboard-publish-failures");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project_a = service
+        .create_project("Publish Failure A")
+        .expect("project should create");
+    let project_b = service
+        .create_project("Publish Failure B")
+        .expect("other project should create");
+    let store = service.storage_store().expect("store should open");
+
+    let failed_a = store
+        .enqueue_publish(
+            &project_a.project_id,
+            "ftp:publish-a",
+            "staging/a.tmp",
+            "IMG_1100.JPG",
+            10,
+        )
+        .expect("publish should enqueue");
+    store
+        .mark_publish_failed(&failed_a.queue_id, "SAF permission revoked")
+        .expect("publish failure should save");
+
+    let failed_b = store
+        .enqueue_publish(
+            &project_b.project_id,
+            "ftp:publish-b",
+            "staging/b.tmp",
+            "IMG_2200.JPG",
+            20,
+        )
+        .expect("other publish should enqueue");
+    store
+        .mark_publish_failed(&failed_b.queue_id, "other project failed")
+        .expect("other publish failure should save");
+
+    let dashboard = service
+        .project_dashboard(
+            &project_a.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+            false,
+        )
+        .expect("project dashboard should build");
+
+    assert_eq!(dashboard.recent_publish_failures.len(), 1);
+    assert_eq!(
+        dashboard.recent_publish_failures[0].queue_id,
+        failed_a.queue_id
+    );
+    assert_eq!(
+        dashboard.recent_publish_failures[0].last_error.as_deref(),
+        Some("SAF permission revoked")
+    );
+    assert_eq!(
+        dashboard.recent_publish_failures[0].final_filename,
+        "IMG_1100.JPG"
+    );
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_project_dashboard_filters_transfer_summary_by_query() {
     let config_path = unique_temp_path("storage-service-dashboard-summary-filter");
     let service = CameraConnectorService::new(Some(config_path.clone()));

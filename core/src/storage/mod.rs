@@ -995,6 +995,28 @@ impl SqliteStore {
         })
     }
 
+    pub fn failed_publish_items(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> Result<Vec<PublishQueueItem>> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let mut statement = connection.prepare(
+                "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                        protocol, original_path, username, remote_addr, source_name, started_at_ms,
+                        state, attempt_count, last_error, created_at_ms, updated_at_ms
+                 FROM publish_queue
+                 WHERE project_id = ?1 AND state = 'failed'
+                 ORDER BY updated_at_ms DESC, created_at_ms DESC, queue_id DESC
+                 LIMIT ?2",
+            )?;
+            let rows =
+                statement.query_map(params![project_id, limit as i64], publish_item_from_row)?;
+            collect_rows(rows)
+        })
+    }
+
     pub fn claim_next_publish_item(&self) -> Result<Option<PublishQueueItem>> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;

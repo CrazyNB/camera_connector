@@ -2262,6 +2262,7 @@ mod tests {
                 final_location_kind: None,
                 final_location_label: None,
             }],
+            recent_publish_failures: Vec::new(),
             devices: vec![camera_connector_core::ConnectedDeviceView {
                 device: camera_connector_core::ConnectedDevice {
                     remote_addr: "192.168.137.56".to_string(),

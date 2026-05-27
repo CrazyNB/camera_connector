@@ -31,8 +31,9 @@ pub use runtime::{
 };
 pub use service::{
     AccountView, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    CameraConnectorDashboard, CameraConnectorService, ConnectedDeviceView, ReceiverConfigRequest,
-    ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
+    CameraConnectorDashboard, CameraConnectorService, ConnectedDeviceView, PublishQueueFailureView,
+    ReceiverConfigRequest, ReceiverSettingsUpdate, SystemPathsView, TransferQuery,
+    TransferRecordView, TransferSummary,
 };
 pub use storage::{
     LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectStatus,

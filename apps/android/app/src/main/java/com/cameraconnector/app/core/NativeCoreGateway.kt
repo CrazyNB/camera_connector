@@ -186,6 +186,9 @@ class NativeCoreGateway(
             statusHost to statusPort
         }
 
+        val transferRows = mapTransfers(transfers, assets, value.optJSONArray("recent_failures")) +
+            mapPublishFailureTransfers(value.optJSONArray("recent_publish_failures"))
+
         return DashboardState(
             receiver = ReceiverState(
                 running = running,
@@ -206,7 +209,7 @@ class NativeCoreGateway(
             ),
             accounts = mapAccounts(value),
             inbox = mapInbox(assets),
-            transfers = mapTransfers(transfers, assets, value.optJSONArray("recent_failures")),
+            transfers = transferRows,
             publishQueue = mapPublishQueueState(value.optJSONObject("publish_queue")),
         )
     }
@@ -435,3 +438,37 @@ internal fun mapPublishQueueState(value: JSONObject?): PublishQueueState =
         completedCount = value?.optInt("completed_count") ?: 0,
         failedCount = value?.optInt("failed_count") ?: 0,
     )
+
+internal fun mapPublishFailureTransfers(value: JSONArray?): List<TransferRow> {
+    if (value == null) {
+        return emptyList()
+    }
+
+    return buildList {
+        for (index in 0 until value.length()) {
+            val item = value.optJSONObject(index) ?: continue
+            val displayPath = publishFailureDisplayPath(item)
+            add(
+                TransferRow(
+                    id = item.optString("queue_id").ifBlank { "publish-failure-$index" },
+                    status = "Failed",
+                    displayPath = displayPath,
+                    message = item.optString("last_error").takeIf { it.isNotBlank() },
+                ),
+            )
+        }
+    }
+}
+
+private fun publishFailureDisplayPath(item: JSONObject): String {
+    val path = item.optString("original_path")
+        .ifBlank { item.optString("final_filename") }
+        .ifBlank { item.optString("transfer_id") }
+        .ifBlank { "Publish failed" }
+    val source = item.optString("display_source").takeIf { it.isNotBlank() }
+    return if (source == null || path.startsWith("$source/")) {
+        path
+    } else {
+        "$source/$path"
+    }
+}

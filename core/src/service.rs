@@ -133,6 +133,19 @@ pub struct AccountView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishQueueFailureView {
+    pub queue_id: String,
+    pub transfer_id: String,
+    pub final_filename: String,
+    pub original_path: Option<String>,
+    pub display_source: Option<String>,
+    pub username: Option<String>,
+    pub attempt_count: u32,
+    pub last_error: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemPathsView {
     pub config_path: PathBuf,
     pub state_dir: PathBuf,
@@ -149,6 +162,7 @@ pub struct CameraConnectorDashboard {
     pub transfers: TransferSummary,
     pub publish_queue: PublishQueueSummary,
     pub recent_failures: Vec<TransferRecordView>,
+    pub recent_publish_failures: Vec<PublishQueueFailureView>,
     pub assets: AssetGroupPage,
 }
 
@@ -572,6 +586,34 @@ impl CameraConnectorService {
         Ok(views)
     }
 
+    pub fn project_recent_publish_failures(
+        &self,
+        project_id: &str,
+        limit: usize,
+    ) -> Result<Vec<PublishQueueFailureView>> {
+        let accounts = self.receiver_account_configs()?;
+        let failures = self
+            .storage_store()?
+            .failed_publish_items(project_id, limit)?
+            .into_iter()
+            .map(|item| {
+                let display_source = publish_item_display_source(&item, &accounts);
+                PublishQueueFailureView {
+                    queue_id: item.queue_id,
+                    transfer_id: item.transfer_id,
+                    final_filename: item.final_filename,
+                    original_path: item.original_path,
+                    display_source,
+                    username: item.username,
+                    attempt_count: item.attempt_count,
+                    last_error: item.last_error,
+                    updated_at_ms: item.updated_at_ms,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(failures)
+    }
+
     pub fn connected_devices(
         &self,
         output_dir: impl AsRef<Path>,
@@ -631,6 +673,7 @@ impl CameraConnectorService {
             transfers,
             publish_queue: store.publish_queue_summary(project_id)?,
             recent_failures: self.project_recent_failed_transfers(project_id, transfer_query, 5)?,
+            recent_publish_failures: self.project_recent_publish_failures(project_id, 5)?,
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
@@ -996,6 +1039,17 @@ fn record_display_source(
         .and_then(|username| accounts.get(username))
         .map(|account| account.device_name.clone())
         .or_else(|| record.source_name.clone())
+}
+
+fn publish_item_display_source(
+    item: &PublishQueueItem,
+    accounts: &BTreeMap<String, ReceiverAccountConfig>,
+) -> Option<String> {
+    item.username
+        .as_deref()
+        .and_then(|username| accounts.get(username))
+        .map(|account| account.device_name.clone())
+        .or_else(|| item.source_name.clone())
 }
 
 fn device_matches(device: &ConnectedDevice, username: Option<&str>, online: bool) -> bool {
