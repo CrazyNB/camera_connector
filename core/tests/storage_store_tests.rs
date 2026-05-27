@@ -3,6 +3,7 @@ use camera_connector_core::{
     ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, SqliteStore,
     StoredObjectLocation, TransferRecord, TransferStatus,
 };
+use rusqlite::Connection;
 
 #[test]
 fn sqlite_store_creates_projects_and_tracks_active_project() {
@@ -242,6 +243,65 @@ fn sqlite_store_persists_receiver_runtime_status() {
     assert_eq!(loaded.output_dir, status.output_dir);
     assert_eq!(loaded.state_dir, status.state_dir);
     assert_eq!(loaded.account_count, 1);
+}
+
+#[test]
+fn sqlite_store_persists_receiver_runtime_status_as_columns() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let db_path = temp_dir.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store should open");
+    let status = ReceiverRuntimeStatus {
+        phase: ReceiverRuntimePhase::Running,
+        protocol: Some(PushProtocol::Sftp),
+        auth_mode: ReceiverAuthMode::Accounts,
+        local_addr: Some("127.0.0.1:2222".parse().expect("addr should parse")),
+        output_dir: Some(temp_dir.path().join("output")),
+        state_dir: Some(temp_dir.path().join("state")),
+        account_count: 2,
+        message: Some("ready".to_string()),
+    };
+
+    store
+        .write_receiver_runtime_status(&status)
+        .expect("runtime status should write");
+
+    let connection = Connection::open(db_path).expect("sqlite should open");
+    let columns = connection
+        .prepare("PRAGMA table_info(receiver_status)")
+        .expect("pragma should prepare")
+        .query_map([], |row| row.get::<_, String>(1))
+        .expect("columns should query")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("columns should collect");
+    let row = connection
+        .query_row(
+            "SELECT phase, protocol, auth_mode, local_addr, output_dir, state_dir,
+                    account_count, message
+             FROM receiver_status
+             WHERE key = 'current'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            },
+        )
+        .expect("receiver status row should query");
+
+    assert!(!columns.iter().any(|column| column == "payload"));
+    assert_eq!(row.0, "running");
+    assert_eq!(row.1.as_deref(), Some("sftp"));
+    assert_eq!(row.2, "accounts");
+    assert_eq!(row.3.as_deref(), Some("127.0.0.1:2222"));
+    assert_eq!(row.6, 2);
+    assert_eq!(row.7.as_deref(), Some("ready"));
 }
 
 #[test]

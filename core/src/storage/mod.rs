@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     group_received_assets, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    ConnectedDevice, ImportSource, ImporterError, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, ReceiverRuntimeStatus, Result, StoredObjectLocation, TransferRecord,
-    TransferStatus,
+    ConnectedDevice, ImportSource, ImporterError, ObjectFormat, PushProtocol, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase,
+    ReceiverRuntimeStatus, Result, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
@@ -573,16 +573,39 @@ impl SqliteStore {
     }
 
     pub fn write_receiver_runtime_status(&self, status: &ReceiverRuntimeStatus) -> Result<()> {
-        let payload = serde_json::to_string(status)
-            .map_err(|error| ImporterError::internal(error.to_string()))?;
         self.with_connection(|connection| {
             connection.execute(
-                "INSERT INTO receiver_status (key, payload, updated_at_ms)
-                 VALUES ('current', ?1, ?2)
+                "INSERT INTO receiver_status (
+                    key, phase, protocol, auth_mode, local_addr, output_dir, state_dir,
+                    account_count, message, updated_at_ms
+                 ) VALUES ('current', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(key) DO UPDATE SET
-                    payload = excluded.payload,
+                    phase = excluded.phase,
+                    protocol = excluded.protocol,
+                    auth_mode = excluded.auth_mode,
+                    local_addr = excluded.local_addr,
+                    output_dir = excluded.output_dir,
+                    state_dir = excluded.state_dir,
+                    account_count = excluded.account_count,
+                    message = excluded.message,
                     updated_at_ms = excluded.updated_at_ms",
-                params![payload, current_time_ms()],
+                params![
+                    receiver_runtime_phase_name(status.phase),
+                    status.protocol.map(push_protocol_name),
+                    receiver_auth_mode_name(status.auth_mode),
+                    status.local_addr.map(|addr| addr.to_string()),
+                    status
+                        .output_dir
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    status
+                        .state_dir
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    status.account_count as i64,
+                    status.message.as_deref(),
+                    current_time_ms(),
+                ],
             )?;
             Ok(())
         })
@@ -592,13 +615,12 @@ impl SqliteStore {
         self.with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT payload FROM receiver_status WHERE key = 'current'",
+                    "SELECT phase, protocol, auth_mode, local_addr, output_dir, state_dir,
+                            account_count, message
+                     FROM receiver_status
+                     WHERE key = 'current'",
                     [],
-                    |row| {
-                        let payload = row.get::<_, String>(0)?;
-                        serde_json::from_str::<ReceiverRuntimeStatus>(&payload)
-                            .map_err(sqlite_data_error)
-                    },
+                    receiver_runtime_status_from_row,
                 )
                 .optional()
         })
@@ -919,7 +941,14 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
 
         CREATE TABLE IF NOT EXISTS receiver_status (
             key TEXT PRIMARY KEY,
-            payload TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            protocol TEXT,
+            auth_mode TEXT NOT NULL,
+            local_addr TEXT,
+            output_dir TEXT,
+            state_dir TEXT,
+            account_count INTEGER NOT NULL,
+            message TEXT,
             updated_at_ms INTEGER NOT NULL
         );
 
@@ -1105,6 +1134,92 @@ fn sort_connected_devices(devices: &mut [ConnectedDevice]) {
             .then_with(|| right.last_seen_at_ms.cmp(&left.last_seen_at_ms))
             .then_with(|| left.remote_addr.cmp(&right.remote_addr))
     });
+}
+
+fn receiver_runtime_status_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<ReceiverRuntimeStatus, rusqlite::Error> {
+    let phase = row.get::<_, String>(0)?;
+    let protocol = row.get::<_, Option<String>>(1)?;
+    let auth_mode = row.get::<_, String>(2)?;
+    let local_addr = row.get::<_, Option<String>>(3)?;
+    let output_dir = row.get::<_, Option<String>>(4)?;
+    let state_dir = row.get::<_, Option<String>>(5)?;
+    Ok(ReceiverRuntimeStatus {
+        phase: receiver_runtime_phase_from_name(&phase)?,
+        protocol: protocol
+            .as_deref()
+            .map(push_protocol_from_name)
+            .transpose()?,
+        auth_mode: receiver_auth_mode_from_name(&auth_mode)?,
+        local_addr: local_addr
+            .as_deref()
+            .map(|value| value.parse().map_err(sqlite_data_error))
+            .transpose()?,
+        output_dir: output_dir.map(PathBuf::from),
+        state_dir: state_dir.map(PathBuf::from),
+        account_count: row.get::<_, i64>(6)? as usize,
+        message: row.get(7)?,
+    })
+}
+
+fn receiver_runtime_phase_name(phase: ReceiverRuntimePhase) -> &'static str {
+    match phase {
+        ReceiverRuntimePhase::Stopped => "stopped",
+        ReceiverRuntimePhase::Starting => "starting",
+        ReceiverRuntimePhase::Running => "running",
+        ReceiverRuntimePhase::Stopping => "stopping",
+        ReceiverRuntimePhase::Failed => "failed",
+    }
+}
+
+fn receiver_runtime_phase_from_name(
+    phase: &str,
+) -> std::result::Result<ReceiverRuntimePhase, rusqlite::Error> {
+    match phase {
+        "stopped" => Ok(ReceiverRuntimePhase::Stopped),
+        "starting" => Ok(ReceiverRuntimePhase::Starting),
+        "running" => Ok(ReceiverRuntimePhase::Running),
+        "stopping" => Ok(ReceiverRuntimePhase::Stopping),
+        "failed" => Ok(ReceiverRuntimePhase::Failed),
+        value => Err(sqlite_data_error(format!(
+            "invalid receiver runtime phase: {value}"
+        ))),
+    }
+}
+
+fn receiver_auth_mode_name(auth_mode: ReceiverAuthMode) -> &'static str {
+    match auth_mode {
+        ReceiverAuthMode::Anonymous => "anonymous",
+        ReceiverAuthMode::Accounts => "accounts",
+    }
+}
+
+fn receiver_auth_mode_from_name(
+    auth_mode: &str,
+) -> std::result::Result<ReceiverAuthMode, rusqlite::Error> {
+    match auth_mode {
+        "anonymous" => Ok(ReceiverAuthMode::Anonymous),
+        "accounts" => Ok(ReceiverAuthMode::Accounts),
+        value => Err(sqlite_data_error(format!(
+            "invalid receiver auth mode: {value}"
+        ))),
+    }
+}
+
+fn push_protocol_name(protocol: PushProtocol) -> &'static str {
+    match protocol {
+        PushProtocol::Ftp => "ftp",
+        PushProtocol::Sftp => "sftp",
+    }
+}
+
+fn push_protocol_from_name(protocol: &str) -> std::result::Result<PushProtocol, rusqlite::Error> {
+    match protocol {
+        "ftp" => Ok(PushProtocol::Ftp),
+        "sftp" => Ok(PushProtocol::Sftp),
+        value => Err(sqlite_data_error(format!("invalid push protocol: {value}"))),
+    }
 }
 
 fn sqlite_data_error(error: impl ToString) -> rusqlite::Error {

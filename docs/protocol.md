@@ -136,9 +136,9 @@ The receiver writes runtime status to the SQLite `receiver_status` table in the 
 - `account_count`.
 - `message`: failure or diagnostic text.
 
-The status file is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore known metadata filenames defensively.
+The status table is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore known metadata filenames defensively.
 
-Status readers should treat a stale `Running` file as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
+Status readers should treat a stale `Running` row as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
 
 ## Real Camera Verification
 
