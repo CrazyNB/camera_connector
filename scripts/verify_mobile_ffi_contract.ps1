@@ -30,6 +30,7 @@ $requiredFunctions = @(
     "camera_connector_mobile_core_mark_publish_completed_json",
     "camera_connector_mobile_core_complete_publish_json",
     "camera_connector_mobile_core_mark_publish_failed_json",
+    "camera_connector_mobile_core_release_failed_publish_retries_json",
     "camera_connector_mobile_core_save_receiver_settings_json",
     "camera_connector_mobile_core_save_device_account_json",
     "camera_connector_mobile_core_remove_device_account_json",

@@ -94,6 +94,11 @@ char *camera_connector_mobile_core_mark_publish_failed_json(
     const char *error
 );
 
+char *camera_connector_mobile_core_release_failed_publish_retries_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
 char *camera_connector_mobile_core_save_receiver_settings_json(
     const CameraConnectorMobileCore *core,
     const char *patch_json
