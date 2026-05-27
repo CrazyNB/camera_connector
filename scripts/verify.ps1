@@ -11,6 +11,11 @@ $ftpSmokeState = Join-Path $root "target\ftp-smoke-state"
 $sftpSmokeOutput = Join-Path $root "target\sftp-smoke-output"
 $sftpSmokeState = Join-Path $root "target\sftp-smoke-state"
 $configPath = Join-Path $root "target\push-config.json"
+$serviceSource = Get-Content -LiteralPath (Join-Path $root "core\src\service.rs") -Raw
+
+if ($serviceSource -match "pub fn dashboard\(") {
+    throw "CameraConnectorService dashboard views must be project-scoped; use project_dashboard instead"
+}
 
 function Invoke-CargoDev {
     param(

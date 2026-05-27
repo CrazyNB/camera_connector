@@ -558,54 +558,6 @@ impl CameraConnectorService {
         Ok(views)
     }
 
-    pub fn dashboard(
-        &self,
-        state_dir: impl AsRef<Path>,
-        asset_query: AssetGroupQuery,
-        offset: usize,
-        limit: usize,
-        online_devices_only: bool,
-    ) -> Result<CameraConnectorDashboard> {
-        let state_dir = state_dir.as_ref();
-        let config = self.load_config()?;
-        let receiver_settings = config.receiver.clone();
-        let receiver_status = self.receiver_status(state_dir)?;
-        let devices = self.connected_devices(
-            state_dir,
-            asset_query.username.as_deref(),
-            online_devices_only,
-        )?;
-        let accounts = accounts_with_devices(self.accounts()?, &devices);
-        Ok(CameraConnectorDashboard {
-            receiver_settings,
-            paths: SystemPathsView {
-                config_path: self.config_path(),
-                state_dir: state_dir.to_path_buf(),
-                output_dir: receiver_status
-                    .as_ref()
-                    .and_then(|status| status.output_dir.clone()),
-            },
-            receiver_status,
-            accounts,
-            devices,
-            transfers: self.transfer_summary_with_query(
-                state_dir,
-                transfer_query_from_asset_query(&asset_query),
-            )?,
-            recent_failures: self.recent_failed_transfers(
-                state_dir,
-                transfer_query_from_asset_query(&asset_query),
-                5,
-            )?,
-            assets: self.transfer_asset_group_page_with_query(
-                state_dir,
-                asset_query,
-                offset,
-                limit,
-            )?,
-        })
-    }
-
     pub fn project_dashboard(
         &self,
         project_id: &str,
