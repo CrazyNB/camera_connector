@@ -400,57 +400,35 @@ if (($projectDashboardOutput | Where-Object { $_ -like "asset*username=verify*so
 }
 Write-Output $projectDashboardOutput
 
-$dashboardOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --state $pushState --username "verify" --limit 1
-if ($LASTEXITCODE -ne 0) { throw "dashboard smoke failed" }
-if (($dashboardOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
-    throw "dashboard did not expose paged asset summary"
-}
-if (($dashboardOutput | Where-Object { $_ -like "account*username=verify*device=Verify Camera*password_configured=true*online=*connections=*remote=*" }).Count -lt 1) {
-    throw "dashboard did not expose account summary"
-}
-if (($dashboardOutput | Where-Object { $_ -like "paths*config=$configPath*state=$pushState*" }).Count -lt 1) {
-    throw "dashboard did not expose system paths"
-}
-if (($dashboardOutput | Where-Object { $_ -like "transfers*total=3*completed=2*failed=1*" }).Count -lt 1) {
-    throw "dashboard did not expose transfer summary"
-}
-if (($dashboardOutput | Where-Object { $_ -like "failure*ftp:verify-failed*Failed*error=simulated failure*" }).Count -lt 1) {
-    throw "dashboard did not expose recent failure rows"
-}
-if (($dashboardOutput | Where-Object { $_ -like "asset*username=verify*source=Verify Camera*" }).Count -lt 1) {
-    throw "dashboard did not expose filtered asset rows"
-}
-Write-Output $dashboardOutput
-
-$dashboardJsonOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --state $pushState --username "verify" --limit 1 --json
-if ($LASTEXITCODE -ne 0) { throw "dashboard json smoke failed" }
+$dashboardJsonOutput = & (Join-Path $root "target\debug\camera-connector.exe") dashboard --config $configPath --project-id $projectId --username "verify" --limit 1 --json
+if ($LASTEXITCODE -ne 0) { throw "project dashboard json smoke failed" }
 $dashboardJson = $dashboardJsonOutput -join "`n" | ConvertFrom-Json
 if ($dashboardJson.assets.summary.group_count -ne 2) {
-    throw "dashboard json did not expose asset summary"
+    throw "project dashboard json did not expose asset summary"
 }
 if ($dashboardJson.accounts[0].username -ne "verify" -or $dashboardJson.accounts[0].password_configured -ne $true) {
-    throw "dashboard json did not expose safe account summary"
+    throw "project dashboard json did not expose safe account summary"
 }
 if ($null -eq $dashboardJson.accounts[0].online -or $null -eq $dashboardJson.accounts[0].active_connections) {
-    throw "dashboard json did not expose account connection state"
+    throw "project dashboard json did not expose account connection state"
 }
 if ($dashboardJson.paths.config_path -ne $configPath -or $dashboardJson.paths.state_dir -ne $pushState) {
-    throw "dashboard json did not expose system paths"
+    throw "project dashboard json did not expose system paths"
 }
-if ($dashboardJson.transfers.total_count -ne 3 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 1) {
-    throw "dashboard json did not expose transfer summary"
+if ($dashboardJson.transfers.total_count -ne 2 -or $dashboardJson.transfers.completed_count -ne 2 -or $dashboardJson.transfers.failed_count -ne 0) {
+    throw "project dashboard json did not expose project transfer summary"
 }
-if ($dashboardJson.recent_failures.Count -ne 1 -or $dashboardJson.recent_failures[0].record.error -ne "simulated failure") {
-    throw "dashboard json did not expose recent failures"
+if ($dashboardJson.recent_failures.Count -ne 0) {
+    throw "project dashboard json should not include transfer-log-only failures"
 }
 if (($dashboardJsonOutput -join "`n") -like "*password_hash*") {
-    throw "dashboard json exposed password hash"
+    throw "project dashboard json exposed password hash"
 }
 if ($dashboardJson.assets.groups[0].primary.username -ne "verify") {
-    throw "dashboard json did not expose filtered asset username"
+    throw "project dashboard json did not expose filtered asset username"
 }
 if ($dashboardJson.assets.groups[0].primary.duplicate_index -ne 2 -or $dashboardJson.assets.groups[0].primary.duplicate_count -ne 2) {
-    throw "dashboard json did not expose duplicate metadata"
+    throw "project dashboard json did not expose duplicate metadata"
 }
 Write-Output $dashboardJsonOutput
 

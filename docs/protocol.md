@@ -71,7 +71,7 @@ Not yet implemented:
   - Android: `media_uri` or `document_uri` through MediaStore/SAF.
   - iOS: `document_uri` or `photo_asset` through Files/Photos APIs.
 - Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then publish contract.
-- Every completed upload is indexed under a project in SQLite. When no explicit active project is provided by the app shell, the core uses the system `Inbox` project, which remains non-archivable so fallback imports cannot be stranded.
+- Every completed upload is indexed under a project in SQLite. When no explicit active project is provided by the app shell, the core uses the system `Inbox` project, which remains non-archivable so fallback imports cannot be stranded. Dashboard and asset review views must name a project; audit-log diagnostics are separate from project views.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
 - Use only the final remote filename for local storage.

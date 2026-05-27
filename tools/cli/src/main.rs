@@ -86,10 +86,8 @@ enum Command {
     Dashboard {
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long, alias = "path")]
-        state: Option<PathBuf>,
         #[arg(long, alias = "project")]
-        project_id: Option<String>,
+        project_id: String,
         #[arg(long)]
         username: Option<String>,
         #[arg(long)]
@@ -303,8 +301,7 @@ struct ReceiveFileArgs {
 
 struct DashboardArgs {
     config: Option<PathBuf>,
-    state: Option<PathBuf>,
-    project_id: Option<String>,
+    project_id: String,
     query: AssetGroupQuery,
     offset: usize,
     limit: usize,
@@ -402,7 +399,6 @@ async fn main() -> Result<()> {
         }
         Some(Command::Dashboard {
             config,
-            state,
             project_id,
             username,
             source_name,
@@ -416,7 +412,6 @@ async fn main() -> Result<()> {
         }) => {
             let dashboard = load_dashboard(DashboardArgs {
                 config,
-                state,
                 project_id,
                 query: AssetGroupQuery {
                     username,
@@ -716,27 +711,13 @@ fn record_transfer_in_active_project(state_dir: &Path, record: &TransferRecord) 
 
 fn load_dashboard(args: DashboardArgs) -> Result<CameraConnectorDashboard> {
     let service = CameraConnectorService::new(args.config);
-    match args.project_id {
-        Some(project_id) => service.project_dashboard(
-            &project_id,
-            args.query,
-            args.offset,
-            args.limit,
-            args.online_devices,
-        ),
-        None => {
-            let state = args
-                .state
-                .ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
-            service.dashboard(
-                state,
-                args.query,
-                args.offset,
-                args.limit,
-                args.online_devices,
-            )
-        }
-    }
+    service.project_dashboard(
+        &args.project_id,
+        args.query,
+        args.offset,
+        args.limit,
+        args.online_devices,
+    )
 }
 
 fn load_project_inbox_page(
@@ -1830,8 +1811,8 @@ mod tests {
             "dashboard",
             "--config",
             "C:\\CameraConnector\\config.json",
-            "--state",
-            "C:\\CameraConnector\\state",
+            "--project-id",
+            "project-1",
             "--username",
             "z5",
             "--online-devices",
@@ -1847,13 +1828,28 @@ mod tests {
             cli.command,
             Some(Command::Dashboard {
                 username: Some(_),
+                project_id,
                 online_devices: true,
                 json: true,
                 offset: 0,
                 limit: 25,
                 ..
-            })
+            }) if project_id == "project-1"
         ));
+    }
+
+    #[test]
+    fn dashboard_requires_project_id() {
+        let result = Cli::try_parse_from([
+            "camera-connector",
+            "dashboard",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "--username",
+            "z5",
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1872,8 +1868,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Command::Dashboard {
-                state: None,
-                project_id: Some(project_id),
+                project_id,
                 json: true,
                 ..
             }) if project_id == "project-1"
@@ -1925,8 +1920,7 @@ mod tests {
 
         let dashboard = load_dashboard(DashboardArgs {
             config: Some(config_path.clone()),
-            state: None,
-            project_id: Some(project.project_id),
+            project_id: project.project_id,
             query: AssetGroupQuery::default(),
             offset: 0,
             limit: 50,
