@@ -31,7 +31,7 @@ The Android source now has a native gateway boundary:
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
-- The Inbox screen uses a photo-first grid with persisted 2-column/3-column preference, compact tile labels, image previews when JPEG data is available, and a detail screen for full source/file metadata.
+- The Inbox screen uses a photo-first grid with persisted 2-column/3-column preference, compact tile labels, image previews from local paths, SAF document URIs, and MediaStore image URIs when JPEG data is available, plus a detail screen for full source/file metadata.
 
 The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation.
 

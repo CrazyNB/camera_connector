@@ -2328,9 +2328,10 @@ private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimensionPx: I
     return sampleSize
 }
 
-private fun isDecodablePreviewLocation(location: String?): Boolean {
+internal fun isDecodablePreviewLocation(location: String?): Boolean {
     val normalized = location.orEmpty().substringBefore('?').lowercase()
-    return normalized.endsWith(".jpg") ||
+    return isMediaStoreImageUri(normalized) ||
+        normalized.endsWith(".jpg") ||
         normalized.endsWith(".jpeg") ||
         normalized.endsWith(".png") ||
         normalized.endsWith(".webp") ||
@@ -2348,7 +2349,11 @@ private fun isDecodablePreviewLocation(location: String?): Boolean {
         normalized.endsWith(".dng")
 }
 
-private fun isRawPreviewLocation(location: String?): Boolean {
+private fun isMediaStoreImageUri(normalizedLocation: String): Boolean =
+    normalizedLocation.startsWith("content://media/") &&
+        normalizedLocation.contains("/images/")
+
+internal fun isRawPreviewLocation(location: String?): Boolean {
     val normalized = location.orEmpty().substringBefore('?').lowercase()
     return normalized.endsWith(".nef") ||
         normalized.endsWith(".nrw") ||
@@ -2362,7 +2367,7 @@ private fun isRawPreviewLocation(location: String?): Boolean {
         normalized.endsWith(".dng")
 }
 
-private fun isJpegPreviewLocation(location: String?): Boolean {
+internal fun isJpegPreviewLocation(location: String?): Boolean {
     val normalized = location.orEmpty().substringBefore('?').lowercase()
     return normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")
 }
