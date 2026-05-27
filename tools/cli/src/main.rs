@@ -550,23 +550,24 @@ async fn main() -> Result<()> {
             } else if from_transfers {
                 let path = path.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
                 if let Some(limit) = limit {
-                    let page =
-                        service.transfer_asset_group_page_with_query(path, query, offset, limit)?;
+                    let page = service.diagnostic_transfer_asset_group_page_with_query(
+                        path, query, offset, limit,
+                    )?;
                     if summary {
                         println!("{}", asset_group_page_summary_line(&page));
                     }
                     page.groups
                 } else {
                     if summary {
-                        let summary =
-                            service.transfer_asset_summary_with_query(&path, query.clone())?;
+                        let summary = service
+                            .diagnostic_transfer_asset_summary_with_query(&path, query.clone())?;
                         println!("{}", asset_group_summary_line(&summary));
                     }
-                    service.transfer_asset_groups_with_query(path, query)?
+                    service.diagnostic_transfer_asset_groups_with_query(path, query)?
                 }
             } else {
                 let path = path.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
-                service.inbox_groups(path, source)?
+                service.diagnostic_inbox_groups(path, source)?
             };
             print_asset_groups(groups);
         }
@@ -764,7 +765,7 @@ fn load_transfers(
         Some(project_id) => service.project_transfers(&project_id, query),
         None => {
             let state = state.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
-            service.transfers(state, query)
+            service.diagnostic_transfers(state, query)
         }
     }
 }

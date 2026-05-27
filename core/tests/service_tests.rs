@@ -128,7 +128,7 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
 
     let service = CameraConnectorService::new(None);
     let views = service
-        .transfers(&output_dir, TransferQuery::default())
+        .diagnostic_transfers(&output_dir, TransferQuery::default())
         .expect("transfers should load");
 
     assert_eq!(views.len(), 1);
@@ -196,7 +196,7 @@ fn service_summarizes_transfer_statuses() {
 
     let service = CameraConnectorService::new(None);
     let summary = service
-        .transfer_summary_with_query(
+        .diagnostic_transfer_summary_with_query(
             &state_dir,
             TransferQuery {
                 username: Some("z5".to_string()),
@@ -261,7 +261,7 @@ fn service_filters_failed_transfer_views_by_status() {
 
     let service = CameraConnectorService::new(None);
     let transfers = service
-        .transfers(
+        .diagnostic_transfers(
             &state_dir,
             TransferQuery {
                 status: Some(TransferStatus::Failed),
@@ -320,7 +320,7 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
     .expect("transfer record should append");
 
     let transfers = service
-        .transfers(
+        .diagnostic_transfers(
             &state_dir,
             TransferQuery {
                 username: Some("z5".to_string()),
@@ -329,7 +329,7 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
         )
         .expect("transfers should load");
     let groups = service
-        .transfer_asset_groups_with_query(
+        .diagnostic_transfer_asset_groups_with_query(
             &state_dir,
             AssetGroupQuery {
                 username: Some("z5".to_string()),
@@ -395,7 +395,7 @@ fn service_scans_inbox_groups() {
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .inbox_groups(&output_dir, ImportSource::FtpPush)
+        .diagnostic_inbox_groups(&output_dir, ImportSource::FtpPush)
         .expect("groups should load");
 
     assert_eq!(groups.len(), 1);
@@ -486,7 +486,7 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .transfer_asset_groups(&state_dir)
+        .diagnostic_transfer_asset_groups(&state_dir)
         .expect("transfer groups should load");
 
     assert_eq!(groups.len(), 1);
@@ -561,7 +561,7 @@ fn service_marks_duplicate_assets_from_same_account_and_original_path() {
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .transfer_asset_groups_with_query(
+        .diagnostic_transfer_asset_groups_with_query(
             &state_dir,
             AssetGroupQuery {
                 username: Some("canon".to_string()),
@@ -654,7 +654,7 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .transfer_asset_groups_with_query(
+        .diagnostic_transfer_asset_groups_with_query(
             &state_dir,
             AssetGroupQuery {
                 source_name: Some("Z5_2".to_string()),
@@ -747,7 +747,7 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
 
     let service = CameraConnectorService::new(None);
     let summary = service
-        .transfer_asset_summary_with_query(&state_dir, AssetGroupQuery::default())
+        .diagnostic_transfer_asset_summary_with_query(&state_dir, AssetGroupQuery::default())
         .expect("summary should load");
 
     assert_eq!(summary.group_count, 2);
@@ -815,7 +815,7 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .transfer_asset_groups(&state_dir)
+        .diagnostic_transfer_asset_groups(&state_dir)
         .expect("groups should load");
 
     assert_eq!(groups[0].group_key, "IMG_1001");
@@ -855,7 +855,7 @@ fn service_paginates_log_backed_asset_groups_after_filtering_and_sorting() {
 
     let service = CameraConnectorService::new(None);
     let page = service
-        .transfer_asset_group_page_with_query(
+        .diagnostic_transfer_asset_group_page_with_query(
             &state_dir,
             AssetGroupQuery {
                 source_name: Some("Z5_2".to_string()),

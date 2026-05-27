@@ -315,7 +315,7 @@ impl CameraConnectorService {
             .collect())
     }
 
-    pub fn inbox_groups(
+    pub fn diagnostic_inbox_groups(
         &self,
         output_dir: impl AsRef<Path>,
         source: ImportSource,
@@ -323,14 +323,14 @@ impl CameraConnectorService {
         scan_inbox_groups(output_dir, source)
     }
 
-    pub fn transfer_asset_groups(
+    pub fn diagnostic_transfer_asset_groups(
         &self,
         state_dir: impl AsRef<Path>,
     ) -> Result<Vec<ReceivedAssetGroup>> {
-        self.transfer_asset_groups_with_query(state_dir, AssetGroupQuery::default())
+        self.diagnostic_transfer_asset_groups_with_query(state_dir, AssetGroupQuery::default())
     }
 
-    pub fn transfer_asset_groups_with_query(
+    pub fn diagnostic_transfer_asset_groups_with_query(
         &self,
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
@@ -352,23 +352,23 @@ impl CameraConnectorService {
             .collect())
     }
 
-    pub fn transfer_asset_summary_with_query(
+    pub fn diagnostic_transfer_asset_summary_with_query(
         &self,
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
     ) -> Result<AssetGroupSummary> {
-        self.transfer_asset_groups_with_query(state_dir, query)
+        self.diagnostic_transfer_asset_groups_with_query(state_dir, query)
             .map(|groups| summarize_asset_groups(&groups))
     }
 
-    pub fn transfer_asset_group_page_with_query(
+    pub fn diagnostic_transfer_asset_group_page_with_query(
         &self,
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
         offset: usize,
         limit: usize,
     ) -> Result<AssetGroupPage> {
-        let groups = self.transfer_asset_groups_with_query(state_dir, query)?;
+        let groups = self.diagnostic_transfer_asset_groups_with_query(state_dir, query)?;
         let total_groups = groups.len();
         let summary = summarize_asset_groups(&groups);
         let page_groups = groups
@@ -412,7 +412,7 @@ impl CameraConnectorService {
         read_receiver_runtime_status(output_dir)
     }
 
-    pub fn transfers(
+    pub fn diagnostic_transfers(
         &self,
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
@@ -462,7 +462,7 @@ impl CameraConnectorService {
         Ok(views)
     }
 
-    pub fn transfer_summary_with_query(
+    pub fn diagnostic_transfer_summary_with_query(
         &self,
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
@@ -488,13 +488,13 @@ impl CameraConnectorService {
         Ok(summarize_transfers(&records))
     }
 
-    pub fn recent_failed_transfers(
+    pub fn diagnostic_recent_failed_transfers(
         &self,
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
         limit: usize,
     ) -> Result<Vec<TransferRecordView>> {
-        let mut views = self.transfers(
+        let mut views = self.diagnostic_transfers(
             output_dir,
             TransferQuery {
                 status: Some(TransferStatus::Failed),

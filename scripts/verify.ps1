@@ -17,6 +17,22 @@ if ($serviceSource -match "pub fn dashboard\(") {
     throw "CameraConnectorService dashboard views must be project-scoped; use project_dashboard instead"
 }
 
+$unscopedServiceReadNames = @(
+    "inbox_groups",
+    "transfer_asset_groups",
+    "transfer_asset_groups_with_query",
+    "transfer_asset_summary_with_query",
+    "transfer_asset_group_page_with_query",
+    "transfers",
+    "transfer_summary_with_query",
+    "recent_failed_transfers"
+)
+foreach ($methodName in $unscopedServiceReadNames) {
+    if ($serviceSource -match "pub fn $methodName\(") {
+        throw "Unscoped CameraConnectorService reads must be named diagnostic_*: $methodName"
+    }
+}
+
 function Invoke-CargoDev {
     param(
         [Parameter(Mandatory = $true)]
