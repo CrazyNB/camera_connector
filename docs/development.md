@@ -104,7 +104,7 @@ target\debug\camera-connector.exe inbox --config C:\Users\hxn\AppData\Roaming\Ca
 List the receiver folder directly for low-level diagnostics:
 
 ```powershell
-target\debug\camera-connector.exe inbox --path C:\Users\hxn\Pictures\CameraConnector --source ftp
+target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\Pictures\CameraConnector --source ftp
 ```
 
 List project transfer records from SQLite and filter by status, source name, original camera path, final filename, remote IP, or transfer id:
@@ -116,25 +116,25 @@ target\debug\camera-connector.exe transfers --config C:\Users\hxn\AppData\Roamin
 List transfer-log audit records for diagnostics:
 
 ```powershell
-target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --source-name "Z5_2" --original-path DCIM
+target\debug\camera-connector.exe transfers --diagnostic --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --source-name "Z5_2" --original-path DCIM
 ```
 
 Use `--status completed` or `--status failed` when triaging receiver health:
 
 ```powershell
-target\debug\camera-connector.exe transfers --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --status failed
+target\debug\camera-connector.exe transfers --diagnostic --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --username z5 --status failed
 ```
 
 For transfer-log diagnostics that cannot scan a real output folder, build groups from the audit log:
 
 ```powershell
-target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
+target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
 ```
 
 Use `--offset` and `--limit` with `--from-transfers` when paging diagnostic audit views:
 
 ```powershell
-target\debug\camera-connector.exe inbox --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
+target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
 ```
 
 Manage the active shooting project before importing or reviewing assets:

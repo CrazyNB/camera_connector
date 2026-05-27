@@ -330,10 +330,10 @@ $failedTransfer = [ordered]@{
 }
 ($failedTransfer | ConvertTo-Json -Compress) | Add-Content -LiteralPath $transferLog
 
-& (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushOutput --source ftp
+& (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushOutput --source ftp
 if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
 
-$logBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --summary
+$logBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushState --from-transfers --summary
 if ($LASTEXITCODE -ne 0) { throw "log-backed inbox smoke failed" }
 if (($logBackedInboxOutput | Where-Object { $_ -like "summary*groups=2*raw_groups=2*sources=Verify Camera:2*" }).Count -lt 1) {
     throw "log-backed inbox did not expose summary counts"
@@ -352,7 +352,7 @@ if (($logBackedInboxOutput | Where-Object { $_ -like "*IMG_1234 (1)*duplicate=2/
 }
 Write-Output $logBackedInboxOutput
 
-$pagedLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --path $pushState --from-transfers --summary --offset 1 --limit 1
+$pagedLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushState --from-transfers --summary --offset 1 --limit 1
 if ($LASTEXITCODE -ne 0) { throw "paged log-backed inbox smoke failed" }
 if (($pagedLogBackedInboxOutput | Where-Object { $_ -like "summary*offset=1*limit=1*total_groups=2*has_more=False*" }).Count -lt 1) {
     throw "paged log-backed inbox did not expose paging state"
@@ -362,7 +362,7 @@ if (($pagedLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_
 }
 Write-Output $pagedLogBackedInboxOutput
 
-$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --path $pushState --from-transfers --username "verify" --source-name "Verify Camera" --original-path IMG_1234 --format cr3
+$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --diagnostic --path $pushState --from-transfers --username "verify" --source-name "Verify Camera" --original-path IMG_1234 --format cr3
 if ($LASTEXITCODE -ne 0) { throw "filtered log-backed inbox smoke failed" }
 if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
     throw "filtered log-backed inbox did not include expected group"
@@ -443,14 +443,14 @@ if ($LASTEXITCODE -ne 0) { throw "devices smoke failed" }
 & (Join-Path $root "target\debug\camera-connector.exe") devices --config $configPath --state $ftpSmokeState --username "verify"
 if ($LASTEXITCODE -ne 0) { throw "devices username filter smoke failed" }
 
-$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --username "verify" --source-name "Verify Camera" --original-path IMG_1234
+$transfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --diagnostic --state $pushState --username "verify" --source-name "Verify Camera" --original-path IMG_1234
 if ($LASTEXITCODE -ne 0) { throw "transfers smoke failed" }
 if (($transfersOutput | Where-Object { $_ -like "*username=verify*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
     throw "transfers display path smoke failed"
 }
 Write-Output $transfersOutput
 
-$failedTransfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --state $pushState --username "verify" --status failed
+$failedTransfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --diagnostic --state $pushState --username "verify" --status failed
 if ($LASTEXITCODE -ne 0) { throw "failed transfers status smoke failed" }
 if (($failedTransfersOutput | Where-Object { $_ -like "*ftp:verify-failed*Failed*error=simulated failure*" }).Count -ne 1) {
     throw "failed transfers status filter did not return expected failure"

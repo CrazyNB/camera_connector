@@ -154,6 +154,12 @@ enum Command {
         path: Option<PathBuf>,
         #[arg(long, alias = "project")]
         project_id: Option<String>,
+        #[arg(
+            long,
+            required_unless_present = "project_id",
+            conflicts_with = "project_id"
+        )]
+        diagnostic: bool,
         #[arg(long, default_value = "ftp")]
         source: String,
         #[arg(long)]
@@ -182,6 +188,12 @@ enum Command {
         state: Option<PathBuf>,
         #[arg(long, alias = "project")]
         project_id: Option<String>,
+        #[arg(
+            long,
+            required_unless_present = "project_id",
+            conflicts_with = "project_id"
+        )]
+        diagnostic: bool,
         #[arg(long)]
         status: Option<String>,
         #[arg(long)]
@@ -502,6 +514,7 @@ async fn main() -> Result<()> {
             config,
             path,
             project_id,
+            diagnostic: _,
             source,
             from_transfers,
             summary,
@@ -561,6 +574,7 @@ async fn main() -> Result<()> {
             config,
             state,
             project_id,
+            diagnostic: _,
             status,
             transfer_id,
             original_path,
@@ -1459,6 +1473,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "camera-connector",
             "inbox",
+            "--diagnostic",
             "--config",
             "C:\\CameraConnector\\config.json",
             "--path",
@@ -1494,6 +1509,43 @@ mod tests {
                 format: Some(_),
                 offset: 1,
                 limit: Some(20),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn diagnostic_inbox_requires_explicit_flag() {
+        let result = Cli::try_parse_from([
+            "camera-connector",
+            "inbox",
+            "--path",
+            "C:\\CameraConnector\\Inbox",
+            "--source",
+            "ftp",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parses_diagnostic_inbox_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "inbox",
+            "--diagnostic",
+            "--path",
+            "C:\\CameraConnector\\Inbox",
+            "--source",
+            "ftp",
+        ])
+        .expect("diagnostic inbox command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Inbox {
+                project_id: None,
+                path: Some(_),
                 ..
             })
         ));
@@ -1694,6 +1746,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "camera-connector",
             "transfers",
+            "--diagnostic",
             "--state",
             "C:\\CameraConnector\\state",
             "--status",
@@ -1708,6 +1761,20 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn diagnostic_transfers_require_explicit_flag() {
+        let result = Cli::try_parse_from([
+            "camera-connector",
+            "transfers",
+            "--state",
+            "C:\\CameraConnector\\state",
+            "--status",
+            "failed",
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
