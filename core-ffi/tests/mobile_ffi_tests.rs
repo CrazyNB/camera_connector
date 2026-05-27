@@ -7,10 +7,13 @@ use camera_connector_core::{
 };
 use camera_connector_ffi::{
     camera_connector_mobile_core_active_project_json,
-    camera_connector_mobile_core_archive_project_json, camera_connector_mobile_core_create,
+    camera_connector_mobile_core_archive_project_json,
+    camera_connector_mobile_core_claim_next_publish_item_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
     camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
+    camera_connector_mobile_core_mark_publish_completed_json,
+    camera_connector_mobile_core_mark_publish_failed_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_group_assets_json,
     camera_connector_mobile_core_remove_device_account_json,
@@ -294,6 +297,69 @@ fn ffi_returns_project_group_assets_json_envelope() {
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0]["final_filename"], "IMG_6001.JPG");
     assert_eq!(assets[0]["group_id"], group_id.to_str().unwrap());
+}
+
+#[test]
+fn ffi_claims_and_updates_publish_queue_json_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Publisher").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:ffi-publish",
+            "staging/ffi-publish.tmp",
+            "IMG_7001.JPG",
+            42,
+        )
+        .unwrap();
+
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let queue_id = CString::new(item.queue_id.clone()).unwrap();
+    let error = CString::new("permission revoked").unwrap();
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+
+    let claimed =
+        take_ffi_string(unsafe { camera_connector_mobile_core_claim_next_publish_item_json(core) });
+    let claimed: Value = serde_json::from_str(&claimed).unwrap();
+    assert_eq!(claimed["ok"], true);
+    assert_eq!(claimed["value"]["queue_id"], item.queue_id);
+    assert_eq!(claimed["value"]["state"], "Publishing");
+
+    let completed = take_ffi_string(unsafe {
+        camera_connector_mobile_core_mark_publish_completed_json(core, queue_id.as_ptr())
+    });
+    let completed: Value = serde_json::from_str(&completed).unwrap();
+    assert_eq!(completed["ok"], true);
+    assert_eq!(completed["value"]["completed"], true);
+
+    let failed_item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:ffi-failed",
+            "staging/ffi-failed.tmp",
+            "IMG_7002.JPG",
+            43,
+        )
+        .unwrap();
+    let failed_queue_id = CString::new(failed_item.queue_id.clone()).unwrap();
+    let _ =
+        take_ffi_string(unsafe { camera_connector_mobile_core_claim_next_publish_item_json(core) });
+    let failed = take_ffi_string(unsafe {
+        camera_connector_mobile_core_mark_publish_failed_json(
+            core,
+            failed_queue_id.as_ptr(),
+            error.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let failed: Value = serde_json::from_str(&failed).unwrap();
+    assert_eq!(failed["ok"], true);
+    assert_eq!(failed["value"]["failed"], true);
 }
 
 #[test]

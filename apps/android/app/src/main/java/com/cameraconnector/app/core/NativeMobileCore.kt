@@ -13,6 +13,21 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
         call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
             ?: JSONArray()
 
+    fun claimNextPublishItem(): JSONObject? {
+        val value = call { claimNextPublishItemJson(handle) }
+        return if (value.has("value") && value.isNull("value")) {
+            null
+        } else {
+            value
+        }
+    }
+
+    fun markPublishCompleted(queueId: String): JSONObject =
+        call { markPublishCompletedJson(handle, queueId) }
+
+    fun markPublishFailed(queueId: String, error: String): JSONObject =
+        call { markPublishFailedJson(handle, queueId, error) }
+
     fun createProject(name: String): JSONObject =
         call { createProjectJson(handle, name) }
 
@@ -93,6 +108,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable {
     private external fun destroy(handle: Long)
     private external fun projectDashboardJson(handle: Long, projectId: String, offset: Int, limit: Int): String
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
+    private external fun claimNextPublishItemJson(handle: Long): String
+    private external fun markPublishCompletedJson(handle: Long, queueId: String): String
+    private external fun markPublishFailedJson(handle: Long, queueId: String, error: String): String
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String

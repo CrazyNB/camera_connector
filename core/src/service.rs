@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
     scan_inbox_groups, CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat,
-    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore,
-    StoredAsset, TransferRecord, TransferStatus,
+    PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig,
+    Result, SqliteStore, StoredAsset, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -256,6 +256,18 @@ impl CameraConnectorService {
 
     pub fn record_project_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
         self.storage_store()?.record_transfer(project_id, record)
+    }
+
+    pub fn claim_next_publish_item(&self) -> Result<Option<PublishQueueItem>> {
+        self.storage_store()?.claim_next_publish_item()
+    }
+
+    pub fn mark_publish_completed(&self, queue_id: &str) -> Result<()> {
+        self.storage_store()?.mark_publish_completed(queue_id)
+    }
+
+    pub fn mark_publish_failed(&self, queue_id: &str, error: &str) -> Result<()> {
+        self.storage_store()?.mark_publish_failed(queue_id, error)
     }
 
     pub fn set_account(

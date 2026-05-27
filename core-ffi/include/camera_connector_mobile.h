@@ -71,6 +71,21 @@ char *camera_connector_mobile_core_project_group_assets_json(
     const char *group_id
 );
 
+char *camera_connector_mobile_core_claim_next_publish_item_json(
+    const CameraConnectorMobileCore *core
+);
+
+char *camera_connector_mobile_core_mark_publish_completed_json(
+    const CameraConnectorMobileCore *core,
+    const char *queue_id
+);
+
+char *camera_connector_mobile_core_mark_publish_failed_json(
+    const CameraConnectorMobileCore *core,
+    const char *queue_id,
+    const char *error
+);
+
 char *camera_connector_mobile_core_save_receiver_settings_json(
     const CameraConnectorMobileCore *core,
     const char *patch_json

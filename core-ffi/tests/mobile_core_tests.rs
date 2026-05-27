@@ -190,6 +190,71 @@ fn mobile_core_returns_project_dashboard_json() {
 }
 
 #[test]
+fn mobile_core_claims_and_completes_publish_queue_items_as_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile Publisher").unwrap();
+    let store = service.storage_store().unwrap();
+    let item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:mobile-publish",
+            "staging/mobile-publish.tmp",
+            "IMG_6001.JPG",
+            42,
+        )
+        .unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let claimed_json = core.claim_next_publish_item_json().unwrap();
+    let claimed: Value = serde_json::from_str(&claimed_json).unwrap();
+    assert_eq!(claimed["queue_id"], item.queue_id);
+    assert_eq!(claimed["state"], "Publishing");
+    assert_eq!(claimed["last_error"], Value::Null);
+    let empty_after_claim: Value =
+        serde_json::from_str(&core.claim_next_publish_item_json().unwrap()).unwrap();
+    assert!(empty_after_claim.is_null());
+
+    let completed_json = core
+        .mark_publish_completed_json(item.queue_id.clone())
+        .unwrap();
+    let completed: Value = serde_json::from_str(&completed_json).unwrap();
+    assert_eq!(completed["queue_id"], item.queue_id);
+    assert_eq!(completed["completed"], true);
+    let failed_item = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:mobile-failed",
+            "staging/mobile-failed.tmp",
+            "IMG_6002.JPG",
+            43,
+        )
+        .unwrap();
+    let claimed_failed: Value =
+        serde_json::from_str(&core.claim_next_publish_item_json().unwrap()).unwrap();
+    assert_eq!(claimed_failed["queue_id"], failed_item.queue_id);
+    let failed_json = core
+        .mark_publish_failed_json(
+            failed_item.queue_id.clone(),
+            "permission revoked".to_string(),
+        )
+        .unwrap();
+    let failed: Value = serde_json::from_str(&failed_json).unwrap();
+    assert_eq!(failed["queue_id"], failed_item.queue_id);
+    assert_eq!(failed["failed"], true);
+    let dashboard: Value = serde_json::from_str(
+        &core
+            .project_dashboard_json(project.project_id.clone(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(dashboard["publish_queue"]["completed_count"], 1);
+    assert_eq!(dashboard["publish_queue"]["failed_count"], 1);
+    assert_eq!(dashboard["publish_queue"]["pending_count"], 1);
+}
+
+#[test]
 fn mobile_core_returns_project_group_assets_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

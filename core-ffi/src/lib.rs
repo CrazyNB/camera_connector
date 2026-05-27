@@ -152,6 +152,31 @@ impl MobileCore {
         Ok(serde_json::to_string(&assets)?)
     }
 
+    pub fn claim_next_publish_item_json(&self) -> MobileCoreResult<String> {
+        let item = self.service.claim_next_publish_item()?;
+        Ok(serde_json::to_string(&item)?)
+    }
+
+    pub fn mark_publish_completed_json(&self, queue_id: String) -> MobileCoreResult<String> {
+        self.service.mark_publish_completed(&queue_id)?;
+        Ok(serde_json::to_string(&json!({
+            "queue_id": queue_id,
+            "completed": true,
+        }))?)
+    }
+
+    pub fn mark_publish_failed_json(
+        &self,
+        queue_id: String,
+        error: String,
+    ) -> MobileCoreResult<String> {
+        self.service.mark_publish_failed(&queue_id, &error)?;
+        Ok(serde_json::to_string(&json!({
+            "queue_id": queue_id,
+            "failed": true,
+        }))?)
+    }
+
     pub fn save_receiver_settings_json(
         &self,
         patch: MobileReceiverSettingsPatch,
@@ -428,6 +453,53 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_group_assets_json(
         let group_id = required_c_string(group_id, "group_id")?;
         let assets = core_ref(core)?.project_group_assets_json(project_id, group_id)?;
         parse_json_value(&assets)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_claim_next_publish_item_json(
+    core: *const MobileCore,
+) -> *mut c_char {
+    ffi_response(|| {
+        let item = core_ref(core)?.claim_next_publish_item_json()?;
+        parse_json_value(&item)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `queue_id` must be a valid, null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_mark_publish_completed_json(
+    core: *const MobileCore,
+    queue_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let queue_id = required_c_string(queue_id, "queue_id")?;
+        let result = core_ref(core)?.mark_publish_completed_json(queue_id)?;
+        parse_json_value(&result)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `queue_id` and `error` must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_mark_publish_failed_json(
+    core: *const MobileCore,
+    queue_id: *const c_char,
+    error: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let queue_id = required_c_string(queue_id, "queue_id")?;
+        let error = required_c_string(error, "error")?;
+        let result = core_ref(core)?.mark_publish_failed_json(queue_id, error)?;
+        parse_json_value(&result)
     })
 }
 
@@ -756,6 +828,58 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
             let assets = mobile_core_from_handle(handle)?
                 .project_group_assets_json(project_id?, group_id?)?;
             parse_json_value(&assets)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_claimNextPublishItemJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+) -> jstring {
+    env.with_env(|env| {
+        java_response(env, || {
+            let item = mobile_core_from_handle(handle)?.claim_next_publish_item_json()?;
+            parse_json_value(&item)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_markPublishCompletedJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    queue_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let queue_id = required_java_string(env, queue_id, "queue_id");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?.mark_publish_completed_json(queue_id?)?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_markPublishFailedJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    queue_id: JString,
+    error: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let queue_id = required_java_string(env, queue_id, "queue_id");
+        let error = required_java_string(env, error, "error");
+        java_response(env, || {
+            let result =
+                mobile_core_from_handle(handle)?.mark_publish_failed_json(queue_id?, error?)?;
+            parse_json_value(&result)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()
