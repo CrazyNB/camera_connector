@@ -366,6 +366,10 @@ impl russh_sftp::server::Handler for SftpSession {
                 },
             )
             .map_err(|_| StatusCode::Failure)?;
+        if self.config.defer_publish {
+            return Ok(ok_status(id));
+        }
+
         let progress = match LocalFolderObjectStore::new(&self.config.output_dir).publish(staged) {
             Ok(progress) => {
                 self.config

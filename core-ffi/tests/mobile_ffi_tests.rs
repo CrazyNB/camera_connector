@@ -105,7 +105,8 @@ fn ffi_saves_receiver_settings_from_json_patch() {
             "output_dir":{},
             "state_dir":{},
             "advertised_host":"192.168.137.1",
-            "source_name":"Studio Camera"
+            "source_name":"Studio Camera",
+            "defer_publish":true
         }}"#,
         serde_json::to_string(&output_dir.to_string_lossy()).unwrap(),
         serde_json::to_string(&state_dir.to_string_lossy()).unwrap(),
@@ -122,6 +123,7 @@ fn ffi_saves_receiver_settings_from_json_patch() {
     assert_eq!(value["ok"], true);
     assert_eq!(value["value"]["protocol"], "Sftp");
     assert_eq!(value["value"]["source_name"], "Studio Camera");
+    assert_eq!(value["value"]["defer_publish"], true);
 }
 
 #[test]

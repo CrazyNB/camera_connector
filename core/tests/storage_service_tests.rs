@@ -202,6 +202,7 @@ fn service_persists_receiver_accounts_in_sqlite_store() {
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .expect("receiver config should build");
 
@@ -257,6 +258,7 @@ fn receiver_config_keeps_accounts_in_configured_state_when_runtime_state_is_over
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .expect("receiver config should build");
 

@@ -25,6 +25,7 @@ async fn runtime_starts_and_stops_ftp_receiver() {
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .await
         .expect("receiver should start");
@@ -93,6 +94,7 @@ async fn runtime_status_reports_account_authentication_mode() {
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .await
         .expect("receiver should start");
@@ -128,6 +130,7 @@ async fn runtime_records_failed_status_when_port_is_unavailable() {
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .await;
 

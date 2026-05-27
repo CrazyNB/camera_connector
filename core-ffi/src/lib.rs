@@ -55,6 +55,7 @@ pub struct MobileReceiverSettingsPatch {
     pub state_dir: Option<String>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
+    pub defer_publish: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,6 +241,7 @@ impl MobileCore {
                     password: None,
                     advertised_host: None,
                     source_name: None,
+                    defer_publish: None,
                 }))?;
         Ok(serde_json::to_string(&status)?)
     }
@@ -263,6 +265,7 @@ impl TryFrom<MobileReceiverSettingsPatch> for ReceiverSettingsUpdate {
             state_dir: patch.state_dir.map(PathBuf::from),
             advertised_host: patch.advertised_host,
             source_name: patch.source_name,
+            defer_publish: patch.defer_publish,
         })
     }
 }

@@ -130,6 +130,8 @@ pub struct ReceiverSettingsConfig {
     pub advertised_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<String>,
+    #[serde(default)]
+    pub defer_publish: bool,
 }
 
 impl Default for ReceiverSettingsConfig {
@@ -143,6 +145,7 @@ impl Default for ReceiverSettingsConfig {
             state_dir: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: false,
         }
     }
 }
@@ -384,6 +387,7 @@ pub struct PushReceiverConfig {
     pub source_name: Option<String>,
     pub accounts: Vec<ReceiverAccount>,
     pub active_project_id: Option<String>,
+    pub defer_publish: bool,
 }
 
 impl PushReceiverConfig {
@@ -406,6 +410,7 @@ impl PushReceiverConfig {
             source_name: None,
             accounts: Vec::new(),
             active_project_id: None,
+            defer_publish: false,
         }
     }
 
@@ -441,6 +446,11 @@ impl PushReceiverConfig {
 
     pub fn with_active_project(mut self, project_id: impl Into<String>) -> Self {
         self.active_project_id = Some(project_id.into());
+        self
+    }
+
+    pub fn with_deferred_publish(mut self) -> Self {
+        self.defer_publish = true;
         self
     }
 

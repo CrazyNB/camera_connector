@@ -431,6 +431,10 @@ async fn handle_stor(
             started_at_ms,
         },
     )?;
+    if config.defer_publish {
+        return reply(reader, "226 Transfer complete").await;
+    }
+
     let progress = match LocalFolderObjectStore::new(&config.output_dir).publish(staged) {
         Ok(progress) => {
             config.mark_publish_completed(&queue_item.queue_id)?;

@@ -465,6 +465,7 @@ async fn main() -> Result<()> {
                 password,
                 advertised_host,
                 source_name,
+                defer_publish: None,
             };
             let receiver_config = service.receiver_config(request.clone())?;
             let status = runtime.start_receiver(request).await?;
@@ -499,6 +500,7 @@ async fn main() -> Result<()> {
                 password,
                 advertised_host,
                 source_name,
+                defer_publish: None,
             };
             let receiver_config = service.receiver_config(request.clone())?;
             let status = runtime.start_receiver(request).await?;
@@ -1077,6 +1079,7 @@ fn build_config(args: ConfigArgs) -> Result<PushReceiverConfig> {
         password: args.password,
         advertised_host: args.advertised_host,
         source_name: args.source_name,
+        defer_publish: None,
     })
 }
 
@@ -1279,6 +1282,7 @@ fn handle_receiver_settings_command(
         state_dir: args.state,
         advertised_host: args.advertised_host,
         source_name: args.source_name,
+        defer_publish: None,
     })?;
     println!("config: {}", path.display());
     println!("protocol: {}", settings.protocol);

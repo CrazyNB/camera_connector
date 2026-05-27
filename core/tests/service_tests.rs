@@ -37,6 +37,7 @@ fn service_builds_receiver_config_from_saved_accounts() {
             password: None,
             advertised_host: None,
             source_name: None,
+            defer_publish: None,
         })
         .expect("receiver config should build");
 
@@ -72,6 +73,7 @@ fn service_updates_receiver_settings() {
             state_dir: Some(state_dir.clone()),
             advertised_host: Some("192.168.137.1".to_string()),
             source_name: Some("Studio".to_string()),
+            defer_publish: Some(true),
         })
         .expect("receiver settings should save");
 
@@ -80,6 +82,7 @@ fn service_updates_receiver_settings() {
     assert_eq!(settings.bind_host, "127.0.0.1");
     assert_eq!(settings.ftp_port, 2122);
     assert_eq!(settings.sftp_port, 2223);
+    assert!(settings.defer_publish);
 
     let loaded = CameraConnectorConfig::load(Some(&config_path)).expect("config should load");
     assert_eq!(
@@ -95,6 +98,7 @@ fn service_updates_receiver_settings() {
         Some("192.168.137.1")
     );
     assert_eq!(loaded.receiver.source_name.as_deref(), Some("Studio"));
+    assert!(loaded.receiver.defer_publish);
 
     let _ = std::fs::remove_file(config_path);
 }

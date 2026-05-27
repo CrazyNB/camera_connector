@@ -23,6 +23,7 @@ fn mobile_core_saves_receiver_settings_as_json() {
             state_dir: Some(state_dir.to_string_lossy().into_owned()),
             advertised_host: Some("192.168.137.1".to_string()),
             source_name: Some("Studio Camera".to_string()),
+            defer_publish: Some(true),
         })
         .unwrap();
 
@@ -32,6 +33,7 @@ fn mobile_core_saves_receiver_settings_as_json() {
     assert_eq!(value["ftp_port"], 2121);
     assert_eq!(value["sftp_port"], 2222);
     assert_eq!(value["source_name"], "Studio Camera");
+    assert_eq!(value["defer_publish"], true);
 }
 
 #[test]

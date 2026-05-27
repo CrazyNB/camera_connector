@@ -73,10 +73,12 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     }
 
     fun saveAndroidReceiverPaths(outputDir: String, stateDir: String) {
-        val patch = JSONObject()
-            .put("output_dir", outputDir)
-            .put("state_dir", stateDir)
-        call { saveReceiverSettingsJson(handle, patch.toString()) }
+        call {
+            saveReceiverSettingsJson(
+                handle,
+                androidReceiverPathsPatch(outputDir, stateDir).toString(),
+            )
+        }
     }
 
     fun saveDeviceAccount(account: DeviceAccount, password: String?) {
@@ -160,6 +162,12 @@ internal fun receiverSettingsPatch(settings: ReceiverSettings): JSONObject =
     receiverSettingsPatchFields(settings).entries.fold(JSONObject()) { patch, (key, value) ->
         patch.put(key, value)
     }
+
+internal fun androidReceiverPathsPatch(outputDir: String, stateDir: String): JSONObject =
+    JSONObject()
+        .put("output_dir", outputDir)
+        .put("state_dir", stateDir)
+        .put("defer_publish", true)
 
 internal fun receiverSettingsPatchFields(settings: ReceiverSettings): Map<String, Any> =
     mapOf(

@@ -28,6 +28,7 @@ pub struct ReceiverConfigRequest {
     pub password: Option<String>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
+    pub defer_publish: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -40,6 +41,7 @@ pub struct ReceiverSettingsUpdate {
     pub state_dir: Option<PathBuf>,
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
+    pub defer_publish: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -196,6 +198,9 @@ impl CameraConnectorService {
             .advertised_host
             .or(receiver_settings.advertised_host);
         config.source_name = request.source_name.or(receiver_settings.source_name);
+        config.defer_publish = request
+            .defer_publish
+            .unwrap_or(receiver_settings.defer_publish);
         let account_state_dir = receiver_settings
             .state_dir
             .clone()
@@ -329,6 +334,9 @@ impl CameraConnectorService {
         }
         if let Some(source_name) = update.source_name {
             config.receiver.source_name = Some(source_name);
+        }
+        if let Some(defer_publish) = update.defer_publish {
+            config.receiver.defer_publish = defer_publish;
         }
         let settings = config.receiver.clone();
         let path = self.save_config(&config)?;

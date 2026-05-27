@@ -2,8 +2,8 @@ use std::fs;
 use std::net::SocketAddr;
 
 use camera_connector_core::{
-    read_connected_devices, read_transfer_log, FtpPushServer, PushProtocol, PushReceiverConfig,
-    ReceiverAccount, SqliteStore, TransferStatus,
+    read_connected_devices, read_transfer_log, AssetGroupQuery, FtpPushServer, PushProtocol,
+    PushReceiverConfig, ReceiverAccount, SqliteStore, TransferStatus,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::time::{sleep, Duration};
@@ -174,6 +174,84 @@ async fn ftp_server_indexes_uploads_under_active_project() {
     assert_eq!(page.total_groups, 1);
     assert_eq!(page.summary.asset_count, 1);
     assert_eq!(page.groups[0].group_key, "IMG_5001");
+}
+
+#[tokio::test]
+async fn ftp_server_defers_final_publish_when_configured() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let state_dir = tempfile::tempdir().expect("state dir should be created");
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path())
+        .with_deferred_publish();
+    let server = FtpPushServer::bind(config)
+        .await
+        .expect("server should bind");
+    let control_addr = server.local_addr();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+    let server_task = tokio::spawn(async move {
+        server
+            .run_until(async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+    });
+
+    let mut control = BufReader::new(
+        tokio::net::TcpStream::connect(control_addr)
+            .await
+            .expect("control connection should open"),
+    );
+
+    assert_reply(&mut control, "220").await;
+    command(&mut control, "PASV").await;
+    let passive_reply = read_reply(&mut control).await;
+    let data_addr = passive_addr_from_reply(&passive_reply);
+    let mut data = tokio::net::TcpStream::connect(data_addr)
+        .await
+        .expect("data connection should open");
+    command(&mut control, "CWD DCIM").await;
+    assert_reply(&mut control, "250").await;
+    command(&mut control, "STOR IMG_9101.JPG").await;
+    assert_reply(&mut control, "150").await;
+    data.write_all(&[9, 1, 0, 1])
+        .await
+        .expect("data should write");
+    data.shutdown().await.expect("data should close");
+    assert_reply(&mut control, "226").await;
+    command(&mut control, "QUIT").await;
+    assert_reply(&mut control, "221").await;
+
+    let _ = shutdown_tx.send(());
+    server_task
+        .await
+        .expect("server task should join")
+        .expect("server should stop cleanly");
+
+    assert!(!temp_dir.path().join("IMG_9101.JPG").exists());
+    let records = read_transfer_log(state_dir.path()).expect("transfer log should read");
+    assert!(records.is_empty());
+
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let summary = store
+        .publish_queue_summary("project-inbox")
+        .expect("queue summary should read");
+    assert_eq!(summary.staged_count, 1);
+    assert_eq!(summary.pending_count, 1);
+    assert_eq!(summary.completed_count, 0);
+    let page = store
+        .asset_group_page("project-inbox", AssetGroupQuery::default(), 0, 25)
+        .expect("asset groups should query");
+    assert_eq!(page.total_groups, 0);
+
+    let item = store
+        .claim_next_publish_item()
+        .expect("publish item should claim")
+        .expect("deferred publish should leave a queue item");
+    assert_eq!(item.final_filename, "IMG_9101.JPG");
+    assert_eq!(item.protocol.as_deref(), Some("ftp"));
+    assert_eq!(item.original_path.as_deref(), Some("DCIM/IMG_9101.JPG"));
+    assert!(std::path::Path::new(&item.staged_path).exists());
 }
 
 #[tokio::test]
