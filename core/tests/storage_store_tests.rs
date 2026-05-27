@@ -601,6 +601,62 @@ fn sqlite_store_tracks_publish_queue_retry_state() {
     assert_eq!(failed[0].state.as_str(), "failed");
 }
 
+#[test]
+fn sqlite_store_claims_pending_publish_items_for_exclusive_work() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Queue Claim")
+        .expect("project should create");
+
+    let staged = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:staged",
+            "staged/ftp-staged.tmp",
+            "IMG_9001.NEF",
+            123,
+        )
+        .expect("staged publish item should enqueue");
+    let failed = store
+        .enqueue_publish(
+            &project.project_id,
+            "ftp:failed",
+            "staged/ftp-failed.tmp",
+            "IMG_9002.NEF",
+            456,
+        )
+        .expect("failed publish item should enqueue");
+    store
+        .mark_publish_failed(&failed.queue_id, "permission revoked")
+        .expect("publish failure should save");
+
+    let claimed = store
+        .claim_next_publish_item()
+        .expect("claim should run")
+        .expect("first item should be claimed");
+    let pending = store
+        .pending_publish_items()
+        .expect("pending publish items should load");
+    let retried = store
+        .claim_next_publish_item()
+        .expect("retry claim should run")
+        .expect("failed item should be claimed");
+    let empty = store
+        .claim_next_publish_item()
+        .expect("empty claim should run");
+
+    assert_eq!(claimed.queue_id, staged.queue_id);
+    assert_eq!(claimed.state.as_str(), "publishing");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].queue_id, failed.queue_id);
+    assert_eq!(retried.queue_id, failed.queue_id);
+    assert_eq!(retried.state.as_str(), "publishing");
+    assert_eq!(retried.attempt_count, 1);
+    assert_eq!(retried.last_error, None);
+    assert!(empty.is_none());
+}
+
 fn completed_transfer(
     transfer_id: &str,
     original_path: &str,

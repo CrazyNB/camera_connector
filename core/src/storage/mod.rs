@@ -838,6 +838,47 @@ impl SqliteStore {
         })
     }
 
+    pub fn claim_next_publish_item(&self) -> Result<Option<PublishQueueItem>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let queue_id = transaction
+                .query_row(
+                    "SELECT queue_id
+                     FROM publish_queue
+                     WHERE state IN ('staged', 'failed')
+                     ORDER BY created_at_ms ASC, queue_id ASC
+                     LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            let Some(queue_id) = queue_id else {
+                transaction.commit()?;
+                return Ok(None);
+            };
+            transaction.execute(
+                "UPDATE publish_queue
+                 SET state = ?1, last_error = NULL, updated_at_ms = ?2
+                 WHERE queue_id = ?3 AND state IN ('staged', 'failed')",
+                params![
+                    PublishState::Publishing.as_str(),
+                    current_time_ms(),
+                    queue_id
+                ],
+            )?;
+            let item = transaction.query_row(
+                "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
+                        state, attempt_count, last_error, created_at_ms, updated_at_ms
+                 FROM publish_queue
+                 WHERE queue_id = ?1",
+                params![queue_id],
+                publish_item_from_row,
+            )?;
+            transaction.commit()?;
+            Ok(Some(item))
+        })
+    }
+
     pub fn publish_queue_summary(&self, project_id: &str) -> Result<PublishQueueSummary> {
         self.with_connection(|connection| {
             ensure_project_exists(connection, project_id)?;
