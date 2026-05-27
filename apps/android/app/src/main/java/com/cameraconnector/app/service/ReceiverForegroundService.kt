@@ -50,6 +50,22 @@ class ReceiverForegroundService : Service() {
                 START_NOT_STICKY
             }
 
+            ACTION_RETRY_PUBLISH -> {
+                startForeground(NOTIFICATION_ID, notification("正在重试发布"))
+                val configPath = intent.getStringExtra(EXTRA_CONFIG_PATH)
+                Log.i(LOG_TAG, "publish retry requested configPath=$configPath")
+                serviceScope.launch {
+                    drainPublishQueueOnce(configPath)
+                    if (nativeCore == null) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf(startId)
+                    } else {
+                        startForeground(NOTIFICATION_ID, notification("接收服务运行中"))
+                    }
+                }
+                START_NOT_STICKY
+            }
+
             else -> {
                 startForeground(NOTIFICATION_ID, notification("正在启动接收服务"))
                 val configPath = intent?.getStringExtra(EXTRA_CONFIG_PATH)
@@ -110,17 +126,7 @@ class ReceiverForegroundService : Service() {
             return
         }
 
-        val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
-        val storageGateway = AndroidStorageGateway(this)
-        val publishTarget = ResolvingPublishTarget {
-            storageGateway.selectedInboxUri()
-                ?.let { uri -> SafPublishTarget(AndroidDocumentTreeStore(this, uri)) }
-                ?: FilePublishTarget(outputDir)
-        }
-        val worker = AndroidPublishWorker(
-            core = core,
-            publishTarget = publishTarget,
-        )
+        val worker = createPublishWorker(core)
         publishWorkerJob = serviceScope.launch {
             while (isActive) {
                 runCatching {
@@ -138,6 +144,39 @@ class ReceiverForegroundService : Service() {
                 delay(PUBLISH_QUEUE_POLL_INTERVAL_MS)
             }
         }
+    }
+
+    private fun drainPublishQueueOnce(configPath: String?) {
+        val existingCore = nativeCore
+        val ownsCore = existingCore == null
+        val core = existingCore ?: NativeMobileCore(configPath)
+        runCatching {
+            createPublishWorker(core).drainOnce()
+        }.onSuccess { result ->
+            Log.i(
+                LOG_TAG,
+                "publish retry drained completed=${result.completedCount} failed=${result.failedCount}",
+            )
+        }.onFailure { error ->
+            Log.e(LOG_TAG, "publish retry drain failed", error)
+        }
+        if (ownsCore) {
+            core.close()
+        }
+    }
+
+    private fun createPublishWorker(core: NativeMobileCore): AndroidPublishWorker {
+        val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
+        val storageGateway = AndroidStorageGateway(this)
+        val publishTarget = ResolvingPublishTarget {
+            storageGateway.selectedInboxUri()
+                ?.let { uri -> SafPublishTarget(AndroidDocumentTreeStore(this, uri)) }
+                ?: FilePublishTarget(outputDir)
+        }
+        return AndroidPublishWorker(
+            core = core,
+            publishTarget = publishTarget,
+        )
     }
 
     private fun stopPublishWorker() {
@@ -192,6 +231,7 @@ class ReceiverForegroundService : Service() {
     companion object {
         const val ACTION_START = "com.cameraconnector.app.receiver.START"
         const val ACTION_STOP = "com.cameraconnector.app.receiver.STOP"
+        const val ACTION_RETRY_PUBLISH = "com.cameraconnector.app.receiver.RETRY_PUBLISH"
 
         private const val LOG_TAG = "CameraConnectorReceiver"
         private const val CHANNEL_ID = "camera_connector_receiver"
@@ -211,6 +251,12 @@ class ReceiverForegroundService : Service() {
         fun stopIntent(context: Context, configPath: String, stateDir: String): Intent =
             Intent(context, ReceiverForegroundService::class.java)
                 .setAction(ACTION_STOP)
+                .putExtra(EXTRA_CONFIG_PATH, configPath)
+                .putExtra(EXTRA_STATE_DIR, stateDir)
+
+        fun retryPublishIntent(context: Context, configPath: String, stateDir: String): Intent =
+            Intent(context, ReceiverForegroundService::class.java)
+                .setAction(ACTION_RETRY_PUBLISH)
                 .putExtra(EXTRA_CONFIG_PATH, configPath)
                 .putExtra(EXTRA_STATE_DIR, stateDir)
     }

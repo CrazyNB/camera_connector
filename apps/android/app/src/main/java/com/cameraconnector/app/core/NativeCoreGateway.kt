@@ -114,6 +114,7 @@ class NativeCoreGateway(
                     .takeIf { it.isNotBlank() }
             if (projectId != null) {
                 nativeCore.releaseFailedPublishRetries(projectId)
+                receiverServiceController.retryFailedPublishes()
             }
         }
         refresh()
