@@ -502,7 +502,11 @@ impl PushReceiverConfig {
     fn resolve_storage_project_id_with_store(&self, store: &SqliteStore) -> Result<String> {
         match self.active_project_id.as_deref() {
             Some(project_id) => Ok(project_id.to_string()),
-            None => Ok(store.ensure_inbox_project()?.project_id),
+            None => {
+                let project = store.ensure_inbox_project()?;
+                store.set_active_project(&project.project_id)?;
+                Ok(project.project_id)
+            }
         }
     }
 }

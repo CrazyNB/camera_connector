@@ -1,6 +1,6 @@
 use camera_connector_core::{
     FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer, ReceiverAccount,
-    SftpPushServer,
+    SftpPushServer, SqliteStore, TransferRecord, TransferStatus,
 };
 use std::str::FromStr;
 
@@ -9,6 +9,41 @@ fn push_protocol_rejects_ftps() {
     let result = PushProtocol::from_str("ftps");
 
     assert!(result.is_err());
+}
+
+#[test]
+fn push_receiver_config_persists_inbox_as_active_project_when_falling_back() {
+    let output_dir = tempfile::tempdir().expect("output dir should create");
+    let state_dir = tempfile::tempdir().expect("state dir should create");
+    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, output_dir.path())
+        .with_state_dir(state_dir.path());
+
+    config
+        .record_storage_transfer(&TransferRecord {
+            transfer_id: "ftp:fallback".to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: "IMG_0001.JPG".to_string(),
+            final_filename: "IMG_0001.JPG".to_string(),
+            final_path: Some(output_dir.path().join("IMG_0001.JPG")),
+            final_location: None,
+            size_bytes: 3,
+            username: None,
+            remote_addr: None,
+            source_name: None,
+            started_at_ms: 10,
+            completed_at_ms: Some(20),
+            error: None,
+        })
+        .expect("transfer should record");
+
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let active = store
+        .active_project()
+        .expect("active project should load")
+        .expect("fallback project should be active");
+
+    assert_eq!(active.project_id, "project-inbox");
 }
 
 #[tokio::test]
