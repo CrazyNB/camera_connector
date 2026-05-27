@@ -598,6 +598,7 @@ fn sqlite_store_tracks_publish_queue_retry_state() {
     assert_eq!(failed[0].queue_id, item.queue_id);
     assert_eq!(failed[0].attempt_count, 1);
     assert_eq!(failed[0].last_error.as_deref(), Some("permission revoked"));
+    assert!(failed[0].next_attempt_at_ms.is_some());
     assert_eq!(failed[0].state.as_str(), "failed");
 }
 
@@ -638,10 +639,9 @@ fn sqlite_store_claims_pending_publish_items_for_exclusive_work() {
     let pending = store
         .pending_publish_items()
         .expect("pending publish items should load");
-    let retried = store
+    let deferred = store
         .claim_next_publish_item()
-        .expect("retry claim should run")
-        .expect("failed item should be claimed");
+        .expect("deferred retry claim should run");
     let empty = store
         .claim_next_publish_item()
         .expect("empty claim should run");
@@ -650,10 +650,9 @@ fn sqlite_store_claims_pending_publish_items_for_exclusive_work() {
     assert_eq!(claimed.state.as_str(), "publishing");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].queue_id, failed.queue_id);
-    assert_eq!(retried.queue_id, failed.queue_id);
-    assert_eq!(retried.state.as_str(), "publishing");
-    assert_eq!(retried.attempt_count, 1);
-    assert_eq!(retried.last_error, None);
+    assert_eq!(pending[0].state.as_str(), "failed");
+    assert!(pending[0].next_attempt_at_ms.is_some());
+    assert!(deferred.is_none());
     assert!(empty.is_none());
 }
 

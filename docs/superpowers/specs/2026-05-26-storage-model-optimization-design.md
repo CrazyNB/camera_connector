@@ -76,7 +76,7 @@ Owns the transition from a completed staged object to final storage.
 Responsibilities:
 
 - Enqueue completed staged uploads.
-- Retry failed publishes.
+- Retry failed publishes without tight polling loops; failed rows carry `next_attempt_at_ms` so permission loss does not cause a worker to hammer the same item every poll.
 - Keep enough metadata to recover after process death.
 - Report `staged`, `publishing`, `completed`, and `failed` states.
 - Leave staged bytes intact until the final object is durable.
@@ -321,6 +321,7 @@ The optimized model must handle these cases:
 
 - Upload interrupted before staging completes: keep or remove incomplete temp file according to cleanup policy and record a failed receive when enough metadata exists.
 - Upload completes but publish fails: keep staged file, mark publish failed, show retry action.
+- Repeated publish failure: preserve the last error, increment attempt count, and delay the next automatic claim through `next_attempt_at_ms`; manual retry can clear the delay once a user reauthorizes storage.
 - App process dies after staging but before publish: recover queue on next startup.
 - Final object exists: reserve a duplicate filename before publish.
 - State write fails after final publish: preserve enough queue metadata to reconcile on next startup.
