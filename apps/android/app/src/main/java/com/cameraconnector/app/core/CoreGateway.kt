@@ -11,6 +11,11 @@ interface CoreGateway {
     suspend fun setActiveProject(projectId: String)
     suspend fun archiveProject(projectId: String)
     suspend fun restoreProject(projectId: String)
+    suspend fun moveProjectGroup(
+        sourceProjectId: String,
+        groupId: String,
+        targetProjectId: String,
+    )
     suspend fun startReceiver()
     suspend fun stopReceiver()
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
@@ -198,6 +203,12 @@ class PreviewCoreGateway : CoreGateway {
         }
         projects.value = projects.value.copy(projects = nextProjects)
     }
+
+    override suspend fun moveProjectGroup(
+        sourceProjectId: String,
+        groupId: String,
+        targetProjectId: String,
+    ) = Unit
 
     override suspend fun startReceiver() {
         dashboard.value = dashboard.value.copy(

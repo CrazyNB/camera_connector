@@ -66,10 +66,18 @@ Those remain core responsibilities.
 UI code talks to a Kotlin `CoreGateway` interface:
 
 - `observeDashboard()`
+- `observeProjects()`
+- `createProject()`
+- `setActiveProject()`
+- `archiveProject()`
+- `restoreProject()`
+- `moveProjectGroup()`
 - `startReceiver()`
 - `stopReceiver()`
 - `saveReceiverSettings()`
 - `saveDeviceAccount()`
+- `removeDeviceAccount()`
+- `retryFailedPublishes()`
 
 The first skeleton may use an in-memory gateway for layout and lifecycle wiring. Native Rust bindings should later implement the same interface.
 
@@ -82,10 +90,26 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_create`
 - `camera_connector_mobile_core_destroy`
 - `camera_connector_mobile_core_free_string`
+- `camera_connector_mobile_core_config_path`
+- `camera_connector_mobile_core_default_state_dir`
+- `camera_connector_mobile_core_create_project_json`
+- `camera_connector_mobile_core_list_projects_json`
+- `camera_connector_mobile_core_set_active_project_json`
+- `camera_connector_mobile_core_archive_project_json`
+- `camera_connector_mobile_core_restore_project_json`
+- `camera_connector_mobile_core_active_project_json`
+- `camera_connector_mobile_core_ensure_active_project_json`
 - `camera_connector_mobile_core_project_dashboard_json`
 - `camera_connector_mobile_core_project_group_assets_json`
+- `camera_connector_mobile_core_move_project_group_json`
+- `camera_connector_mobile_core_claim_next_publish_item_json`
+- `camera_connector_mobile_core_mark_publish_completed_json`
+- `camera_connector_mobile_core_complete_publish_json`
+- `camera_connector_mobile_core_mark_publish_failed_json`
+- `camera_connector_mobile_core_release_failed_publish_retries_json`
 - `camera_connector_mobile_core_save_receiver_settings_json`
 - `camera_connector_mobile_core_save_device_account_json`
+- `camera_connector_mobile_core_remove_device_account_json`
 - `camera_connector_mobile_core_start_receiver_json`
 - `camera_connector_mobile_core_stop_receiver_json`
 
@@ -113,6 +137,7 @@ The Android source now has the Kotlin side of that bridge:
 
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` ensures an active project and adapts project dashboard JSON into the existing `CoreGateway` model used by Compose.
+- Project correction actions stay project-scoped through the gateway: Android can move an asset group from one project to another while Rust rewrites assets, transfers, publish queue rows, and group rollups transactionally.
 - `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`; release-facing verification builds use the native gateway.
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
@@ -139,10 +164,24 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
 - `create`
 - `destroy`
+- `createProjectJson`
+- `listProjectsJson`
+- `setActiveProjectJson`
+- `archiveProjectJson`
+- `restoreProjectJson`
+- `activeProjectJson`
+- `ensureActiveProjectJson`
 - `projectDashboardJson`
 - `projectGroupAssetsJson`
+- `moveProjectGroupJson`
+- `claimNextPublishItemJson`
+- `markPublishCompletedJson`
+- `completePublishJson`
+- `markPublishFailedJson`
+- `releaseFailedPublishRetriesJson`
 - `saveReceiverSettingsJson`
 - `saveDeviceAccountJson`
+- `removeDeviceAccountJson`
 - `startReceiverJson`
 - `stopReceiverJson`
 

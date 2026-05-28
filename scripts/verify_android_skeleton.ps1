@@ -229,6 +229,7 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Cor
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "lastSeenAtMs"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "authMode"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "accountCount"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "moveProjectGroup"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "BuildConfig\.USE_NATIVE_CORE"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "NativeCoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "ReceiverServiceController"
@@ -239,10 +240,12 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Nat
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "NativeEnvelope"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" '"state_dir"'
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" '"defer_publish"'
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "moveProjectGroupJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "startReceiverJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "stopReceiverJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "class NativeCoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "CoreGateway"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.moveProjectGroup"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "splitHostAndPort"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "pollDashboard"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "recent_failures"

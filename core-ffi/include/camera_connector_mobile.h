@@ -71,6 +71,13 @@ char *camera_connector_mobile_core_project_group_assets_json(
     const char *group_id
 );
 
+char *camera_connector_mobile_core_move_project_group_json(
+    const CameraConnectorMobileCore *core,
+    const char *source_project_id,
+    const char *group_id,
+    const char *target_project_id
+);
+
 char *camera_connector_mobile_core_claim_next_publish_item_json(
     const CameraConnectorMobileCore *core
 );

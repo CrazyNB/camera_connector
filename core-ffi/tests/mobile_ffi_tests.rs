@@ -16,6 +16,7 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
+    camera_connector_mobile_core_move_project_group_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_group_assets_json,
     camera_connector_mobile_core_release_failed_publish_retries_json,
@@ -302,6 +303,68 @@ fn ffi_returns_project_group_assets_json_envelope() {
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0]["final_filename"], "IMG_6001.JPG");
     assert_eq!(assets[0]["group_id"], group_id.to_str().unwrap());
+}
+
+#[test]
+fn ffi_moves_project_group_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let source_project = service.create_project("FFI Wrong Project").unwrap();
+    let target_project = service.create_project("FFI Correct Project").unwrap();
+    service
+        .record_project_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:ffi-move-jpg", "DCIM/100/IMG_6102.JPG", 20),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:ffi-move-raw", "DCIM/100/IMG_6102.NEF", 21),
+        )
+        .unwrap();
+    let source_page = service
+        .project_asset_group_page_with_query(
+            &source_project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .unwrap();
+    let group_id = source_page.groups[0].group_id.clone().unwrap();
+
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let source_project_id = CString::new(source_project.project_id.clone()).unwrap();
+    let target_project_id = CString::new(target_project.project_id.clone()).unwrap();
+    let group_id = CString::new(group_id).unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let response = take_ffi_string(unsafe {
+        camera_connector_mobile_core_move_project_group_json(
+            core,
+            source_project_id.as_ptr(),
+            group_id.as_ptr(),
+            target_project_id.as_ptr(),
+        )
+    });
+    let source_dashboard = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_dashboard_json(core, source_project_id.as_ptr(), 0, 25)
+    });
+    let target_dashboard = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_dashboard_json(core, target_project_id.as_ptr(), 0, 25)
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    let source_dashboard: Value = serde_json::from_str(&source_dashboard).unwrap();
+    let target_dashboard: Value = serde_json::from_str(&target_dashboard).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["project_id"], target_project.project_id);
+    assert_eq!(value["value"]["member_count"], 2);
+    assert_eq!(source_dashboard["value"]["assets"]["total_groups"], 0);
+    assert_eq!(target_dashboard["value"]["assets"]["total_groups"], 1);
 }
 
 #[test]

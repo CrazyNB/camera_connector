@@ -155,6 +155,20 @@ impl MobileCore {
         Ok(serde_json::to_string(&assets)?)
     }
 
+    pub fn move_project_group_json(
+        &self,
+        source_project_id: String,
+        group_id: String,
+        target_project_id: String,
+    ) -> MobileCoreResult<String> {
+        let group = self.service.move_project_asset_group(
+            &source_project_id,
+            &group_id,
+            &target_project_id,
+        )?;
+        Ok(serde_json::to_string(&group)?)
+    }
+
     pub fn claim_next_publish_item_json(&self) -> MobileCoreResult<String> {
         let item = self.service.claim_next_publish_item()?;
         Ok(serde_json::to_string(&item)?)
@@ -496,6 +510,30 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_group_assets_json(
         let group_id = required_c_string(group_id, "group_id")?;
         let assets = core_ref(core)?.project_group_assets_json(project_id, group_id)?;
         parse_json_value(&assets)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// All string pointers must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_move_project_group_json(
+    core: *const MobileCore,
+    source_project_id: *const c_char,
+    group_id: *const c_char,
+    target_project_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let source_project_id = required_c_string(source_project_id, "source_project_id")?;
+        let group_id = required_c_string(group_id, "group_id")?;
+        let target_project_id = required_c_string(target_project_id, "target_project_id")?;
+        let group = core_ref(core)?.move_project_group_json(
+            source_project_id,
+            group_id,
+            target_project_id,
+        )?;
+        parse_json_value(&group)
     })
 }
 
@@ -914,6 +952,31 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
             let assets = mobile_core_from_handle(handle)?
                 .project_group_assets_json(project_id?, group_id?)?;
             parse_json_value(&assets)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_moveProjectGroupJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    source_project_id: JString,
+    group_id: JString,
+    target_project_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let source_project_id = required_java_string(env, source_project_id, "source_project_id");
+        let group_id = required_java_string(env, group_id, "group_id");
+        let target_project_id = required_java_string(env, target_project_id, "target_project_id");
+        java_response(env, || {
+            let group = mobile_core_from_handle(handle)?.move_project_group_json(
+                source_project_id?,
+                group_id?,
+                target_project_id?,
+            )?;
+            parse_json_value(&group)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()

@@ -75,6 +75,17 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun moveProjectGroup(
+        sourceProjectId: String,
+        groupId: String,
+        targetProjectId: String,
+    ) {
+        withContext(Dispatchers.IO) {
+            nativeCore.moveProjectGroup(sourceProjectId, groupId, targetProjectId)
+        }
+        refresh()
+    }
+
     override suspend fun startReceiver() {
         receiverServiceController.startReceiver()
         refreshAfterServiceCommand()

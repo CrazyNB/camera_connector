@@ -2589,10 +2589,13 @@ mod tests {
     }
 
     fn unique_temp_config_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "camera-connector-{name}-{}.json",
+        let root = std::env::temp_dir().join(format!(
+            "camera-connector-{name}-{}-{}",
+            std::process::id(),
             current_time_ms()
-        ))
+        ));
+        std::fs::create_dir_all(&root).expect("temp config directory should create");
+        root.join("config.json")
     }
 
     fn completed_transfer(

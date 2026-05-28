@@ -390,6 +390,65 @@ fn mobile_core_returns_project_group_assets_json() {
 }
 
 #[test]
+fn mobile_core_moves_project_group_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let source_project = service.create_project("Wrong Mobile Project").unwrap();
+    let target_project = service.create_project("Correct Mobile Project").unwrap();
+    service
+        .record_project_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:mobile-move-jpg", "DCIM/100/IMG_6101.JPG", 20),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:mobile-move-raw", "DCIM/100/IMG_6101.NEF", 21),
+        )
+        .unwrap();
+    let source_page = service
+        .project_asset_group_page_with_query(
+            &source_project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .unwrap();
+    let group_id = source_page.groups[0].group_id.clone().unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let moved_json = core
+        .move_project_group_json(
+            source_project.project_id.clone(),
+            group_id.clone(),
+            target_project.project_id.clone(),
+        )
+        .unwrap();
+    let source_dashboard: Value = serde_json::from_str(
+        &core
+            .project_dashboard_json(source_project.project_id.clone(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    let target_dashboard: Value = serde_json::from_str(
+        &core
+            .project_dashboard_json(target_project.project_id.clone(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+
+    let moved: Value = serde_json::from_str(&moved_json).unwrap();
+    assert_eq!(moved["project_id"], target_project.project_id);
+    assert_eq!(moved["display_key"], "IMG_6101");
+    assert_eq!(moved["member_count"], 2);
+    assert_eq!(source_dashboard["assets"]["total_groups"], 0);
+    assert_eq!(target_dashboard["assets"]["total_groups"], 1);
+    assert_eq!(target_dashboard["assets"]["summary"]["asset_count"], 2);
+}
+
+#[test]
 fn mobile_core_starts_and_stops_receiver_as_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
