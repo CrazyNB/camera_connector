@@ -432,6 +432,12 @@ impl SqliteStore {
                 "DELETE FROM receiver_accounts WHERE username = ?1",
                 params![username],
             )?;
+            if changed > 0 {
+                connection.execute(
+                    "UPDATE connected_devices SET username = NULL WHERE username = ?1",
+                    params![username],
+                )?;
+            }
             Ok(changed > 0)
         })
     }

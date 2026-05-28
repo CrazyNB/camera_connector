@@ -159,6 +159,12 @@ fn sqlite_store_removes_receiver_accounts() {
                 .expect("account should build"),
         )
         .expect("account should upsert");
+    store
+        .record_connected_device("192.168.137.56", Some(51120), None, None)
+        .expect("device should connect");
+    store
+        .record_authenticated_device("192.168.137.56", Some("Z5 II"), Some("z5"))
+        .expect("device should authenticate");
 
     assert!(store
         .remove_receiver_account("z5")
@@ -170,6 +176,13 @@ fn sqlite_store_removes_receiver_accounts() {
         .receiver_accounts()
         .expect("accounts should list")
         .is_empty());
+    let devices = store
+        .connected_devices()
+        .expect("connected devices should list");
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].remote_addr, "192.168.137.56");
+    assert_eq!(devices[0].source_name.as_deref(), Some("Z5 II"));
+    assert_eq!(devices[0].username, None);
 }
 
 #[test]
