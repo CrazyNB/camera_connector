@@ -87,6 +87,12 @@ target\debug\camera-connector.exe devices --state C:\Users\hxn\AppData\Roaming\C
 
 The `devices` output reads current receiver metadata. After the camera logs in as `z5`, the current IP is shown as a connection property of that account. IP addresses are not persisted in account config; if the camera reconnects with a different IP, the latest connection record updates naturally.
 
+Move a RAW/JPEG/video group to another project without touching the published files:
+
+```powershell
+target\debug\camera-connector.exe project move-group --from project-wrong --group-id group-abc123 --to project-correct
+```
+
 Validate local ingest without a camera:
 
 ```powershell

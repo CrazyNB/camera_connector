@@ -396,6 +396,118 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
 }
 
 #[test]
+fn sqlite_store_moves_asset_group_between_projects() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let source_project = store
+        .create_project("Wrong Project")
+        .expect("source project should create");
+    let target_project = store
+        .create_project("Correct Project")
+        .expect("target project should create");
+
+    store
+        .record_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:jpg", "DCIM/100/IMG_3333.JPG", 20),
+        )
+        .expect("jpg transfer should record");
+    store
+        .record_transfer(
+            &source_project.project_id,
+            completed_transfer("ftp:raw", "DCIM/100/IMG_3333.NEF", 21),
+        )
+        .expect("raw transfer should record");
+    let queue_item = store
+        .enqueue_publish(
+            &source_project.project_id,
+            "ftp:jpg",
+            "staged/ftp-jpg.tmp",
+            "IMG_3333.JPG",
+            100,
+        )
+        .expect("publish item should enqueue");
+    store
+        .mark_publish_completed(&queue_item.queue_id)
+        .expect("publish item should complete");
+
+    let source_page = store
+        .asset_group_page(
+            &source_project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .expect("source groups should query");
+    let source_group_id = source_page.groups[0]
+        .group_id
+        .as_deref()
+        .expect("source group should expose id");
+
+    let moved_group = store
+        .move_asset_group(
+            &source_project.project_id,
+            source_group_id,
+            &target_project.project_id,
+        )
+        .expect("group move should run")
+        .expect("group should move");
+
+    let old_source_page = store
+        .asset_group_page(
+            &source_project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .expect("source groups should query after move");
+    let target_page = store
+        .asset_group_page(
+            &target_project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            25,
+        )
+        .expect("target groups should query after move");
+    let target_assets = store
+        .assets_for_group(&target_project.project_id, &moved_group.group_id)
+        .expect("target group assets should query");
+    let source_transfers = store
+        .transfer_records(&source_project.project_id)
+        .expect("source transfers should query");
+    let target_transfers = store
+        .transfer_records(&target_project.project_id)
+        .expect("target transfers should query");
+    let source_queue = store
+        .publish_queue_summary(&source_project.project_id)
+        .expect("source queue summary should query");
+    let target_queue = store
+        .publish_queue_summary(&target_project.project_id)
+        .expect("target queue summary should query");
+
+    assert_eq!(old_source_page.total_groups, 0);
+    assert_eq!(target_page.total_groups, 1);
+    assert_eq!(target_page.summary.asset_count, 2);
+    assert_eq!(moved_group.project_id, target_project.project_id);
+    assert_eq!(target_assets.len(), 2);
+    assert!(target_assets
+        .iter()
+        .all(|asset| asset.project_id == target_project.project_id));
+    assert!(target_assets
+        .iter()
+        .any(|asset| asset.final_filename == "IMG_3333.JPG"
+            && asset
+                .final_location
+                .as_ref()
+                .and_then(StoredObjectLocation::as_local_path)
+                .is_some()));
+    assert!(source_transfers.is_empty());
+    assert_eq!(target_transfers.len(), 2);
+    assert_eq!(source_queue.completed_count, 0);
+    assert_eq!(target_queue.completed_count, 1);
+}
+
+#[test]
 fn sqlite_store_exposes_asset_group_rollup_model() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");

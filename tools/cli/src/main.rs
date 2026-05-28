@@ -270,6 +270,14 @@ enum ProjectCommand {
         #[arg(long, alias = "project-id")]
         id: String,
     },
+    MoveGroup {
+        #[arg(long)]
+        from: String,
+        #[arg(long = "group-id")]
+        group_id: String,
+        #[arg(long)]
+        to: String,
+    },
     GroupAssets {
         #[arg(long, alias = "project-id")]
         id: String,
@@ -1254,6 +1262,17 @@ fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) ->
                 .map(|project| project.project_id.as_str());
             println!("{}", project_line(&project, active_project_id));
         }
+        ProjectCommand::MoveGroup { from, group_id, to } => {
+            let moved_group = service.move_project_asset_group(&from, &group_id, &to)?;
+            if let Some(group) = moved_group {
+                println!(
+                    "moved group\tid={}\tfrom={}\tto={}\tassets={}",
+                    group.group_id, from, to, group.member_count
+                );
+            } else {
+                println!("not_found group\tid={group_id}\tfrom={from}\tto={to}");
+            }
+        }
         ProjectCommand::GroupAssets { id, group_id } => {
             let assets =
                 load_project_group_assets(config_path.map(Path::to_path_buf), &id, &group_id)?;
@@ -2100,6 +2119,102 @@ mod tests {
     }
 
     #[test]
+    fn parses_project_move_group_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "--config",
+            "C:\\CameraConnector\\config.json",
+            "move-group",
+            "--from",
+            "project-a",
+            "--group-id",
+            "group-1",
+            "--to",
+            "project-b",
+        ])
+        .expect("project move-group command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Project {
+                action: ProjectCommand::MoveGroup { from, group_id, to },
+                ..
+            }) if from == "project-a" && group_id == "group-1" && to == "project-b"
+        ));
+    }
+
+    #[test]
+    fn project_move_group_command_updates_project_membership() {
+        let path = unique_temp_config_path("project-move-group");
+        let service = CameraConnectorService::new(Some(path.clone()));
+        let source_project = service
+            .create_project("Wrong Project")
+            .expect("source project should create");
+        let target_project = service
+            .create_project("Correct Project")
+            .expect("target project should create");
+        service
+            .record_project_transfer(
+                &source_project.project_id,
+                completed_transfer("ftp:move-jpg", "DCIM/100/IMG_6001.JPG", 20),
+            )
+            .expect("jpg transfer should record");
+        service
+            .record_project_transfer(
+                &source_project.project_id,
+                completed_transfer("ftp:move-raw", "DCIM/100/IMG_6001.NEF", 21),
+            )
+            .expect("raw transfer should record");
+        let source_page = service
+            .project_asset_group_page_with_query(
+                &source_project.project_id,
+                AssetGroupQuery::default(),
+                0,
+                25,
+            )
+            .expect("source groups should query");
+        let group_id = source_page.groups[0]
+            .group_id
+            .as_deref()
+            .expect("group should expose id")
+            .to_string();
+
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::MoveGroup {
+                from: source_project.project_id.clone(),
+                group_id,
+                to: target_project.project_id.clone(),
+            },
+        )
+        .expect("project move-group command should move group");
+
+        let source_after = service
+            .project_asset_group_page_with_query(
+                &source_project.project_id,
+                AssetGroupQuery::default(),
+                0,
+                25,
+            )
+            .expect("source groups should query after move");
+        let target_after = service
+            .project_asset_group_page_with_query(
+                &target_project.project_id,
+                AssetGroupQuery::default(),
+                0,
+                25,
+            )
+            .expect("target groups should query after move");
+
+        assert_eq!(source_after.total_groups, 0);
+        assert_eq!(target_after.total_groups, 1);
+        assert_eq!(target_after.summary.asset_count, 2);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn project_archive_command_clears_active_project() {
         let path = unique_temp_config_path("project-archive");
 
@@ -2478,6 +2593,34 @@ mod tests {
             "camera-connector-{name}-{}.json",
             current_time_ms()
         ))
+    }
+
+    fn completed_transfer(
+        transfer_id: &str,
+        original_path: &str,
+        completed_at_ms: i64,
+    ) -> TransferRecord {
+        let final_filename = original_path
+            .rsplit('/')
+            .next()
+            .expect("filename should exist")
+            .to_string();
+        TransferRecord {
+            transfer_id: transfer_id.to_string(),
+            protocol: "ftp".to_string(),
+            status: TransferStatus::Completed,
+            original_path: original_path.to_string(),
+            final_filename: final_filename.clone(),
+            final_path: None,
+            final_location: Some(StoredObjectLocation::local_path(final_filename)),
+            size_bytes: 100,
+            username: Some("z5".to_string()),
+            remote_addr: Some("192.168.137.56".to_string()),
+            source_name: Some("Studio Z5".to_string()),
+            started_at_ms: completed_at_ms - 1,
+            completed_at_ms: Some(completed_at_ms),
+            error: None,
+        }
     }
 }
 

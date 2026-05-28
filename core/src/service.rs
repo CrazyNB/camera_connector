@@ -463,6 +463,16 @@ impl CameraConnectorService {
         self.storage_store()?.assets_for_group(project_id, group_id)
     }
 
+    pub fn move_project_asset_group(
+        &self,
+        source_project_id: &str,
+        group_id: &str,
+        target_project_id: &str,
+    ) -> Result<Option<crate::StoredAssetGroup>> {
+        self.storage_store()?
+            .move_asset_group(source_project_id, group_id, target_project_id)
+    }
+
     pub fn receiver_status(
         &self,
         output_dir: impl AsRef<Path>,

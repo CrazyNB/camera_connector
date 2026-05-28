@@ -733,6 +733,112 @@ impl SqliteStore {
         })
     }
 
+    pub fn move_asset_group(
+        &self,
+        source_project_id: &str,
+        group_id: &str,
+        target_project_id: &str,
+    ) -> Result<Option<StoredAssetGroup>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            ensure_project_exists(&transaction, source_project_id)?;
+            ensure_project_is_active(&transaction, target_project_id)?;
+            let Some(source_group) =
+                stored_asset_group_by_id(&transaction, source_project_id, group_id)?
+            else {
+                transaction.commit()?;
+                return Ok(None);
+            };
+            if source_project_id == target_project_id {
+                transaction.commit()?;
+                return Ok(Some(source_group));
+            }
+
+            let transfer_ids = transfer_ids_for_asset_group(
+                &transaction,
+                source_project_id,
+                &source_group.group_id,
+            )?;
+            if transfer_ids.is_empty() {
+                transaction.commit()?;
+                return Ok(Some(source_group));
+            }
+
+            let now = current_time_ms();
+            let target_group_identity = asset_group_identity(
+                target_project_id,
+                source_group.source_identity.as_deref(),
+                source_group.original_parent_path.as_deref(),
+                &source_group.display_key,
+            );
+            let target_group_id = format!("group-{}", stable_key(&target_group_identity));
+            transaction.execute(
+                "INSERT INTO asset_groups (
+                    group_id, project_id, group_identity, display_key, source_identity,
+                    original_parent_path, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                 ON CONFLICT(group_identity) DO UPDATE SET updated_at_ms = excluded.updated_at_ms",
+                params![
+                    target_group_id,
+                    target_project_id,
+                    target_group_identity,
+                    source_group.display_key,
+                    source_group.source_identity,
+                    source_group.original_parent_path,
+                    now,
+                ],
+            )?;
+            let target_group_id = transaction.query_row(
+                "SELECT group_id FROM asset_groups WHERE group_identity = ?1",
+                params![target_group_identity],
+                |row| row.get::<_, String>(0),
+            )?;
+
+            transaction.execute(
+                "UPDATE assets
+                 SET project_id = ?1, group_id = ?2
+                 WHERE project_id = ?3 AND group_id = ?4",
+                params![
+                    target_project_id,
+                    target_group_id,
+                    source_project_id,
+                    group_id
+                ],
+            )?;
+            for transfer_id in &transfer_ids {
+                transaction.execute(
+                    "UPDATE transfers SET project_id = ?1 WHERE transfer_id = ?2",
+                    params![target_project_id, transfer_id],
+                )?;
+                transaction.execute(
+                    "UPDATE publish_queue SET project_id = ?1 WHERE transfer_id = ?2",
+                    params![target_project_id, transfer_id],
+                )?;
+            }
+            transaction.execute(
+                "DELETE FROM asset_groups WHERE project_id = ?1 AND group_id = ?2",
+                params![source_project_id, group_id],
+            )?;
+            transaction.execute(
+                "UPDATE projects SET updated_at_ms = ?1 WHERE project_id IN (?2, ?3)",
+                params![now, source_project_id, target_project_id],
+            )?;
+
+            refresh_group_rollup(&transaction, &target_group_id)?;
+            refresh_duplicate_info(&transaction, source_project_id)?;
+            refresh_duplicate_info(&transaction, target_project_id)?;
+            let moved_group =
+                stored_asset_group_by_id(&transaction, target_project_id, &target_group_id)?
+                    .ok_or_else(|| {
+                        rusqlite::Error::InvalidParameterName(
+                            "moved asset group not found".to_string(),
+                        )
+                    })?;
+            transaction.commit()?;
+            Ok(Some(moved_group))
+        })
+    }
+
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
         self.with_connection(|connection| stored_asset_groups_for_project(connection, project_id))
     }
@@ -1184,6 +1290,40 @@ fn stored_asset_groups_for_project(
     collect_rows(rows)
 }
 
+fn stored_asset_group_by_id(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Option<StoredAssetGroup>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT group_id, project_id, group_identity, display_key, source_identity,
+                    original_parent_path, primary_asset_id, preview_asset_id, member_count,
+                    has_raw, has_jpeg, has_video, first_capture_at_ms, last_capture_at_ms,
+                    first_received_at_ms, last_received_at_ms, created_at_ms, updated_at_ms
+             FROM asset_groups
+             WHERE project_id = ?1 AND group_id = ?2",
+            params![project_id, group_id],
+            stored_asset_group_from_row,
+        )
+        .optional()
+}
+
+fn transfer_ids_for_asset_group(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Vec<String>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT transfer_id
+         FROM assets
+         WHERE project_id = ?1 AND group_id = ?2
+         ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
+    )?;
+    let rows = statement.query_map(params![project_id, group_id], |row| row.get(0))?;
+    collect_rows(rows)
+}
+
 fn received_assets_for_group(
     connection: &Connection,
     project_id: &str,
@@ -1631,12 +1771,11 @@ fn insert_asset_for_transfer(
         normalized_stem(&record.final_filename).unwrap_or_else(|| record.final_filename.clone());
     let original_parent_path = original_parent_path(&record.original_path);
     let source_identity = source_identity(record);
-    let group_identity = format!(
-        "{}\t{}\t{}\t{}",
+    let group_identity = asset_group_identity(
         project_id,
-        source_identity.clone().unwrap_or_default(),
-        original_parent_path.clone().unwrap_or_default(),
-        normalized_stem
+        source_identity.as_deref(),
+        original_parent_path.as_deref(),
+        &normalized_stem,
     );
     let group_id = format!("group-{}", stable_key(&group_identity));
     let final_location = record.resolved_final_location();
@@ -2090,6 +2229,21 @@ fn stable_key(value: &str) -> String {
         hash = hash.wrapping_mul(1099511628211);
     }
     format!("{hash:016x}")
+}
+
+fn asset_group_identity(
+    project_id: &str,
+    source_identity: Option<&str>,
+    original_parent_path: Option<&str>,
+    normalized_stem: &str,
+) -> String {
+    format!(
+        "{}\t{}\t{}\t{}",
+        project_id,
+        source_identity.unwrap_or_default(),
+        original_parent_path.unwrap_or_default(),
+        normalized_stem
+    )
 }
 
 fn normalized_stem(filename: &str) -> Option<String> {
