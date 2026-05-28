@@ -275,6 +275,12 @@ fun CameraConnectorApp(
                                     coreGateway.createProject(name)
                                 }
                             },
+                            onRenameProject = { projectId, name ->
+                                projectSwitcherOpen = false
+                                runAction("正在重命名项目") {
+                                    coreGateway.renameProject(projectId, name)
+                                }
+                            },
                             onArchiveProject = { projectId ->
                                 projectSwitcherOpen = false
                                 runAction("正在归档项目") {
@@ -677,11 +683,14 @@ private fun ProjectSwitcherDialog(
     onDismiss: () -> Unit,
     onSelectProject: (String) -> Unit,
     onCreateProject: (String) -> Unit,
+    onRenameProject: (String, String) -> Unit,
     onArchiveProject: (String) -> Unit,
     onRestoreProject: (String) -> Unit,
 ) {
-    var newProjectName by remember { mutableStateOf("") }
-    val cleanName = newProjectName.trim()
+    var projectNameInput by remember { mutableStateOf("") }
+    var editingProject by remember { mutableStateOf<ProjectSummary?>(null) }
+    val cleanName = projectNameInput.trim()
+    val editing = editingProject
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = true),
@@ -703,16 +712,20 @@ private fun ProjectSwitcherDialog(
                             selected = project.id == projectState.activeProjectId,
                             enabled = actionsEnabled,
                             onSelect = { onSelectProject(project.id) },
+                            onRename = {
+                                editingProject = project
+                                projectNameInput = project.name
+                            },
                             onArchive = { onArchiveProject(project.id) },
                             onRestore = { onRestoreProject(project.id) },
                         )
                     }
                 }
                 OutlinedTextField(
-                    value = newProjectName,
-                    onValueChange = { newProjectName = it },
+                    value = projectNameInput,
+                    onValueChange = { projectNameInput = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("新项目名称") },
+                    label = { Text(if (editing == null) "新项目名称" else "项目名称") },
                     singleLine = true,
                     enabled = actionsEnabled,
                 )
@@ -723,12 +736,33 @@ private fun ProjectSwitcherDialog(
                     OutlinedButton(onClick = onDismiss, shape = elementShape) {
                         Text("取消")
                     }
+                    if (editing != null) {
+                        OutlinedButton(
+                            onClick = {
+                                editingProject = null
+                                projectNameInput = ""
+                            },
+                            enabled = actionsEnabled,
+                            shape = elementShape,
+                        ) {
+                            Text("取消编辑")
+                        }
+                    }
                     Button(
-                        onClick = { onCreateProject(cleanName) },
-                        enabled = actionsEnabled && cleanName.isNotBlank(),
+                        onClick = {
+                            val project = editing
+                            if (project == null) {
+                                onCreateProject(cleanName)
+                            } else {
+                                onRenameProject(project.id, cleanName)
+                            }
+                        },
+                        enabled = actionsEnabled &&
+                            cleanName.isNotBlank() &&
+                            (editing == null || cleanName != editing.name),
                         shape = elementShape,
                     ) {
-                        Text("新建")
+                        Text(if (editing == null) "新建" else "保存")
                     }
                 }
             }
@@ -742,6 +776,7 @@ private fun ProjectOptionRow(
     selected: Boolean,
     enabled: Boolean,
     onSelect: () -> Unit,
+    onRename: () -> Unit,
     onArchive: () -> Unit,
     onRestore: () -> Unit,
 ) {
@@ -780,6 +815,15 @@ private fun ProjectOptionRow(
                     shape = elementShape,
                 ) {
                     Text("选择")
+                }
+            }
+            if (lifecycle.canRename) {
+                OutlinedButton(
+                    onClick = onRename,
+                    enabled = enabled,
+                    shape = elementShape,
+                ) {
+                    Text("重命名")
                 }
             }
             if (lifecycle.canArchive) {

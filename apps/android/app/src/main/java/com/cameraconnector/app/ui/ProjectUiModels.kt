@@ -9,6 +9,7 @@ internal data class ProjectLifecycleUi(
     val statusLabel: String,
     val canSelect: Boolean,
     val canArchive: Boolean,
+    val canRename: Boolean,
     val canRestore: Boolean,
 )
 
@@ -31,6 +32,7 @@ internal fun projectLifecycleUi(
         },
         canSelect = actionsEnabled && !selected && !archived,
         canArchive = actionsEnabled && !archived && !systemInbox,
+        canRename = actionsEnabled && !systemInbox,
         canRestore = actionsEnabled && archived,
     )
 }

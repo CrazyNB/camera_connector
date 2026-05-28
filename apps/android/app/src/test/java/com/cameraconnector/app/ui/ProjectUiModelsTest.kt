@@ -20,6 +20,7 @@ class ProjectUiModelsTest {
         assertEquals("活跃", ui.statusLabel)
         assertTrue(ui.canSelect)
         assertTrue(ui.canArchive)
+        assertTrue(ui.canRename)
         assertFalse(ui.canRestore)
     }
 
@@ -34,6 +35,7 @@ class ProjectUiModelsTest {
         assertEquals("已归档", ui.statusLabel)
         assertFalse(ui.canSelect)
         assertFalse(ui.canArchive)
+        assertTrue(ui.canRename)
         assertTrue(ui.canRestore)
     }
 
@@ -48,6 +50,7 @@ class ProjectUiModelsTest {
         assertEquals("当前项目", ui.statusLabel)
         assertFalse(ui.canSelect)
         assertFalse(ui.canArchive)
+        assertFalse(ui.canRename)
         assertFalse(ui.canRestore)
     }
 
