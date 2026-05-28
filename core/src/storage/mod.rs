@@ -68,6 +68,7 @@ pub struct StoredAsset {
     pub transfer_id: String,
     pub group_role: String,
     pub group_rank: i64,
+    pub media_kind: String,
     pub format: ObjectFormat,
     pub original_filename: String,
     pub final_filename: String,
@@ -712,7 +713,7 @@ impl SqliteStore {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
-                        format, original_filename, final_filename, normalized_stem, original_path,
+                        media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                         final_location_payload, size_bytes, capture_at_ms, received_at_ms,
                         published_at_ms, source_identity, username, remote_addr,
                         duplicate_index, duplicate_count
@@ -1183,7 +1184,7 @@ fn received_assets_for_group(
 ) -> std::result::Result<Vec<ReceivedAsset>, rusqlite::Error> {
     let mut statement = connection.prepare(
         "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
-                format, original_filename, final_filename, normalized_stem, original_path,
+                media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                 final_location_payload, size_bytes, capture_at_ms, received_at_ms,
                 published_at_ms, source_identity, username, remote_addr,
                 duplicate_index, duplicate_count
@@ -1822,8 +1823,9 @@ fn received_asset_from_row(row: &Row<'_>) -> std::result::Result<ReceivedAsset, 
 }
 
 fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusqlite::Error> {
-    let format: String = row.get(6)?;
-    let final_location_payload: Option<String> = row.get(11)?;
+    let media_kind: String = row.get(6)?;
+    let format: String = row.get(7)?;
+    let final_location_payload: Option<String> = row.get(12)?;
     Ok(StoredAsset {
         asset_id: row.get(0)?,
         project_id: row.get(1)?,
@@ -1831,21 +1833,22 @@ fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusq
         transfer_id: row.get(3)?,
         group_role: row.get(4)?,
         group_rank: row.get(5)?,
+        media_kind,
         format: parse_format(&format),
-        original_filename: row.get(7)?,
-        final_filename: row.get(8)?,
-        normalized_stem: row.get(9)?,
-        original_path: row.get(10)?,
+        original_filename: row.get(8)?,
+        final_filename: row.get(9)?,
+        normalized_stem: row.get(10)?,
+        original_path: row.get(11)?,
         final_location: parse_location(final_location_payload)?,
-        size_bytes: row.get::<_, i64>(12)? as u64,
-        capture_at_ms: row.get(13)?,
-        received_at_ms: row.get(14)?,
-        published_at_ms: row.get(15)?,
-        source_identity: row.get(16)?,
-        username: row.get(17)?,
-        remote_addr: row.get(18)?,
-        duplicate_index: row.get::<_, Option<i64>>(19)?.map(|value| value as usize),
-        duplicate_count: row.get::<_, Option<i64>>(20)?.map(|value| value as usize),
+        size_bytes: row.get::<_, i64>(13)? as u64,
+        capture_at_ms: row.get(14)?,
+        received_at_ms: row.get(15)?,
+        published_at_ms: row.get(16)?,
+        source_identity: row.get(17)?,
+        username: row.get(18)?,
+        remote_addr: row.get(19)?,
+        duplicate_index: row.get::<_, Option<i64>>(20)?.map(|value| value as usize),
+        duplicate_count: row.get::<_, Option<i64>>(21)?.map(|value| value as usize),
     })
 }
 
