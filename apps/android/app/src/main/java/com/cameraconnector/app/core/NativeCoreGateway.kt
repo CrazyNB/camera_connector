@@ -61,6 +61,13 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun renameProject(projectId: String, name: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.renameProject(projectId, name)
+        }
+        refresh()
+    }
+
     override suspend fun archiveProject(projectId: String) {
         withContext(Dispatchers.IO) {
             nativeCore.archiveProject(projectId)

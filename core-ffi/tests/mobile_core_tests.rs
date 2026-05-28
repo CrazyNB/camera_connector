@@ -166,6 +166,34 @@ fn mobile_core_ensures_active_project_as_json() {
 }
 
 #[test]
+fn mobile_core_renames_project_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    let created: Value = serde_json::from_str(
+        &core
+            .create_project_json("Untitled Mobile Shoot".into())
+            .unwrap(),
+    )
+    .unwrap();
+    let project_id = created["project_id"].as_str().unwrap().to_string();
+    core.set_active_project_json(project_id.clone()).unwrap();
+
+    let renamed_json = core
+        .rename_project_json(project_id.clone(), "Client Mobile Shoot".into())
+        .unwrap();
+    let active_json = core.active_project_json().unwrap();
+
+    let renamed: Value = serde_json::from_str(&renamed_json).unwrap();
+    let active: Value = serde_json::from_str(&active_json).unwrap();
+    assert_eq!(renamed["project_id"], project_id);
+    assert_eq!(renamed["name"], "Client Mobile Shoot");
+    assert_eq!(renamed["slug"], "client-mobile-shoot");
+    assert_eq!(active["project_id"], project_id);
+    assert_eq!(active["name"], "Client Mobile Shoot");
+}
+
+#[test]
 fn mobile_core_returns_project_dashboard_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");

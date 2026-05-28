@@ -250,6 +250,14 @@ impl CameraConnectorService {
         self.storage_store()?.create_project(name)
     }
 
+    pub fn rename_project(
+        &self,
+        project_id: &str,
+        name: impl AsRef<str>,
+    ) -> Result<crate::Project> {
+        self.storage_store()?.rename_project(project_id, name)
+    }
+
     pub fn archive_project(&self, project_id: &str) -> Result<crate::Project> {
         self.storage_store()?.archive_project(project_id)
     }

@@ -144,6 +144,13 @@ if (($projectList | Where-Object { $_ -like "project*id=$projectId*name=Verify S
 }
 Write-Output $projectList
 
+$projectRename = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath rename --id $projectId --name "Verify Shoot Renamed"
+if ($LASTEXITCODE -ne 0) { throw "project rename smoke failed" }
+if (($projectRename | Where-Object { $_ -like "project*id=$projectId*name=Verify Shoot Renamed*slug=verify-shoot-renamed*active=true*" }).Count -lt 1) {
+    throw "project rename did not update the active project"
+}
+Write-Output $projectRename
+
 $projectArchive = & (Join-Path $root "target\debug\camera-connector.exe") project --config $configPath archive --id $projectId
 if ($LASTEXITCODE -ne 0) { throw "project archive smoke failed" }
 if (($projectArchive | Where-Object { $_ -like "project*id=$projectId*status=archived*active=false*" }).Count -lt 1) {

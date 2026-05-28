@@ -72,6 +72,35 @@ fn sqlite_store_archives_projects_and_clears_active_selection() {
 }
 
 #[test]
+fn sqlite_store_renames_projects_without_changing_identity() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Untitled Shoot")
+        .expect("project should create");
+    store
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let renamed = store
+        .rename_project(&project.project_id, "Studio Product Shoot")
+        .expect("project should rename");
+    let active = store
+        .active_project()
+        .expect("active project should load")
+        .expect("active project should remain");
+
+    assert_eq!(renamed.project_id, project.project_id);
+    assert_eq!(renamed.name, "Studio Product Shoot");
+    assert_eq!(renamed.slug, "studio-product-shoot");
+    assert_eq!(renamed.status, ProjectStatus::Active);
+    assert_eq!(renamed.created_at_ms, project.created_at_ms);
+    assert!(renamed.updated_at_ms >= project.updated_at_ms);
+    assert_eq!(active.project_id, project.project_id);
+    assert_eq!(active.name, "Studio Product Shoot");
+}
+
+#[test]
 fn sqlite_store_rejects_archiving_system_inbox_project() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
@@ -104,6 +133,31 @@ fn sqlite_store_rejects_archiving_system_inbox_project() {
             .expect("inbox project should load")
             .status,
         ProjectStatus::Active
+    );
+}
+
+#[test]
+fn sqlite_store_rejects_renaming_system_inbox_project() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let inbox = store
+        .ensure_inbox_project()
+        .expect("inbox project should exist");
+
+    let result = store.rename_project(&inbox.project_id, "Client Shoot");
+
+    assert!(result.is_err());
+    assert!(result
+        .err()
+        .expect("error should exist")
+        .to_string()
+        .contains("system inbox project cannot be renamed"));
+    assert_eq!(
+        store
+            .ensure_inbox_project()
+            .expect("inbox project should load")
+            .name,
+        "Inbox"
     );
 }
 

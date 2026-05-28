@@ -118,6 +118,34 @@ fn service_archives_active_project_and_restores_selection() {
 }
 
 #[test]
+fn service_renames_project_and_keeps_active_selection() {
+    let config_path = unique_temp_path("storage-service-rename-project");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Untitled Shoot")
+        .expect("project should create");
+    service
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+
+    let renamed = service
+        .rename_project(&project.project_id, "Client Shoot")
+        .expect("project should rename");
+    let active = service
+        .active_project()
+        .expect("active project should load")
+        .expect("active project should remain");
+
+    assert_eq!(renamed.project_id, project.project_id);
+    assert_eq!(renamed.name, "Client Shoot");
+    assert_eq!(renamed.slug, "client-shoot");
+    assert_eq!(active.project_id, project.project_id);
+    assert_eq!(active.name, "Client Shoot");
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_uses_configured_state_dir_for_project_storage() {
     let config_path = unique_temp_path("storage-service-configured-state");
     let configured_state_dir = config_path

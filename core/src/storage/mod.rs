@@ -310,6 +310,29 @@ impl SqliteStore {
         })
     }
 
+    pub fn rename_project(&self, project_id: &str, name: impl AsRef<str>) -> Result<Project> {
+        if project_id == SYSTEM_INBOX_PROJECT_ID {
+            return Err(ImporterError::internal(
+                "system inbox project cannot be renamed",
+            ));
+        }
+        let name = normalized_required("project name", name.as_ref())?;
+        let slug = slugify(&name);
+        self.with_connection(|connection| {
+            let now = current_time_ms();
+            ensure_project_exists(connection, project_id)?;
+            connection.execute(
+                "UPDATE projects
+                 SET name = ?1, slug = ?2, updated_at_ms = ?3
+                 WHERE project_id = ?4",
+                params![name, slug, now, project_id],
+            )?;
+            project_by_id(connection, project_id)?.ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("project not found".to_string())
+            })
+        })
+    }
+
     pub fn archive_project(&self, project_id: &str) -> Result<Project> {
         if project_id == SYSTEM_INBOX_PROJECT_ID {
             return Err(ImporterError::internal(

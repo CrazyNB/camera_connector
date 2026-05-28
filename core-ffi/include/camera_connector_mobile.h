@@ -44,6 +44,12 @@ char *camera_connector_mobile_core_set_active_project_json(
     const char *project_id
 );
 
+char *camera_connector_mobile_core_rename_project_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *name
+);
+
 char *camera_connector_mobile_core_archive_project_json(
     const CameraConnectorMobileCore *core,
     const char *project_id

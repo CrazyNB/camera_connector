@@ -21,6 +21,7 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_project_group_assets_json,
     camera_connector_mobile_core_release_failed_publish_retries_json,
     camera_connector_mobile_core_remove_device_account_json,
+    camera_connector_mobile_core_rename_project_json,
     camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
@@ -216,6 +217,35 @@ fn ffi_manages_projects_with_envelopes() {
     assert_eq!(restored["value"]["status"], "Active");
 
     unsafe { camera_connector_mobile_core_destroy(core) };
+}
+
+#[test]
+fn ffi_renames_project_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Untitled FFI Shoot").unwrap();
+    service.set_active_project(&project.project_id).unwrap();
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let project_id = CString::new(project.project_id.clone()).unwrap();
+    let name = CString::new("Client FFI Shoot").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let response = take_ffi_string(unsafe {
+        camera_connector_mobile_core_rename_project_json(core, project_id.as_ptr(), name.as_ptr())
+    });
+    let active = take_ffi_string(unsafe { camera_connector_mobile_core_active_project_json(core) });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    let active: Value = serde_json::from_str(&active).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["project_id"], project.project_id);
+    assert_eq!(value["value"]["name"], "Client FFI Shoot");
+    assert_eq!(value["value"]["slug"], "client-ffi-shoot");
+    assert_eq!(active["value"]["project_id"], project.project_id);
+    assert_eq!(active["value"]["name"], "Client FFI Shoot");
 }
 
 #[test]

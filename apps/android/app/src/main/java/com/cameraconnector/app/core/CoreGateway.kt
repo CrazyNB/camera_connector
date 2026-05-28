@@ -9,6 +9,7 @@ interface CoreGateway {
     fun observeProjects(): Flow<ProjectState>
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
+    suspend fun renameProject(projectId: String, name: String)
     suspend fun archiveProject(projectId: String)
     suspend fun restoreProject(projectId: String)
     suspend fun moveProjectGroup(
@@ -183,6 +184,23 @@ class PreviewCoreGateway : CoreGateway {
 
     override suspend fun setActiveProject(projectId: String) {
         projects.value = projects.value.copy(activeProjectId = projectId)
+    }
+
+    override suspend fun renameProject(projectId: String, name: String) {
+        val nextProjects = projects.value.projects.map { project ->
+            if (project.id == projectId) {
+                project.copy(
+                    name = name,
+                    slug = name.lowercase()
+                        .replace(Regex("[^a-z0-9]+"), "-")
+                        .trim('-')
+                        .ifBlank { "project" },
+                )
+            } else {
+                project
+            }
+        }
+        projects.value = projects.value.copy(projects = nextProjects)
     }
 
     override suspend fun archiveProject(projectId: String) {

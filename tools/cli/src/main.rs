@@ -270,6 +270,12 @@ enum ProjectCommand {
         #[arg(long, alias = "project-id")]
         id: String,
     },
+    Rename {
+        #[arg(long, alias = "project-id")]
+        id: String,
+        #[arg(long)]
+        name: String,
+    },
     MoveGroup {
         #[arg(long)]
         from: String,
@@ -1262,6 +1268,14 @@ fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) ->
                 .map(|project| project.project_id.as_str());
             println!("{}", project_line(&project, active_project_id));
         }
+        ProjectCommand::Rename { id, name } => {
+            let project = service.rename_project(&id, name)?;
+            let active_project = service.active_project()?;
+            let active_project_id = active_project
+                .as_ref()
+                .map(|project| project.project_id.as_str());
+            println!("{}", project_line(&project, active_project_id));
+        }
         ProjectCommand::MoveGroup { from, group_id, to } => {
             let moved_group = service.move_project_asset_group(&from, &group_id, &to)?;
             if let Some(group) = moved_group {
@@ -2119,6 +2133,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_project_rename_command() {
+        let cli = Cli::try_parse_from([
+            "camera-connector",
+            "project",
+            "rename",
+            "--id",
+            "project-1",
+            "--name",
+            "Client Shoot",
+        ])
+        .expect("project rename command should parse");
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Project {
+                action: ProjectCommand::Rename { id, name },
+                ..
+            }) if id == "project-1" && name == "Client Shoot"
+        ));
+    }
+
+    #[test]
     fn parses_project_move_group_command() {
         let cli = Cli::try_parse_from([
             "camera-connector",
@@ -2212,6 +2248,46 @@ mod tests {
         assert_eq!(target_after.summary.asset_count, 2);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn project_rename_command_updates_project_name() {
+        let path = unique_temp_config_path("project-rename");
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::Create {
+                name: "Untitled Shoot".to_string(),
+            },
+        )
+        .expect("project should create");
+        let service = CameraConnectorService::new(Some(path.clone()));
+        let project = service
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist");
+
+        handle_project_command(
+            Some(&path),
+            ProjectCommand::Rename {
+                id: project.project_id.clone(),
+                name: "Client Shoot".to_string(),
+            },
+        )
+        .expect("project should rename");
+
+        let active = service
+            .active_project()
+            .expect("active project should load")
+            .expect("active project should exist");
+        assert_eq!(active.project_id, project.project_id);
+        assert_eq!(active.name, "Client Shoot");
+        assert_eq!(active.slug, "client-shoot");
+
+        let parent = path.parent().map(Path::to_path_buf);
+        let _ = std::fs::remove_file(path);
+        if let Some(parent) = parent {
+            let _ = std::fs::remove_dir_all(parent);
+        }
     }
 
     #[test]

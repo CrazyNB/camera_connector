@@ -95,6 +95,7 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_create_project_json`
 - `camera_connector_mobile_core_list_projects_json`
 - `camera_connector_mobile_core_set_active_project_json`
+- `camera_connector_mobile_core_rename_project_json`
 - `camera_connector_mobile_core_archive_project_json`
 - `camera_connector_mobile_core_restore_project_json`
 - `camera_connector_mobile_core_active_project_json`
@@ -167,6 +168,7 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 - `createProjectJson`
 - `listProjectsJson`
 - `setActiveProjectJson`
+- `renameProjectJson`
 - `archiveProjectJson`
 - `restoreProjectJson`
 - `activeProjectJson`

@@ -96,6 +96,15 @@ impl MobileCore {
         Ok(serde_json::to_string(&project)?)
     }
 
+    pub fn rename_project_json(
+        &self,
+        project_id: String,
+        name: String,
+    ) -> MobileCoreResult<String> {
+        let project = self.service.rename_project(&project_id, name)?;
+        Ok(serde_json::to_string(&project)?)
+    }
+
     pub fn list_projects_json(&self) -> MobileCoreResult<String> {
         let projects = self.service.list_projects()?;
         Ok(serde_json::to_string(&projects)?)
@@ -415,6 +424,24 @@ pub unsafe extern "C" fn camera_connector_mobile_core_set_active_project_json(
     ffi_response(|| {
         let project_id = required_c_string(project_id, "project_id")?;
         let project = core_ref(core)?.set_active_project_json(project_id)?;
+        parse_json_value(&project)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// All string pointers must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_rename_project_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+    name: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let name = required_c_string(name, "name")?;
+        let project = core_ref(core)?.rename_project_json(project_id, name)?;
         parse_json_value(&project)
     })
 }
@@ -844,6 +871,26 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_setAct
         let project_id = required_java_string(env, project_id, "project_id");
         java_response(env, || {
             let project = mobile_core_from_handle(handle)?.set_active_project_json(project_id?)?;
+            parse_json_value(&project)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_renameProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    name: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        let name = required_java_string(env, name, "name");
+        java_response(env, || {
+            let project =
+                mobile_core_from_handle(handle)?.rename_project_json(project_id?, name?)?;
             parse_json_value(&project)
         })
     })

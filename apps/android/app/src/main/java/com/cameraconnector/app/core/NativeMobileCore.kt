@@ -56,6 +56,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     fun setActiveProject(projectId: String): JSONObject =
         call { setActiveProjectJson(handle, projectId) }
 
+    fun renameProject(projectId: String, name: String): JSONObject =
+        call { renameProjectJson(handle, projectId, name) }
+
     fun archiveProject(projectId: String): JSONObject =
         call { archiveProjectJson(handle, projectId) }
 
@@ -149,6 +152,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String
+    private external fun renameProjectJson(handle: Long, projectId: String, name: String): String
     private external fun archiveProjectJson(handle: Long, projectId: String): String
     private external fun restoreProjectJson(handle: Long, projectId: String): String
     private external fun activeProjectJson(handle: Long): String
