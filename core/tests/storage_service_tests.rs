@@ -1,7 +1,7 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorConfig, CameraConnectorService, ProjectStatus,
-    ReceiverConfigRequest, ReceiverSettingsUpdate, SqliteStore, StoredObjectLocation,
-    TransferQuery, TransferRecord, TransferStatus,
+    record_device_authenticated, record_device_connected, AssetGroupQuery, CameraConnectorConfig,
+    CameraConnectorService, ProjectStatus, ReceiverConfigRequest, ReceiverSettingsUpdate,
+    SqliteStore, StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -216,6 +216,46 @@ fn service_persists_receiver_accounts_in_sqlite_store() {
     assert_eq!(receiver_config.accounts.len(), 1);
     assert_eq!(receiver_config.accounts[0].username, "z5");
     assert_eq!(receiver_config.accounts[0].device_name, "Z5 II");
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn service_accounts_include_latest_device_state() {
+    let config_path = unique_temp_path("storage-service-account-device-state");
+    let state_dir = config_path
+        .parent()
+        .expect("config path should have parent")
+        .join("account-device-state");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            state_dir: Some(state_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+    service
+        .set_account("z5", Some("secret"), "Studio Z5")
+        .expect("account should save");
+    record_device_connected(&state_dir, "192.168.137.56", Some(51120), None, None)
+        .expect("device should connect");
+    record_device_authenticated(&state_dir, "192.168.137.56", Some("Old Z5"), Some("z5"))
+        .expect("device should authenticate");
+
+    let accounts = service.accounts().expect("account views should load");
+
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].username, "z5");
+    assert_eq!(accounts[0].device_name, "Studio Z5");
+    assert!(accounts[0].online);
+    assert_eq!(accounts[0].active_connections, 1);
+    assert_eq!(
+        accounts[0].last_remote_addr.as_deref(),
+        Some("192.168.137.56")
+    );
+    assert_eq!(accounts[0].last_remote_port, Some(51120));
+    assert!(accounts[0].last_seen_at_ms.is_some());
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(state_dir);

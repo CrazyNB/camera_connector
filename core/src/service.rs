@@ -363,11 +363,14 @@ impl CameraConnectorService {
     }
 
     pub fn accounts(&self) -> Result<Vec<AccountView>> {
-        Ok(self
+        let state_dir = self.storage_state_dir()?;
+        let accounts = self
             .receiver_account_configs()?
             .into_values()
             .map(account_view)
-            .collect())
+            .collect();
+        let devices = self.connected_devices(&state_dir, None, false)?;
+        Ok(accounts_with_devices(accounts, &devices))
     }
 
     pub fn diagnostic_inbox_groups(
@@ -755,6 +758,12 @@ fn accounts_with_devices(
     accounts
         .into_iter()
         .map(|mut account| {
+            account.online = false;
+            account.active_connections = 0;
+            account.last_remote_addr = None;
+            account.last_remote_port = None;
+            account.last_seen_at_ms = None;
+            account.last_disconnected_at_ms = None;
             let matching_devices = devices
                 .iter()
                 .filter(|view| view.device.username.as_deref() == Some(account.username.as_str()));
