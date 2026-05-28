@@ -16,6 +16,15 @@ internal data class ProjectLifecycleUi(
 internal fun ProjectState.activeProjectSummary(): ProjectSummary? =
     activeProjectId?.let { id -> projects.firstOrNull { it.id == id } }
 
+internal fun ProjectState.groupMoveTargets(sourceProjectId: String?): List<ProjectSummary> {
+    val sourceId = sourceProjectId?.takeIf { it.isNotBlank() } ?: return emptyList()
+    return projects.filter { project ->
+        project.id != sourceId &&
+            project.id != SYSTEM_INBOX_PROJECT_ID &&
+            project.status.equals("active", ignoreCase = true)
+    }
+}
+
 internal fun projectLifecycleUi(
     project: ProjectSummary,
     selected: Boolean,

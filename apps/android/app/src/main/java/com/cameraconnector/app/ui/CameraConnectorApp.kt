@@ -330,6 +330,12 @@ fun CameraConnectorApp(
                             dashboard = dashboard,
                             projectState = projectState,
                             onOpenProjects = { projectSwitcherOpen = true },
+                            actionsEnabled = actionInFlight == null,
+                            onMoveProjectGroup = { sourceProjectId, groupId, targetProjectId ->
+                                runAction("正在移动文件组") {
+                                    coreGateway.moveProjectGroup(sourceProjectId, groupId, targetProjectId)
+                                }
+                            },
                             gridColumnCount = inboxGridColumnCount,
                             onGridColumnCountChange = { count ->
                                 inboxGridColumnCount = count
@@ -1227,6 +1233,8 @@ private fun InboxScreen(
     dashboard: DashboardState,
     projectState: ProjectState,
     onOpenProjects: () -> Unit,
+    actionsEnabled: Boolean,
+    onMoveProjectGroup: (String, String, String) -> Unit,
     gridColumnCount: Int,
     onGridColumnCountChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -1251,7 +1259,13 @@ private fun InboxScreen(
         }
         PhotoDetailScreen(
             asset = photo,
+            projectState = projectState,
+            actionsEnabled = actionsEnabled,
             onBack = { selectedPhoto = null },
+            onMoveProjectGroup = { sourceProjectId, groupId, targetProjectId ->
+                selectedPhoto = null
+                onMoveProjectGroup(sourceProjectId, groupId, targetProjectId)
+            },
             modifier = modifier,
         )
         return
@@ -1594,11 +1608,20 @@ private fun CompactPhotoTile(asset: InboxAsset, onClick: () -> Unit) {
 @Composable
 private fun PhotoDetailScreen(
     asset: InboxAsset,
+    projectState: ProjectState,
+    actionsEnabled: Boolean,
     onBack: () -> Unit,
+    onMoveProjectGroup: (String, String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val metadataLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
+    val activeProject = projectState.activeProjectSummary()
+    val sourceProjectId = projectState.activeProjectId
+    val moveGroupId = asset.groupMoveId()
+    val moveTargets = remember(projectState.projects, sourceProjectId) {
+        projectState.groupMoveTargets(sourceProjectId)
+    }
     val photoMetadata by produceState<PhotoMetadata?>(initialValue = null, metadataLocation) {
         value = if (metadataLocation == null) {
             null
@@ -1667,6 +1690,58 @@ private fun PhotoDetailScreen(
                 DetailLine("RAW", asset.rawPath ?: "无")
                 DetailLine("JPEG", asset.jpegPath ?: "无")
                 DetailLine("视频", asset.videoPath ?: "无")
+            }
+        }
+        ProjectMoveSection(
+            currentProjectName = activeProject?.name ?: "未选择项目",
+            sourceProjectId = sourceProjectId,
+            groupId = moveGroupId,
+            targets = moveTargets,
+            actionsEnabled = actionsEnabled,
+            onMoveProjectGroup = onMoveProjectGroup,
+        )
+    }
+}
+
+@Composable
+private fun ProjectMoveSection(
+    currentProjectName: String,
+    sourceProjectId: String?,
+    groupId: String?,
+    targets: List<ProjectSummary>,
+    actionsEnabled: Boolean,
+    onMoveProjectGroup: (String, String, String) -> Unit,
+) {
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("项目归属", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            DetailLine("当前项目", currentProjectName)
+            if (sourceProjectId == null || groupId == null) {
+                Text(
+                    "缺少文件组标识，不能移动。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (targets.isEmpty()) {
+                Text(
+                    "没有可移动的目标项目。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                Spacer(Modifier.height(8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(targets, key = { it.id }) { target ->
+                        OutlinedButton(
+                            onClick = { onMoveProjectGroup(sourceProjectId, groupId, target.id) },
+                            enabled = actionsEnabled,
+                            shape = elementShape,
+                        ) {
+                            Text("移到 ${target.name}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
         }
     }
@@ -2669,6 +2744,9 @@ private fun InboxAsset.filename(): String =
 
 private fun InboxAsset.groupTitle(): String =
     groupKey.ifBlank { filename().substringBeforeLast('.', filename()) }
+
+private fun InboxAsset.groupMoveId(): String? =
+    id.takeIf { it.isNotBlank() }
 
 private fun InboxAsset.sourceLabel(): String =
     displaySource?.takeIf { it.isNotBlank() }

@@ -48,6 +48,7 @@ Assert-File "apps\android\app\src\main\AndroidManifest.xml"
 Assert-File "apps\android\app\src\main\res\values\strings.xml"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\MainActivity.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt"
+Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectUiModels.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt"
 Assert-File "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt"
@@ -128,6 +129,9 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "InboxFilterBar"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "AccountFilterBar"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "OriginalPathFilterBar"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "ProjectMoveSection"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onMoveProjectGroup"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectUiModels.kt" "groupMoveTargets"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x5168,0x90E8,0x8D26,0x53F7))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" (U @(0x5168,0x90E8,0x8DEF,0x5F84))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "SourceFilterBar"

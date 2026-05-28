@@ -55,6 +55,33 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun groupMoveTargetsOnlyIncludeOtherActiveRegularProjects() {
+        val state = ProjectState(
+            projects = listOf(
+                project(id = "project-active", status = "Active"),
+                project(id = "project-target", status = "Active"),
+                project(id = "project-archived", status = "Archived"),
+                project(id = "project-inbox", status = "Active"),
+            ),
+            activeProjectId = "project-active",
+        )
+
+        val targets = state.groupMoveTargets(sourceProjectId = "project-active")
+
+        assertEquals(listOf("project-target"), targets.map { it.id })
+    }
+
+    @Test
+    fun groupMoveTargetsAreEmptyWithoutSourceProject() {
+        val state = ProjectState(
+            projects = listOf(project(id = "project-target", status = "Active")),
+            activeProjectId = null,
+        )
+
+        assertEquals(emptyList<ProjectSummary>(), state.groupMoveTargets(sourceProjectId = null))
+    }
+
+    @Test
     fun activeProjectSummaryDoesNotFallbackToFirstProject() {
         val state = ProjectState(
             projects = listOf(project(id = "project-client", status = "Active")),
