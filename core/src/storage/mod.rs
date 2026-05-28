@@ -74,6 +74,7 @@ pub struct StoredAsset {
     pub final_filename: String,
     pub normalized_stem: String,
     pub original_path: String,
+    pub original_parent_path: Option<String>,
     pub final_location: Option<StoredObjectLocation>,
     pub size_bytes: u64,
     pub capture_at_ms: Option<i64>,
@@ -714,8 +715,8 @@ impl SqliteStore {
             let mut statement = connection.prepare(
                 "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
                         media_kind, format, original_filename, final_filename, normalized_stem, original_path,
-                        final_location_payload, size_bytes, capture_at_ms, received_at_ms,
-                        published_at_ms, source_identity, username, remote_addr,
+                        original_parent_path, final_location_payload, size_bytes, capture_at_ms,
+                        received_at_ms, published_at_ms, source_identity, username, remote_addr,
                         duplicate_index, duplicate_count
                  FROM assets
                  WHERE project_id = ?1 AND group_id = ?2
@@ -1185,8 +1186,8 @@ fn received_assets_for_group(
     let mut statement = connection.prepare(
         "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
                 media_kind, format, original_filename, final_filename, normalized_stem, original_path,
-                final_location_payload, size_bytes, capture_at_ms, received_at_ms,
-                published_at_ms, source_identity, username, remote_addr,
+                original_parent_path, final_location_payload, size_bytes, capture_at_ms,
+                received_at_ms, published_at_ms, source_identity, username, remote_addr,
                 duplicate_index, duplicate_count
          FROM assets
          WHERE project_id = ?1 AND group_id = ?2
@@ -1825,7 +1826,7 @@ fn received_asset_from_row(row: &Row<'_>) -> std::result::Result<ReceivedAsset, 
 fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusqlite::Error> {
     let media_kind: String = row.get(6)?;
     let format: String = row.get(7)?;
-    let final_location_payload: Option<String> = row.get(12)?;
+    let final_location_payload: Option<String> = row.get(13)?;
     Ok(StoredAsset {
         asset_id: row.get(0)?,
         project_id: row.get(1)?,
@@ -1839,16 +1840,17 @@ fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusq
         final_filename: row.get(9)?,
         normalized_stem: row.get(10)?,
         original_path: row.get(11)?,
+        original_parent_path: row.get(12)?,
         final_location: parse_location(final_location_payload)?,
-        size_bytes: row.get::<_, i64>(13)? as u64,
-        capture_at_ms: row.get(14)?,
-        received_at_ms: row.get(15)?,
-        published_at_ms: row.get(16)?,
-        source_identity: row.get(17)?,
-        username: row.get(18)?,
-        remote_addr: row.get(19)?,
-        duplicate_index: row.get::<_, Option<i64>>(20)?.map(|value| value as usize),
-        duplicate_count: row.get::<_, Option<i64>>(21)?.map(|value| value as usize),
+        size_bytes: row.get::<_, i64>(14)? as u64,
+        capture_at_ms: row.get(15)?,
+        received_at_ms: row.get(16)?,
+        published_at_ms: row.get(17)?,
+        source_identity: row.get(18)?,
+        username: row.get(19)?,
+        remote_addr: row.get(20)?,
+        duplicate_index: row.get::<_, Option<i64>>(21)?.map(|value| value as usize),
+        duplicate_count: row.get::<_, Option<i64>>(22)?.map(|value| value as usize),
     })
 }
 

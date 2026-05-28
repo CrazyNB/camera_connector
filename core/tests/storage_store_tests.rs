@@ -371,6 +371,9 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
     assert_eq!(assets.len(), 2);
     assert!(assets.iter().all(|asset| asset.group_id.is_some()));
     assert!(assets.iter().all(|asset| asset.media_kind == "photo"));
+    assert!(assets
+        .iter()
+        .all(|asset| asset.original_parent_path.as_deref() == Some("DCIM/100")));
 
     let other_page = store
         .asset_group_page(&project_b.project_id, AssetGroupQuery::default(), 0, 25)
