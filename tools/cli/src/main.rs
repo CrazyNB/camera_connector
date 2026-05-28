@@ -5,12 +5,12 @@ use std::str::FromStr;
 #[cfg(test)]
 use camera_connector_core::ReceiverSettingsConfig;
 use camera_connector_core::{
-    append_transfer_record, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService, ImportSource,
-    LocalFileSink, ObjectFormat, Project, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
-    Result, SqliteStore, StoredAsset, StoredObjectLocation, TransferQuery, TransferRecord,
-    TransferRecordView, TransferStatus,
+    append_transfer_record, AccountView, AssetFacetCount, AssetGroupPage, AssetGroupQuery,
+    AssetGroupSummary, CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService,
+    ImportSource, LocalFileSink, ObjectFormat, Project, PushProtocol, PushReceiverConfig,
+    ReceivedAsset, ReceivedAssetGroup, ReceiverConfigRequest, ReceiverRuntimeStatus,
+    ReceiverSettingsUpdate, Result, SqliteStore, StoredAsset, StoredObjectLocation, TransferQuery,
+    TransferRecord, TransferRecordView, TransferStatus,
 };
 use clap::{Parser, Subcommand};
 
@@ -783,6 +783,30 @@ fn project_line(project: &Project, active_project_id: Option<&str>) -> String {
     )
 }
 
+fn account_view_line(account: &AccountView) -> String {
+    format!(
+        "account\tusername={}\tdevice={}\tpassword_configured={}\tonline={}\tconnections={}\tremote={}\tport={}\tlast_seen_ms={}\tlast_disconnected_ms={}",
+        account.username,
+        account.device_name,
+        account.password_configured,
+        account.online,
+        account.active_connections,
+        account.last_remote_addr.as_deref().unwrap_or("-"),
+        account
+            .last_remote_port
+            .map(|port| port.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        account
+            .last_seen_at_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        account
+            .last_disconnected_at_ms
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string())
+    )
+}
+
 fn print_asset_groups(groups: Vec<ReceivedAssetGroup>) {
     for group in groups {
         println!("{}", asset_group_line(&group));
@@ -812,27 +836,7 @@ fn print_dashboard(dashboard: CameraConnectorDashboard) {
             .unwrap_or_else(|| "-".to_string())
     );
     for account in dashboard.accounts {
-        println!(
-            "account\tusername={}\tdevice={}\tpassword_configured={}\tonline={}\tconnections={}\tremote={}\tport={}\tlast_seen_ms={}\tlast_disconnected_ms={}",
-            account.username,
-            account.device_name,
-            account.password_configured,
-            account.online,
-            account.active_connections,
-            account.last_remote_addr.as_deref().unwrap_or("-"),
-            account
-                .last_remote_port
-                .map(|port| port.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            account
-                .last_seen_at_ms
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            account
-                .last_disconnected_at_ms
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "-".to_string())
-        );
+        println!("{}", account_view_line(&account));
     }
     for view in dashboard.devices {
         let device = view.device;
@@ -1167,16 +1171,7 @@ fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) ->
                 println!("accounts: -");
             } else {
                 for account in accounts {
-                    println!(
-                        "{}\tdevice={}\tpassword={}",
-                        account.username,
-                        account.device_name,
-                        if account.password_configured {
-                            "configured"
-                        } else {
-                            "not required"
-                        }
-                    );
+                    println!("{}", account_view_line(&account));
                 }
             }
         }
