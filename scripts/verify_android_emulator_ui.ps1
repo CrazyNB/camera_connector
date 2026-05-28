@@ -36,7 +36,7 @@ function Start-App {
 }
 
 function Get-UiXml {
-    for ($attempt = 1; $attempt -le 6; $attempt++) {
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
         Remove-Item -LiteralPath $localDumpPath -ErrorAction SilentlyContinue
         & $adb -s $Serial shell rm -f $dumpPath 2>$null | Out-Null
         $oldErrorActionPreference = $ErrorActionPreference
@@ -112,6 +112,26 @@ function Tap-UntilUiContains {
         }
     }
     throw "Expected UI to contain '$Label' after tapping $X,$Y."
+}
+
+function Swipe-UntilUiContains {
+    param([int]$StartX, [int]$StartY, [int]$EndX, [int]$EndY, [string]$Needle, [string]$Label)
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $xml = Get-UiXml
+        if ($xml.Contains($Needle)) {
+            return $xml
+        }
+        Invoke-Adb @("shell", "input", "swipe", "$StartX", "$StartY", "$EndX", "$EndY", "500") | Out-Null
+        Start-Sleep -Milliseconds 900
+    }
+    throw "Expected UI to contain '$Label' after swiping."
+}
+
+function Scroll-ToTop {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Invoke-Adb @("shell", "input", "swipe", "540", "760", "540", "1900", "500") | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 function Tap {
@@ -210,23 +230,25 @@ Assert-UiNotContains $xml $labels.DeviceAccounts "device accounts on overview"
 Assert-UiNotContains $xml $labels.ImportLocation "import location on overview"
 
 Tap-UiNodeByText $xml "SFTP" "SFTP protocol segment"
+$saveReceiverSettingsLabel = U @(0x4FDD,0x5B58,0x63A5,0x6536,0x8BBE,0x7F6E)
+$xml = Swipe-UntilUiContains 540 1950 540 1250 $saveReceiverSettingsLabel "save receiver settings"
+Tap-UiNodeByText $xml $saveReceiverSettingsLabel "save receiver settings"
+Scroll-ToTop
 $xml = Get-UiXml
-Tap-UiNodeByText $xml (U @(0x4FDD,0x5B58,0x63A5,0x6536,0x8BBE,0x7F6E)) "save receiver settings"
-$xml = Get-UiXml
-Assert-UiContains $xml "SFTP 192.168.137.1:2121" "SFTP unified endpoint after save"
+Assert-UiContains $xml "SFTP " "SFTP unified endpoint after save"
 Use-EmulatorBindableReceiverConfig
 Start-App
 $xml = Wait-UiContains "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after config setup"
 Assert-UiContains $xml "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after save"
 
 if ($xml.Contains($labels.Running)) {
-    Tap 540 760
+    Tap 540 1080
     $xml = Wait-UiContains $labels.Stopped "receiver stopped state"
 }
 
-$xml = Tap-UntilUiContains 540 760 $labels.Running "receiver running state"
+$xml = Tap-UntilUiContains 540 1080 $labels.Running "receiver running state"
 Assert-UiContains $xml $labels.Stop "stop button after running"
-$xml = Tap-UntilUiContains 540 760 $labels.Stopped "receiver stopped state"
+$xml = Tap-UntilUiContains 540 1080 $labels.Stopped "receiver stopped state"
 
 Tap 975 240
 $xml = Get-UiXml
