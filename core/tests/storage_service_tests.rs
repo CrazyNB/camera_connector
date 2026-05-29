@@ -28,8 +28,8 @@ fn service_creates_and_selects_active_storage_project() {
 }
 
 #[test]
-fn service_ensures_system_inbox_project_when_none_is_active() {
-    let config_path = unique_temp_path("storage-service-ensure-inbox");
+fn service_requires_explicit_active_project_when_none_is_selected() {
+    let config_path = unique_temp_path("storage-service-requires-active-project");
     let service = CameraConnectorService::new(Some(config_path.clone()));
 
     assert!(service
@@ -37,26 +37,20 @@ fn service_ensures_system_inbox_project_when_none_is_active() {
         .expect("active project should load")
         .is_none());
 
-    let project = service
-        .ensure_active_project()
-        .expect("active project should be ensured");
-
-    assert_eq!(project.project_id, "project-inbox");
-    assert_eq!(project.name, "Inbox");
-    assert_eq!(
-        service
-            .active_project()
-            .expect("active project should load")
-            .expect("active project should exist")
-            .project_id,
-        "project-inbox"
-    );
+    assert!(service
+        .active_project()
+        .expect("active project should load")
+        .is_none());
+    assert!(service
+        .list_projects()
+        .expect("projects should load")
+        .is_empty());
 
     let _ = std::fs::remove_file(config_path);
 }
 
 #[test]
-fn service_ensure_active_project_keeps_existing_selection() {
+fn service_active_project_returns_existing_selection() {
     let config_path = unique_temp_path("storage-service-preserve-active");
     let service = CameraConnectorService::new(Some(config_path.clone()));
     let project = service
@@ -66,11 +60,12 @@ fn service_ensure_active_project_keeps_existing_selection() {
         .set_active_project(&project.project_id)
         .expect("active project should save");
 
-    let ensured = service
-        .ensure_active_project()
-        .expect("active project should be ensured");
+    let active = service
+        .active_project()
+        .expect("active project should load")
+        .expect("active project should exist");
 
-    assert_eq!(ensured.project_id, project.project_id);
+    assert_eq!(active.project_id, project.project_id);
 
     let _ = std::fs::remove_file(config_path);
 }
@@ -161,8 +156,11 @@ fn service_uses_configured_state_dir_for_project_storage() {
         .expect("receiver settings should save");
 
     let project = service
-        .ensure_active_project()
-        .expect("active project should be ensured");
+        .create_project("Configured State Project")
+        .expect("project should create");
+    service
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
 
     let configured_store =
         SqliteStore::open_state_dir(&configured_state_dir).expect("configured store should open");
@@ -659,6 +657,37 @@ fn service_project_dashboard_includes_project_scoped_publish_queue_summary() {
     assert_eq!(dashboard.publish_queue.failed_count, 1);
 
     let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
+fn service_project_dashboard_reports_configured_output_dir_when_receiver_stopped() {
+    let config_path = unique_temp_path("storage-service-dashboard-output-dir");
+    let output_dir = unique_temp_path("storage-service-dashboard-output-dir-files");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Output Dir")
+        .expect("project should create");
+    service
+        .set_receiver_settings(ReceiverSettingsUpdate {
+            output_dir: Some(output_dir.clone()),
+            ..ReceiverSettingsUpdate::default()
+        })
+        .expect("receiver settings should save");
+
+    let dashboard = service
+        .project_dashboard(
+            &project.project_id,
+            AssetGroupQuery::default(),
+            0,
+            20,
+            false,
+        )
+        .expect("project dashboard should build");
+
+    assert_eq!(dashboard.paths.output_dir.as_deref(), Some(output_dir.as_path()));
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(output_dir);
 }
 
 #[test]

@@ -30,6 +30,17 @@ android {
         buildConfigField("boolean", "USE_NATIVE_CORE", useNativeCore.get().toString())
         buildConfigField("boolean", "NATIVE_CORE_FALLBACK_TO_PREVIEW", nativeCoreFallbackToPreview.get().toString())
     }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
 }
 
 kotlin {

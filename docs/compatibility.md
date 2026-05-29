@@ -10,6 +10,14 @@ Record every real-camera push test here. Unknown is acceptable until a real smok
 | Fujifilm | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 | Panasonic | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 
+## Android Physical Device Matrix
+
+Use this table for the current Android milestone: one real phone, one real camera, FTP push, SAF output, foreground receiver, and project-scoped visibility.
+
+| Phone | Android | Network Mode | Camera | FTP Login | Foreground Service | SAF Publish | RAW/JPEG Pair | Project Photos | Transfers | Diagnostics | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs physical-device test |
+
 ## Test Record Template
 
 ```text
@@ -32,6 +40,38 @@ RAW upload:
 Video upload:
 Large file stability:
 Observed FTP commands:
+Notes:
+```
+
+## Android Physical Device Test Template
+
+```text
+Date:
+Tester:
+Phone model:
+Android version:
+Camera vendor/model/firmware:
+Network mode: phone hotspot / LAN / camera AP
+Phone receiver IP:
+Camera IP:
+Protocol:
+Port:
+Authentication:
+Selected Android output: SAF tree / app-private fallback
+Notification permission:
+Foreground service: starts / remains visible / stops cleanly
+Camera login:
+JPEG upload:
+RAW upload:
+RAW+JPEG grouping:
+SAF publish:
+Project photos visibility:
+Photo detail visibility:
+Project inbox visibility:
+Transfer record visibility:
+Publish queue recovery:
+Diagnostics path:
+Compatibility result:
 Notes:
 ```
 

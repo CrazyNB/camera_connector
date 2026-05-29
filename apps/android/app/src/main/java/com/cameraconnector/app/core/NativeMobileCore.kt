@@ -11,6 +11,14 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     fun projectDashboardJson(projectId: String, offset: Int, limit: Int): JSONObject =
         call { projectDashboardJson(handle, projectId, offset, limit) }
 
+    fun projectAssetGroupPageJson(
+        projectId: String,
+        query: InboxAssetQuery,
+        offset: Int,
+        limit: Int,
+    ): JSONObject =
+        call { projectAssetGroupPageJson(handle, projectId, assetGroupQueryJson(query).toString(), offset, limit) }
+
     fun projectGroupAssetsJson(projectId: String, groupId: String): JSONArray =
         call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
             ?: JSONArray()
@@ -64,9 +72,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
 
     fun restoreProject(projectId: String): JSONObject =
         call { restoreProjectJson(handle, projectId) }
-
-    fun ensureActiveProject(): JSONObject =
-        call { ensureActiveProjectJson(handle) }
 
     fun activeProject(): JSONObject? {
         val value = call { activeProjectJson(handle) }
@@ -131,6 +136,13 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private external fun create(configPath: String?): Long
     private external fun destroy(handle: Long)
     private external fun projectDashboardJson(handle: Long, projectId: String, offset: Int, limit: Int): String
+    private external fun projectAssetGroupPageJson(
+        handle: Long,
+        projectId: String,
+        queryJson: String,
+        offset: Int,
+        limit: Int,
+    ): String
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun moveProjectGroupJson(
         handle: Long,
@@ -156,7 +168,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private external fun archiveProjectJson(handle: Long, projectId: String): String
     private external fun restoreProjectJson(handle: Long, projectId: String): String
     private external fun activeProjectJson(handle: Long): String
-    private external fun ensureActiveProjectJson(handle: Long): String
     private external fun saveReceiverSettingsJson(handle: Long, patchJson: String): String
     private external fun saveDeviceAccountJson(
         handle: Long,
@@ -193,6 +204,16 @@ internal fun receiverSettingsPatchFields(settings: ReceiverSettings): Map<String
         "ftp_port" to settings.ftpPort,
         "sftp_port" to settings.sftpPort,
     )
+
+internal fun assetGroupQueryJson(query: InboxAssetQuery): JSONObject =
+    JSONObject().apply {
+        query.username?.takeIf { it.isNotBlank() }?.let { put("username", it) }
+        query.sourceName?.takeIf { it.isNotBlank() }?.let { put("source_name", it) }
+        query.originalPath?.takeIf { it.isNotBlank() }?.let { put("original_path", it) }
+        query.remoteAddr?.takeIf { it.isNotBlank() }?.let { put("remote_addr", it) }
+        query.format?.takeIf { it.isNotBlank() }?.let { put("format", it) }
+        query.role?.let { put("role", it.wireName) }
+    }
 
 object NativeEnvelope {
     fun unwrap(raw: String): JSONObject {

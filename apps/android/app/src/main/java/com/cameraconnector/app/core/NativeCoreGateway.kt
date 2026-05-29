@@ -26,14 +26,27 @@ class NativeCoreGateway(
     private val dashboard = MutableStateFlow(emptyDashboard())
 
     init {
-        projects.value = loadProjects()
-        dashboard.value = loadDashboard(projects.value.activeProjectId)
         pollDashboard()
     }
 
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
 
     override fun observeProjects(): Flow<ProjectState> = projects.asStateFlow()
+
+    override suspend fun loadInbox(query: InboxAssetQuery, offset: Int, limit: Int): List<InboxAsset> =
+        withContext(Dispatchers.IO) {
+            val projectId = projects.value.activeProjectId
+                ?: loadProjects().activeProjectId
+                ?: return@withContext emptyList()
+            mapInboxAssets(
+                nativeCore.projectAssetGroupPageJson(
+                    projectId = projectId,
+                    query = query,
+                    offset = offset,
+                    limit = limit,
+                ),
+            )
+        }
 
     suspend fun refresh() {
         val (nextProjects, nextDashboard) = withContext(Dispatchers.IO) {
@@ -46,7 +59,7 @@ class NativeCoreGateway(
 
     override suspend fun createProject(name: String): ProjectSummary {
         val project = withContext(Dispatchers.IO) {
-            val created = nativeCore.createProject(name).toProjectSummary()
+            val created = mapProjectSummary(nativeCore.createProject(name))
             nativeCore.setActiveProject(created.id)
             created
         }
@@ -127,13 +140,9 @@ class NativeCoreGateway(
     override suspend fun retryFailedPublishes() {
         withContext(Dispatchers.IO) {
             val projectId = loadProjects().activeProjectId
-                ?: nativeCore.ensureActiveProject()
-                    .optString("project_id")
-                    .takeIf { it.isNotBlank() }
-            if (projectId != null) {
-                nativeCore.releaseFailedPublishRetries(projectId)
-                receiverServiceController.retryFailedPublishes()
-            }
+                ?: return@withContext
+            nativeCore.releaseFailedPublishRetries(projectId)
+            receiverServiceController.retryFailedPublishes()
         }
         refresh()
     }
@@ -143,11 +152,8 @@ class NativeCoreGateway(
         nativeCore.close()
     }
 
-    private fun loadDashboard(
-        activeProjectId: String? = loadProjects().activeProjectId,
-    ): DashboardState {
+    private fun loadDashboard(activeProjectId: String?): DashboardState {
         val projectId = activeProjectId
-            ?: loadProjects().activeProjectId
             ?: return emptyDashboard()
         val dashboardJson = nativeCore.projectDashboardJson(
             projectId,
@@ -158,15 +164,15 @@ class NativeCoreGateway(
     }
 
     private fun loadProjects(): ProjectState {
-        val activeProjectId = nativeCore.ensureActiveProject()
-            .optString("project_id")
-            .takeIf { it.isNotBlank() }
+        val activeProjectId = nativeCore.activeProject()
+            ?.optString("project_id")
+            ?.takeIf { it.isNotBlank() }
         val projectList = nativeCore.listProjects()
         return ProjectState(
             projects = buildList {
                 for (index in 0 until projectList.length()) {
                     val item = projectList.optJSONObject(index) ?: continue
-                    add(item.toProjectSummary())
+                    add(mapProjectSummary(item))
                 }
             },
             activeProjectId = activeProjectId,
@@ -203,8 +209,7 @@ class NativeCoreGateway(
             ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
             ?.let(::normalizeProtocol)
         val protocol = if (running) statusProtocol ?: settingsProtocol else settingsProtocol
-        val configuredHost = receiverSettings?.optString("bind_host")
-            ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+        val configuredHost = jsonStringOrNull(receiverSettings, "bind_host")
             ?: DEFAULT_LISTEN_HOST
         val configuredPort = when (protocol) {
             "SFTP" -> receiverSettings?.optInt("sftp_port")?.takeIf { it in 1..65_535 } ?: 2222
@@ -232,15 +237,14 @@ class NativeCoreGateway(
                 accountCount = receiverStatus?.optInt("account_count") ?: 0,
                 host = host,
                 port = port,
-                outputLabel = paths?.optString("output_dir").orEmpty()
-                    .ifBlank { "选择收件箱文件夹" },
+                outputLabel = dashboardOutputLabel(paths, receiverSettings),
                 message = receiverStatus?.takeIf { !it.isNull("message") }
                     ?.optString("message")
                     .orEmpty()
                     .takeIf { it.isNotBlank() },
             ),
             accounts = mapAccounts(value),
-            inbox = mapInbox(assets),
+            inbox = mapInboxAssets(assets),
             transfers = transferRows,
             publishQueue = mapPublishQueueState(value.optJSONObject("publish_queue")),
         )
@@ -302,52 +306,6 @@ class NativeCoreGateway(
                 )
             }
         }
-    }
-
-    private fun mapInbox(assets: JSONObject?): List<InboxAsset> {
-        val groups = assets?.optJSONArray("groups") ?: return emptyList()
-        return buildList {
-            for (index in 0 until groups.length()) {
-                val group = groups.optJSONObject(index) ?: continue
-                val primary = group.optJSONObject("primary") ?: continue
-                val raw = group.optJSONObject("raw")
-                val jpeg = group.optJSONObject("jpeg")
-                val video = group.optJSONObject("video")
-                add(
-                    InboxAsset(
-                        id = inboxStableId(
-                            group.optString("group_id"),
-                            primary.optString("id"),
-                        ),
-                        groupKey = group.optString("group_key")
-                            .ifBlank { primary.optString("id") },
-                        displayPath = primary.optString("virtual_display_path")
-                            .ifBlank { primary.optString("filename") },
-                        format = primary.optString("format"),
-                        receivedAt = primary.optLong("received_time_ms").toString(),
-                        username = primary.optString("username").takeIf { it.isNotBlank() },
-                        displaySource = primary.optString("display_source").takeIf { it.isNotBlank() },
-                        originalPath = primary.optString("original_path").takeIf { it.isNotBlank() },
-                        sizeBytes = primary.optLong("size_bytes").takeIf { !primary.isNull("size_bytes") },
-                        previewLocation = jpeg?.assetStorageLocation()
-                            ?: primary.assetStorageLocation(),
-                        rawPath = raw?.assetDisplayPath(),
-                        jpegPath = jpeg?.assetDisplayPath(),
-                        videoPath = video?.assetDisplayPath(),
-                    ),
-                )
-            }
-        }
-    }
-
-    private fun JSONObject.assetDisplayPath(): String =
-        optString("virtual_display_path").ifBlank { optString("filename") }
-
-    private fun JSONObject.assetStorageLocation(): String? {
-        val location = optJSONObject("storage_location") ?: return null
-        return location.optString("path")
-            .ifBlank { location.optString("uri") }
-            .ifBlank { null }
     }
 
     private fun mapTransfers(
@@ -441,25 +399,95 @@ class NativeCoreGateway(
             transfers = emptyList(),
         )
 
-    private fun JSONObject.toProjectSummary(): ProjectSummary =
-        ProjectSummary(
-            id = optString("project_id"),
-            name = optString("name"),
-            slug = optString("slug"),
-            status = optString("status"),
-            createdAtMs = optLong("created_at_ms"),
-            updatedAtMs = optLong("updated_at_ms"),
-        )
-
     private companion object {
-        const val DEFAULT_LISTEN_HOST = "192.168.137.1"
         const val DASHBOARD_POLL_INTERVAL_MS = 2_000L
         const val CONTINUOUS_INBOX_LIMIT = 2_000
     }
 }
 
+internal fun dashboardOutputLabel(paths: JSONObject?, receiverSettings: JSONObject?): String =
+    jsonStringOrNull(paths, "output_dir")
+        ?: jsonStringOrNull(receiverSettings, "output_dir")
+        ?: "应用私有目录"
+
+internal fun jsonStringOrNull(value: JSONObject?, key: String): String? =
+    value
+        ?.takeIf { it.has(key) && !it.isNull(key) }
+        ?.optString(key)
+        ?.trim()
+        ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+
+internal fun mapProjectSummary(value: JSONObject): ProjectSummary {
+    val status = value.optString("status")
+    val id = value.optString("project_id")
+    val active = status.equals("Active", ignoreCase = true)
+    val archived = status.equals("Archived", ignoreCase = true)
+    val capabilities = value.optJSONObject("capabilities")
+    return ProjectSummary(
+        id = id,
+        name = value.optString("name"),
+        slug = value.optString("slug"),
+        status = status,
+        createdAtMs = value.optLong("created_at_ms"),
+        updatedAtMs = value.optLong("updated_at_ms"),
+        canBeActiveProject = capabilities?.optBoolean("can_be_active_project", active) ?: active,
+        canArchive = capabilities?.optBoolean("can_archive", active) ?: active,
+        canRename = capabilities?.optBoolean("can_rename", true) ?: true,
+        canRestore = capabilities?.optBoolean("can_restore", archived) ?: archived,
+        canAcceptMovedGroups = capabilities?.optBoolean("can_accept_moved_groups", active) ?: active,
+    )
+}
+
 internal fun inboxStableId(groupId: String, primaryAssetId: String): String =
     groupId.ifBlank { primaryAssetId }
+
+internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
+    val groups = assets?.optJSONArray("groups") ?: return emptyList()
+    return buildList {
+        for (index in 0 until groups.length()) {
+            val group = groups.optJSONObject(index) ?: continue
+            val primary = group.optJSONObject("primary") ?: continue
+            val raw = group.optJSONObject("raw")
+            val jpeg = group.optJSONObject("jpeg")
+            val video = group.optJSONObject("video")
+            add(
+                InboxAsset(
+                    id = inboxStableId(
+                        group.optString("group_id"),
+                        primary.optString("id"),
+                    ),
+                    groupKey = group.optString("group_key")
+                        .ifBlank { primary.optString("id") },
+                    displayPath = primary.assetDisplayPath(),
+                    format = primary.optString("format"),
+                    receivedAt = primary.optLong("received_time_ms").toString(),
+                    username = primary.optString("username").takeIf { it.isNotBlank() },
+                    displaySource = primary.optString("display_source").takeIf { it.isNotBlank() },
+                    originalPath = primary.optString("original_path").takeIf { it.isNotBlank() },
+                    sizeBytes = primary.optLong("size_bytes").takeIf { !primary.isNull("size_bytes") },
+                    previewLocation = jpeg?.assetStorageLocation()
+                        ?: primary.assetStorageLocation(),
+                    rawPath = raw?.assetDisplayPath(),
+                    jpegPath = jpeg?.assetDisplayPath(),
+                    videoPath = video?.assetDisplayPath(),
+                    hasRaw = raw != null,
+                    hasJpeg = jpeg != null || primary.optString("format").equals("Jpeg", ignoreCase = true),
+                    hasVideo = video != null,
+                ),
+            )
+        }
+    }
+}
+
+private fun JSONObject.assetDisplayPath(): String =
+    optString("virtual_display_path").ifBlank { optString("filename") }
+
+private fun JSONObject.assetStorageLocation(): String? {
+    val location = optJSONObject("storage_location") ?: return null
+    return location.optString("path")
+        .ifBlank { location.optString("uri") }
+        .ifBlank { null }
+}
 
 internal fun mapPublishQueueState(value: JSONObject?): PublishQueueState =
     PublishQueueState(

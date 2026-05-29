@@ -12,7 +12,6 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_claim_next_publish_item_json,
     camera_connector_mobile_core_complete_publish_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
-    camera_connector_mobile_core_ensure_active_project_json,
     camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
@@ -246,27 +245,6 @@ fn ffi_renames_project_json_envelope() {
     assert_eq!(value["value"]["slug"], "client-ffi-shoot");
     assert_eq!(active["value"]["project_id"], project.project_id);
     assert_eq!(active["value"]["name"], "Client FFI Shoot");
-}
-
-#[test]
-fn ffi_ensures_active_project_with_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
-        .expect("config path should not contain nul");
-
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-    let ensured =
-        take_ffi_string(unsafe { camera_connector_mobile_core_ensure_active_project_json(core) });
-    let ensured: Value = serde_json::from_str(&ensured).unwrap();
-    assert_eq!(ensured["ok"], true);
-    assert_eq!(ensured["value"]["project_id"], "project-inbox");
-
-    let active_again =
-        take_ffi_string(unsafe { camera_connector_mobile_core_active_project_json(core) });
-    let active_again: Value = serde_json::from_str(&active_again).unwrap();
-    assert_eq!(active_again["value"]["project_id"], "project-inbox");
-
-    unsafe { camera_connector_mobile_core_destroy(core) };
 }
 
 #[test]
@@ -564,7 +542,7 @@ fn ffi_completes_publish_with_platform_location_json_envelope() {
 
 #[test]
 fn ffi_rejects_null_core_pointer() {
-    let project_id = CString::new("project-inbox").unwrap();
+    let project_id = CString::new("project-missing").unwrap();
     let response_ptr = unsafe {
         camera_connector_mobile_core_project_dashboard_json(
             std::ptr::null(),

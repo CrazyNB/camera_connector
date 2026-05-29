@@ -1,7 +1,7 @@
 use camera_connector_core::{
-    AssetGroupQuery, ObjectFormat, ProjectStatus, PushProtocol, ReceiverAccountConfig,
-    ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, SqliteStore,
-    StoredObjectLocation, TransferRecord, TransferStatus,
+    AssetGroupQuery, ObjectFormat, ProjectCapabilities, ProjectKind, ProjectStatus, PushProtocol,
+    ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,
+    SqliteStore, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 use rusqlite::Connection;
 
@@ -101,63 +101,36 @@ fn sqlite_store_renames_projects_without_changing_identity() {
 }
 
 #[test]
-fn sqlite_store_rejects_archiving_system_inbox_project() {
+fn sqlite_store_exposes_project_lifecycle_capabilities() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let inbox = store
-        .ensure_inbox_project()
-        .expect("inbox project should exist");
-    store
-        .set_active_project(&inbox.project_id)
-        .expect("inbox should become active");
+    let active = store
+        .create_project("Client Shoot")
+        .expect("project should create");
+    let archived = store
+        .archive_project(&active.project_id)
+        .expect("project should archive");
 
-    let result = store.archive_project(&inbox.project_id);
-
-    assert!(result.is_err());
-    assert!(result
-        .err()
-        .expect("error should exist")
-        .to_string()
-        .contains("system inbox project cannot be archived"));
+    assert_eq!(active.kind(), ProjectKind::User);
     assert_eq!(
-        store
-            .active_project()
-            .expect("active project should load")
-            .expect("active project should remain")
-            .project_id,
-        "project-inbox"
+        active.capabilities(),
+        ProjectCapabilities {
+            can_be_active_project: true,
+            can_archive: true,
+            can_rename: true,
+            can_restore: false,
+            can_accept_moved_groups: true,
+        }
     );
     assert_eq!(
-        store
-            .ensure_inbox_project()
-            .expect("inbox project should load")
-            .status,
-        ProjectStatus::Active
-    );
-}
-
-#[test]
-fn sqlite_store_rejects_renaming_system_inbox_project() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let inbox = store
-        .ensure_inbox_project()
-        .expect("inbox project should exist");
-
-    let result = store.rename_project(&inbox.project_id, "Client Shoot");
-
-    assert!(result.is_err());
-    assert!(result
-        .err()
-        .expect("error should exist")
-        .to_string()
-        .contains("system inbox project cannot be renamed"));
-    assert_eq!(
-        store
-            .ensure_inbox_project()
-            .expect("inbox project should load")
-            .name,
-        "Inbox"
+        archived.capabilities(),
+        ProjectCapabilities {
+            can_be_active_project: false,
+            can_archive: false,
+            can_rename: true,
+            can_restore: true,
+            can_accept_moved_groups: false,
+        }
     );
 }
 

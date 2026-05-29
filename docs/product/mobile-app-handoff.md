@@ -2,43 +2,51 @@
 
 ## 1. Purpose
 
-This document defines the first mobile implementation slice for Camera Connector after prototype review. The mobile app should be a thin product shell over the existing core concepts: receiver settings, camera accounts, runtime status, connected devices, transfer log, and grouped inbox assets.
+This document defines the mobile implementation slice for Camera Connector after prototype review. The mobile app should be a thin product shell over the existing core concepts: projects, receiver settings, camera accounts, runtime status, connected devices, transfer log, publish queue, and grouped project assets.
 
-The current prototype is the UX source of truth:
+The early HTML prototype remains a historical reference:
 
 ```text
 prototypes/camera-connector/index.html
 ```
 
+The current UX and visual source of truth is the Figma interaction design:
+
+```text
+https://www.figma.com/design/mKSknurwc2LWS83UWe0ReA
+```
+
 ## 2. Product Shell
 
-Primary tabs:
+Global destinations:
 
-- Overview
-- Inbox
-- Transfers
+- Projects
+- Accounts
+- Settings
 
-Secondary pages:
+Settings secondary destinations:
 
-- Receiver Settings
-- Device Accounts
-- Asset Detail
-- Transfer Detail
 - Diagnostics
 
-Do not make Receiver Settings or Device Accounts bottom-tab destinations. They are setup and management surfaces, not daily primary tasks.
+Project workspace:
+
+- Receiver launch/status panel
+- Photos
+
+Receiver controls belong inside the active project workspace. Account management and settings stay global because they are not owned by a single project. Diagnostics are reachable from Settings rather than a standalone bottom tab. Asset detail remains a child page under Photos; transfer and publish records are surfaced through receiver status and Settings diagnostics instead of standalone project tabs.
 
 ## 3. Core Capability Mapping
 
 | Mobile surface | Core capability | Notes |
 | --- | --- | --- |
-| Overview | `CameraConnectorService::project_dashboard` | Single project-scoped read model for status, paths, accounts, devices, transfers, failures, and assets |
-| Receiver Settings | `CameraConnectorService::set_receiver_settings` | Patch-style updates; unspecified values remain unchanged |
-| Device Accounts | `set_account`, `remove_account`, dashboard `accounts` | Password is write-only during setup; display configured/not required |
-| Start/Stop Receiver | `CameraConnectorRuntime::start_receiver`, `stop_receiver`, `status` | Mobile shell owns foreground/background lifecycle |
-| Inbox | project dashboard `assets` or `project_asset_group_page_with_query` | Use the active project as the required viewing scope |
-| Transfers | `project_transfers`, `project_transfer_summary_with_query`, `project_recent_failed_transfers` | Failed rows must show error text and retry guidance |
-| Connected Devices | dashboard `accounts` and `devices` | Account is identity; IP is mutable connection state |
+| Projects | `create_project`, `set_active_project`, `rename_project`, `archive_project`, `restore_project` | Project is the required viewing and import scope |
+| Project workspace | `CameraConnectorService::project_dashboard` | Single project-scoped read model for status, paths, accounts, devices, transfers, failures, publish queue, and assets |
+| Receiver panel | `CameraConnectorService::set_receiver_settings` | Patch-style updates; unspecified values remain unchanged; edited inline before Start applies the current form |
+| Accounts | `set_account`, `remove_account`, dashboard `accounts` | Password is write-only during setup; account is global identity |
+| Start/Stop Receiver | `CameraConnectorRuntime::start_receiver`, `stop_receiver`, `status` | Mobile shell owns foreground/background lifecycle; receiver starts from the active project workspace |
+| Photos | project dashboard `assets` or `project_asset_group_page_with_query` | Tap preview opens group detail; long press enters bulk selection |
+| Transfer/Publish status | `project_transfers`, `project_transfer_summary_with_query`, `project_recent_failed_transfers`, `publish_queue_summary`, publish retry release/drain APIs | Receiver status shows compact health and retry affordances; Settings diagnostics shows rows and errors |
+| Settings diagnostics | dashboard `accounts`, `devices`, `transfers`, receiver status | Account is identity; IP is mutable connection state; transfer/publish records are operational diagnostics |
 
 ## 4. Platform Storage Contract
 
@@ -53,8 +61,9 @@ Mobile implementations should preserve this separation.
 Android likely maps to:
 
 - Config/state: app private storage.
-- Output: MediaStore or Storage Access Framework document tree.
-- Saved location records: `media_uri` or `document_uri`.
+- Output: Storage Access Framework document tree for MVP, with app-private fallback when no tree is selected.
+- Saved location records: `document_uri` for SAF output or `local_path` for app-private fallback.
+- MediaStore is deferred unless physical-device validation proves a concrete need.
 
 iOS likely maps to:
 
@@ -91,40 +100,44 @@ iOS-specific risks:
 
 The first implementation slice should prove these behaviors:
 
-1. Configure one receiver profile.
-2. Configure one camera account.
-3. Start FTP receiver.
-4. Show camera-facing host, port, username, password configured state.
-5. Accept one real camera JPEG.
-6. Accept one real camera RAW.
-7. Show grouped inbox row.
-8. Show transfer log row.
-9. Stop receiver.
+1. Create or select one shooting project.
+2. Configure one receiver profile from the project receiver panel.
+3. Configure one camera account from the global Accounts surface.
+4. Start FTP receiver inside the active project.
+5. Show camera-facing host, port, username, password configured state.
+6. Accept one real camera JPEG.
+7. Accept one real camera RAW.
+8. Show grouped project photo tile and detail.
+9. Show transfer log row in diagnostics when needed.
+10. Show publish queue state when output publishing is pending or failed.
+11. Collapse the receiver panel into a compact running status so Photos remains the main project surface.
+12. Stop receiver.
 
 SFTP can stay behind a validation flag until real camera compatibility is confirmed.
 
 ## 7. UI State Rules
 
-Overview:
+Project receiver panel:
 
-- If receiver is running, show protocol, host, port, auth mode, online accounts, transfer health.
+- If receiver is running, collapse to a compact status with protocol, host, port, auth mode, online accounts, transfer health, and an expand/control affordance.
 - If receiver is stopped, show last status and primary start action.
 - If recent failures exist, show the latest failure card.
+- Pressing Start applies the current protocol/host/port/camera-facing IP values; there is no separate save action.
 
-Inbox:
+Photos:
 
 - Default sort is latest received first.
-- File rows display virtual path, not local folder hierarchy.
-- Duplicate rows show duplicate index/count.
-- Filters are tags, not folders.
+- Grid tiles display previews and compact group metadata.
+- Tap the preview opens group detail.
+- Long press enters selection mode for bulk movement.
 
-Transfers:
+Settings diagnostics:
 
-- Failed rows show error text.
-- Retry is instruction-only: user retries from camera.
-- Final location kind is visible in details for diagnostics.
+- Failed transfer rows show error text.
+- Retry is instruction-only for camera-side transfer failures; publish retry remains an app action.
+- Final location kind is visible where available for diagnostics.
 
-Device Accounts:
+Accounts:
 
 - Username and device name are stable identity.
 - IP address is latest connection metadata.
@@ -132,19 +145,25 @@ Device Accounts:
 
 ## 8. Acceptance Checklist
 
-- Bottom navigation has only Overview, Inbox, Transfers.
-- Receiver settings are reachable from Overview.
-- Device accounts are reachable from Overview and Receiver Settings.
+- Global navigation has Projects, Accounts, and Settings.
+- Settings contains Diagnostics as a secondary page.
+- Projects opens Project Management first; entering a project opens the photo-first project workspace.
+- Receiver settings and receiver start/stop are reachable from the project receiver panel.
+- Accounts are managed from the global Accounts surface.
 - The app can render dashboard data without extra joins in the UI layer.
 - Long filenames, paths, and transfer ids wrap cleanly on small screens.
 - The app can operate with no direct filesystem path for output objects.
 - Failed transfer diagnostics are visible without inspecting raw logs.
 - Config/state/output locations remain separate.
 
-## 9. Open Decisions Before Native Build
+## 9. Remaining Validation Decisions
 
-- Android-first, iOS-first, or shared shell first.
-- Whether the Rust core will be embedded directly or exposed through a local service boundary.
-- Which Android output strategy is preferred for MVP: MediaStore album or SAF directory.
+- Android is the active first mobile target; iOS remains a later platform decision.
+- The Rust core is embedded behind the native gateway boundary for Android.
+- SAF directory publishing is the Android MVP output path; MediaStore can remain deferred unless a real-device workflow proves it is needed.
 - Which iOS output strategy is acceptable for MVP: app container, Files, or Photos.
-- How much background receive support is required for the first mobile validation.
+- How much background receive support is required after physical-device and real-camera validation.
+
+## 10. Deferred Specs
+
+- Project package migration is intentionally deferred until the Android project workflow and real-camera import loop are validated. The dormant protocol spec lives at `docs/superpowers/specs/2026-05-28-project-package-migration-protocol-design.md`.

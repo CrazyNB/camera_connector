@@ -155,6 +155,22 @@ function Tap-UiNodeByText {
     Tap ([int](($left + $right) / 2)) ([int](($top + $bottom) / 2))
 }
 
+function Enter-ProjectWorkspaceIfNeeded {
+    param([string]$Xml)
+    if ($Xml.Contains($labels.ProjectWorkspace)) {
+        return $Xml
+    }
+    if (-not $Xml.Contains($labels.ProjectManagement)) {
+        return $Xml
+    }
+    if ($Xml.Contains($labels.Enter)) {
+        Tap-UiNodeByText $Xml $labels.Enter "enter selected project"
+    } else {
+        Tap-UiNodeByText $Xml $labels.Select "select project"
+    }
+    return Wait-UiContains $labels.ProjectWorkspace "project workspace after selecting project"
+}
+
 function Use-EmulatorBindableReceiverConfig {
     $remoteTempConfig = "/data/local/tmp/camera-connector-emulator-ui-config.json"
     $localConfig = Join-Path $diagnosticsDir "camera-connector-emulator-ui-config.json"
@@ -181,24 +197,32 @@ function Use-EmulatorBindableReceiverConfig {
 }
 
 $labels = @{
-    AppTitle = "Camera Connector"
-    ServiceControl = U @(0x670D,0x52A1,0x63A7,0x5236)
-    ReceiverService = U @(0x63A5,0x6536,0x670D,0x52A1)
+    ProjectManagement = U @(0x9879,0x76EE,0x7BA1,0x7406)
+    ProjectWorkspace = U @(0x9879,0x76EE,0x5DE5,0x4F5C,0x53F0)
+    CurrentProject = U @(0x5F53,0x524D,0x62CD,0x6444,0x9879,0x76EE)
+    NewProject = U @(0x65B0,0x5EFA,0x9879,0x76EE)
+    Enter = U @(0x8FDB,0x5165)
+    Select = U @(0x9009,0x62E9)
+    ServiceControl = U @(0x63A5,0x6536,0x670D,0x52A1,0x63A7,0x5236)
     ReceiverSettings = U @(0x63A5,0x6536,0x8BBE,0x7F6E)
     ListenAddress = U @(0x76D1,0x542C,0x5730,0x5740)
     Start = U @(0x542F,0x52A8)
     Stop = U @(0x505C,0x6B62)
     Running = U @(0x8FD0,0x884C,0x4E2D)
     Stopped = U @(0x5DF2,0x505C,0x6B62)
+    Project = U @(0x9879,0x76EE)
+    Account = U @(0x8D26,0x53F7)
     Settings = U @(0x8BBE,0x7F6E)
-    SettingsSubtitle = U @(0x8D26,0x53F7,0x3001,0x76EE,0x5F55,0x3001,0x901A,0x77E5,0x6743,0x9650)
-    DeviceAccounts = U @(0x8BBE,0x5907,0x8D26,0x53F7)
+    Diagnostics = U @(0x8BCA,0x65AD)
+    Overview = U @(0x6982,0x89C8)
+    Photos = U @(0x7167,0x7247)
     ImportLocation = U @(0x5BFC,0x5165,0x4F4D,0x7F6E)
-    Inbox = U @(0x6536,0x4EF6,0x7BB1)
-    Transfers = U @(0x4F20,0x8F93)
-    TransferLog = U @(0x4F20,0x8F93,0x8BB0,0x5F55)
-    Overview = U @(0x603B,0x89C8)
-    EmptyInbox = U @(0x8FD8,0x6CA1,0x6709,0x5BFC,0x5165,0x6587,0x4EF6,0x3002)
+    ProjectPhotos = U @(0x9879,0x76EE,0x7167,0x7247)
+    AccountsTitle = U @(0x8D26,0x53F7,0x7BA1,0x7406)
+    SettingsTitle = U @(0x7CFB,0x7EDF,0x8BBE,0x7F6E)
+    DiagnosticsTitle = U @(0x8BCA,0x65AD,0x65E5,0x5FD7)
+    OnlineAccounts = U @(0x5728,0x7EBF,0x8D26,0x53F7)
+    SaveReceiverSettings = U @(0x4FDD,0x5B58,0x63A5,0x6536,0x8BBE,0x7F6E)
 }
 
 if (-not $SkipInstall) {
@@ -208,76 +232,87 @@ if (-not $SkipInstall) {
     }
 }
 
+& $adb -s $Serial shell pm grant $packageName android.permission.POST_NOTIFICATIONS 2>$null | Out-Null
+
 Start-App
 
-$xml = Get-UiXml
-if ($xml.Contains($labels.SettingsSubtitle)) {
-    Tap 75 240
-    $xml = Get-UiXml
+$xml = Wait-UiContains $labels.ProjectManagement "project management"
+Assert-UiContains $xml $labels.ProjectManagement "project management title"
+Assert-UiContains $xml $labels.NewProject "new project action"
+Assert-UiContains $xml $labels.Project "global projects destination"
+Assert-UiContains $xml $labels.Account "global accounts destination"
+Assert-UiContains $xml $labels.Settings "global settings destination"
+Assert-UiNotContains $xml $labels.Diagnostics "diagnostics is not a global destination"
+Assert-UiNotContains $xml $labels.Overview "project overview tab before entering project"
+Assert-UiNotContains $xml $labels.Photos "project photos tab before entering project"
+if ($xml.Contains($labels.Enter)) {
+    Tap-UiNodeByText $xml $labels.Enter "enter selected project"
+} else {
+    Tap-UiNodeByText $xml $labels.Select "select project"
 }
-Assert-UiContains $xml $labels.AppTitle "app title"
+
+$xml = Wait-UiContains $labels.ProjectWorkspace "project workspace"
+Assert-UiContains $xml $labels.ProjectWorkspace "project workspace title"
 Assert-UiContains $xml $labels.ServiceControl "service control subtitle"
-Assert-UiContains $xml $labels.ReceiverService "receiver service card"
 Assert-UiContains $xml $labels.ReceiverSettings "receiver settings card"
 Assert-UiContains $xml $labels.ListenAddress "listen address field"
 Assert-UiContains $xml $labels.Start "start button"
 Assert-UiContains $xml "FTP" "FTP protocol"
 Assert-UiContains $xml "SFTP" "SFTP protocol"
-Assert-UiContains $xml $labels.Overview "overview tab"
-Assert-UiContains $xml $labels.Inbox "inbox tab"
-Assert-UiContains $xml $labels.Transfers "transfers tab"
-Assert-UiNotContains $xml $labels.DeviceAccounts "device accounts on overview"
-Assert-UiNotContains $xml $labels.ImportLocation "import location on overview"
+Assert-UiContains $xml $labels.Project "global projects destination"
+Assert-UiContains $xml $labels.Account "global accounts destination"
+Assert-UiContains $xml $labels.Settings "global settings destination"
+Assert-UiNotContains $xml $labels.Diagnostics "diagnostics is not a global destination"
+Assert-UiContains $xml $labels.Overview "project overview tab"
+Assert-UiContains $xml $labels.Photos "project photos tab"
+Assert-UiNotContains $xml (U @(0x6536,0x4EF6,0x7BB1)) "project inbox tab"
+Assert-UiNotContains $xml (U @(0x4F20,0x8F93)) "project transfers tab"
+Assert-UiNotContains $xml (U @(0x53D1,0x5E03)) "project publish tab"
 
 Tap-UiNodeByText $xml "SFTP" "SFTP protocol segment"
-$saveReceiverSettingsLabel = U @(0x4FDD,0x5B58,0x63A5,0x6536,0x8BBE,0x7F6E)
-$xml = Swipe-UntilUiContains 540 1950 540 1250 $saveReceiverSettingsLabel "save receiver settings"
-Tap-UiNodeByText $xml $saveReceiverSettingsLabel "save receiver settings"
-Scroll-ToTop
 $xml = Get-UiXml
-Assert-UiContains $xml "SFTP " "SFTP unified endpoint after save"
+Assert-UiNotContains $xml $labels.SaveReceiverSettings "receiver settings save button is not shown"
 Use-EmulatorBindableReceiverConfig
 Start-App
-$xml = Wait-UiContains "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after config setup"
-Assert-UiContains $xml "FTP 0.0.0.0:2121" "emulator-bind FTP endpoint after save"
+$xml = Wait-UiContains "FTP 192.168.50.1:2121" "emulator-bind FTP endpoint after config setup"
+$xml = Enter-ProjectWorkspaceIfNeeded $xml
+Assert-UiContains $xml "FTP 192.168.50.1:2121" "emulator-bind FTP endpoint after save"
 
 if ($xml.Contains($labels.Running)) {
-    Tap 540 1080
+    Tap 540 1200
     $xml = Wait-UiContains $labels.Stopped "receiver stopped state"
 }
 
-$xml = Tap-UntilUiContains 540 1080 $labels.Running "receiver running state"
+$xml = Enter-ProjectWorkspaceIfNeeded $xml
+$xml = Tap-UntilUiContains 540 1200 $labels.Running "receiver running state"
 Assert-UiContains $xml $labels.Stop "stop button after running"
-$xml = Tap-UntilUiContains 540 1080 $labels.Stopped "receiver stopped state"
+$xml = Tap-UntilUiContains 540 1200 $labels.Stopped "receiver stopped state"
 
-Tap 975 240
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.Settings "settings title"
-Assert-UiContains $xml $labels.SettingsSubtitle "settings subtitle"
-Assert-UiContains $xml $labels.DeviceAccounts "device accounts section"
-Assert-UiNotContains $xml $labels.Overview "bottom overview tab on settings"
-Assert-UiNotContains $xml $labels.Transfers "bottom transfers tab on settings"
+Tap-UiNodeByText $xml $labels.Photos "project photos tab"
+$xml = Wait-UiContains $labels.ProjectPhotos "project photos screen title"
+Assert-UiContains $xml $labels.ProjectPhotos "project photos screen title"
 
-Invoke-Adb @("shell", "input", "swipe", "540", "1700", "540", "850", "500") | Out-Null
-Start-Sleep -Milliseconds 900
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.ImportLocation "import location section"
+Tap-UiNodeByText $xml $labels.Account "global accounts destination"
+$xml = Wait-UiContains $labels.AccountsTitle "accounts screen title"
+Assert-UiContains $xml $labels.AccountsTitle "accounts screen title"
 
-Tap 75 240
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.ServiceControl "overview after back"
+Tap-UiNodeByText $xml $labels.Settings "global settings destination"
+$xml = Wait-UiContains $labels.SettingsTitle "settings screen title"
+Assert-UiContains $xml $labels.SettingsTitle "settings screen title"
+Assert-UiContains $xml $labels.ImportLocation "settings import location section"
+Assert-UiContains $xml $labels.DiagnosticsTitle "settings diagnostics menu"
 
-Tap 540 2240
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.Inbox "inbox screen title"
+Tap-UiNodeByText $xml $labels.DiagnosticsTitle "settings diagnostics menu"
+$xml = Wait-UiContains $labels.OnlineAccounts "diagnostics screen metrics"
+Assert-UiContains $xml $labels.DiagnosticsTitle "diagnostics screen title"
+Assert-UiContains $xml $labels.OnlineAccounts "diagnostics screen metrics"
 
-Tap 900 2240
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.TransferLog "transfer log screen title"
-
-Tap 170 2240
-$xml = Get-UiXml
-Assert-UiContains $xml $labels.ServiceControl "overview after tab navigation"
+Tap-UiNodeByText $xml $labels.Project "global projects destination"
+$xml = Wait-UiContains $labels.ProjectManagement "project management after global navigation"
+Assert-UiContains $xml $labels.ProjectManagement "project management after global navigation"
+Assert-UiContains $xml $labels.NewProject "new project action after global navigation"
+Assert-UiNotContains $xml $labels.Overview "project overview tab after returning to project management"
+Assert-UiNotContains $xml $labels.Photos "project photos tab after returning to project management"
 
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir $diagnosticsDir
 if ($LASTEXITCODE -ne 0) {

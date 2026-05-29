@@ -17,7 +17,6 @@ pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore,
 
 const DB_FILENAME: &str = "camera-connector.sqlite3";
 const ACTIVE_PROJECT_KEY: &str = "active_project_id";
-const SYSTEM_INBOX_PROJECT_ID: &str = "project-inbox";
 const FAILED_PUBLISH_RETRY_DELAY_MS: i64 = 30_000;
 
 #[derive(Debug, Clone)]
@@ -36,6 +35,60 @@ pub struct Project {
     pub archived_at_ms: Option<i64>,
     pub default_output_target_id: Option<String>,
     pub default_strategy_profile_id: Option<String>,
+}
+
+impl Project {
+    pub fn kind(&self) -> ProjectKind {
+        ProjectKind::User
+    }
+
+    pub fn capabilities(&self) -> ProjectCapabilities {
+        let active = self.status == ProjectStatus::Active;
+        let archived = self.status == ProjectStatus::Archived;
+        ProjectCapabilities {
+            can_be_active_project: active,
+            can_archive: active,
+            can_rename: true,
+            can_restore: archived,
+            can_accept_moved_groups: active,
+        }
+    }
+
+    pub fn into_view(self) -> ProjectView {
+        let kind = self.kind();
+        let capabilities = self.capabilities();
+        ProjectView {
+            project: self,
+            kind,
+            capabilities,
+        }
+    }
+
+    pub fn view(&self) -> ProjectView {
+        self.clone().into_view()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectKind {
+    User,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCapabilities {
+    pub can_be_active_project: bool,
+    pub can_archive: bool,
+    pub can_rename: bool,
+    pub can_restore: bool,
+    pub can_accept_moved_groups: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectView {
+    #[serde(flatten)]
+    pub project: Project,
+    pub kind: ProjectKind,
+    pub capabilities: ProjectCapabilities,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,50 +306,6 @@ impl SqliteStore {
         })
     }
 
-    pub fn ensure_inbox_project(&self) -> Result<Project> {
-        self.with_connection(|connection| {
-            let existing = connection
-                .query_row(
-                    "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
-                            archived_at_ms, default_output_target_id, default_strategy_profile_id
-                     FROM projects
-                     WHERE project_id = ?1",
-                    params![SYSTEM_INBOX_PROJECT_ID],
-                    project_from_row,
-                )
-                .optional()?;
-            if let Some(project) = existing {
-                return Ok(project);
-            }
-            let now = current_time_ms();
-            connection.execute(
-                "INSERT INTO projects (
-                    project_id, name, slug, status, created_at_ms, updated_at_ms,
-                    archived_at_ms, default_output_target_id, default_strategy_profile_id
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![
-                    SYSTEM_INBOX_PROJECT_ID,
-                    "Inbox",
-                    "inbox",
-                    ProjectStatus::Active.as_str(),
-                    now,
-                    now,
-                    Option::<i64>::None,
-                    Option::<String>::None,
-                    Option::<String>::None,
-                ],
-            )?;
-            connection.query_row(
-                "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
-                        archived_at_ms, default_output_target_id, default_strategy_profile_id
-                 FROM projects
-                 WHERE project_id = ?1",
-                params![SYSTEM_INBOX_PROJECT_ID],
-                project_from_row,
-            )
-        })
-    }
-
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
@@ -311,11 +320,6 @@ impl SqliteStore {
     }
 
     pub fn rename_project(&self, project_id: &str, name: impl AsRef<str>) -> Result<Project> {
-        if project_id == SYSTEM_INBOX_PROJECT_ID {
-            return Err(ImporterError::internal(
-                "system inbox project cannot be renamed",
-            ));
-        }
         let name = normalized_required("project name", name.as_ref())?;
         let slug = slugify(&name);
         self.with_connection(|connection| {
@@ -334,11 +338,6 @@ impl SqliteStore {
     }
 
     pub fn archive_project(&self, project_id: &str) -> Result<Project> {
-        if project_id == SYSTEM_INBOX_PROJECT_ID {
-            return Err(ImporterError::internal(
-                "system inbox project cannot be archived",
-            ));
-        }
         self.with_connection(|connection| {
             let now = current_time_ms();
             ensure_project_exists(connection, project_id)?;
@@ -2152,6 +2151,10 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
             && query
                 .format
                 .map(|expected| asset.format == expected)
+                .unwrap_or(true)
+            && query
+                .role
+                .map(|expected| asset.format.role() == expected)
                 .unwrap_or(true)
     })
 }

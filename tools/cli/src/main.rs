@@ -445,6 +445,7 @@ async fn main() -> Result<()> {
                     original_path,
                     remote_addr,
                     format: format.as_deref().map(parse_object_format).transpose()?,
+                    role: None,
                 },
                 offset,
                 limit,
@@ -550,6 +551,7 @@ async fn main() -> Result<()> {
                 original_path,
                 remote_addr,
                 format: format.as_deref().map(parse_object_format).transpose()?,
+                role: None,
             };
             let groups = if let Some(project_id) = project_id {
                 let page = load_project_inbox_page(
@@ -729,14 +731,11 @@ fn handle_receive_file_command(args: ReceiveFileArgs) -> Result<TransferRecord> 
 
 fn record_transfer_in_active_project(state_dir: &Path, record: &TransferRecord) -> Result<()> {
     let store = SqliteStore::open_state_dir(state_dir)?;
-    let project = match store.active_project()? {
-        Some(project) => project,
-        None => {
-            let project = store.ensure_inbox_project()?;
-            store.set_active_project(&project.project_id)?;
-            project
-        }
-    };
+    let project = store.active_project()?.ok_or_else(|| {
+        camera_connector_core::ImporterError::internal(
+            "no active project selected; create and select a project first",
+        )
+    })?;
     store.record_transfer(&project.project_id, record.clone())
 }
 
@@ -1154,25 +1153,8 @@ fn parse_transfer_status(value: &str) -> Result<TransferStatus> {
 }
 
 fn parse_object_format(value: &str) -> Result<ObjectFormat> {
-    let format = match value.to_ascii_lowercase().as_str() {
-        "jpg" | "jpeg" => ObjectFormat::Jpeg,
-        "nef" => ObjectFormat::Nef,
-        "nrw" => ObjectFormat::Nrw,
-        "cr2" => ObjectFormat::Cr2,
-        "cr3" => ObjectFormat::Cr3,
-        "arw" | "srf" | "sr2" => ObjectFormat::Arw,
-        "raf" => ObjectFormat::Raf,
-        "rw2" | "rwl" => ObjectFormat::Rw2,
-        "orf" => ObjectFormat::Orf,
-        "pef" => ObjectFormat::Pef,
-        "dng" => ObjectFormat::Dng,
-        "mov" => ObjectFormat::Mov,
-        "mp4" => ObjectFormat::Mp4,
-        "tif" | "tiff" => ObjectFormat::Tiff,
-        "unknown" => ObjectFormat::Unknown,
-        _ => return Err(camera_connector_core::ImporterError::InvalidUploadPath),
-    };
-    Ok(format)
+    ObjectFormat::from_str(value)
+        .map_err(|_| camera_connector_core::ImporterError::InvalidUploadPath)
 }
 
 fn handle_account_command(config_path: Option<&Path>, action: AccountCommand) -> Result<()> {
@@ -1240,7 +1222,11 @@ fn handle_project_command(config_path: Option<&Path>, action: ProjectCommand) ->
             );
         }
         ProjectCommand::Active => {
-            let project = service.ensure_active_project()?;
+            let project = service.active_project()?.ok_or_else(|| {
+                camera_connector_core::ImporterError::internal(
+                    "no active project selected; create and select a project first",
+                )
+            })?;
             println!(
                 "{}",
                 project_line(&project, Some(project.project_id.as_str()))
@@ -1653,7 +1639,7 @@ mod tests {
     #[test]
     fn project_inbox_loads_asset_page_from_sqlite() {
         let root = std::env::temp_dir().join(format!(
-            "camera-connector-project-inbox-{}",
+            "camera-connector-project-assets-{}",
             current_time_ms()
         ));
         let config_path = root.join("config.json");
@@ -1673,7 +1659,7 @@ mod tests {
             .record_project_transfer(
                 &project.project_id,
                 TransferRecord {
-                    transfer_id: "ftp:project-inbox".to_string(),
+                    transfer_id: "ftp:project-assets".to_string(),
                     protocol: "ftp".to_string(),
                     status: TransferStatus::Completed,
                     original_path: "DCIM/100/IMG_0202.CR3".to_string(),

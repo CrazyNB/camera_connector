@@ -191,6 +191,23 @@ function Send-FtpCommand {
     return $reply
 }
 
+function Send-FtpCommandAny {
+    param(
+        [System.IO.StreamWriter]$Writer,
+        [System.IO.StreamReader]$Reader,
+        [string]$Command,
+        [string[]]$Prefixes
+    )
+    $Writer.WriteLine($Command)
+    $reply = Read-FtpReply $Reader
+    foreach ($prefix in $Prefixes) {
+        if ($reply.StartsWith($prefix)) {
+            return $reply
+        }
+    }
+    throw "FTP command '$Command' expected one of $($Prefixes -join ', '), got '$reply'"
+}
+
 function Wait-LocalPort {
     param([int]$Port)
     for ($i = 0; $i -lt 40; $i++) {
@@ -229,25 +246,77 @@ function Test-FtpGreeting {
 
 function Start-ReceiverFromUi {
     Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
-    Start-Sleep -Seconds 3
-    for ($attempt = 1; $attempt -le 5; $attempt++) {
-        Invoke-Adb @("shell", "input", "tap", "540", "760") | Out-Null
-        Start-Sleep -Seconds 2
+    $startText = U @(0x5F00,0x59CB,0x63A5,0x6536)
+    $startShortText = U @(0x542F,0x52A8)
+    $runningText = U @(0x8FD0,0x884C,0x4E2D)
+    $stopText = U @(0x505C,0x6B62)
+
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
         if (Test-FtpGreeting) {
             return
         }
+
+        $xml = ""
+        try {
+            $xml = Get-UiXml
+        } catch {
+            Start-Sleep -Seconds 1
+            continue
+        }
+
+        $xml = Enter-ProjectWorkspaceIfNeeded $xml
+
+        if ($xml.Contains($startText) -or $xml.Contains($startShortText)) {
+            Invoke-Adb @("shell", "input", "tap", "540", "1200") | Out-Null
+        } elseif ($xml.Contains($runningText) -or $xml.Contains($stopText)) {
+            Start-Sleep -Seconds 1
+        }
+
+        Start-Sleep -Seconds 2
     }
     throw "Android receiver did not expose an FTP greeting after starting from UI."
 }
 
 function Get-AndroidFileText {
     param([string]$Path)
-    return (& $adb -s $Serial shell run-as $packageName cat $Path) -join "`n"
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        return (& $adb -s $Serial shell run-as $packageName cat $Path 2>$null) -join "`n"
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+}
+
+function Wait-AndroidTransferLog {
+    param([object[]]$Cases)
+    for ($attempt = 1; $attempt -le 90; $attempt++) {
+        $log = Get-AndroidFileText "files/state/transfer-log.jsonl"
+        $allCasesLogged = $true
+        foreach ($case in $Cases) {
+            if ($log -notmatch [regex]::Escape($case.Filename)) {
+                $allCasesLogged = $false
+                break
+            }
+        }
+        if ($allCasesLogged) {
+            return $log
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw "Android transfer log did not include all uploaded cases within timeout."
 }
 
 function Get-UiXml {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $localDumpPath) | Out-Null
-    for ($attempt = 1; $attempt -le 5; $attempt++) {
+    $lastDumpOutput = ""
+    $lastDumpExitCode = $null
+    $lastPullExitCode = $null
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+        if ($attempt -in @(4, 8)) {
+            Invoke-Adb @("shell", "input", "keyevent", "KEYCODE_WAKEUP") | Out-Null
+            Invoke-Adb @("shell", "wm", "dismiss-keyguard") | Out-Null
+        }
         if (Test-Path -LiteralPath $localDumpPath) {
             Remove-Item -LiteralPath $localDumpPath -Force
         }
@@ -260,8 +329,10 @@ function Get-UiXml {
         } finally {
             $ErrorActionPreference = $oldErrorActionPreference
         }
+        $lastDumpOutput = $dumpOutput -join "`n"
+        $lastDumpExitCode = $dumpExitCode
         if ($dumpExitCode -ne 0 -or (($dumpOutput -join "`n") -notmatch "dumped to")) {
-            Start-Sleep -Milliseconds 400
+            Start-Sleep -Milliseconds 750
             continue
         }
         $oldErrorActionPreference = $ErrorActionPreference
@@ -272,17 +343,18 @@ function Get-UiXml {
         } finally {
             $ErrorActionPreference = $oldErrorActionPreference
         }
+        $lastPullExitCode = $pullExitCode
         if ($pullExitCode -ne 0 -or -not (Test-Path -LiteralPath $localDumpPath -PathType Leaf)) {
-            Start-Sleep -Milliseconds 400
+            Start-Sleep -Milliseconds 750
             continue
         }
         $xml = [System.IO.File]::ReadAllText($localDumpPath, [System.Text.Encoding]::UTF8)
         if ($xml.Contains("<hierarchy")) {
             return $xml
         }
-        Start-Sleep -Milliseconds 400
+        Start-Sleep -Milliseconds 750
     }
-    throw "Unable to dump Android UI hierarchy."
+    throw "Unable to dump Android UI hierarchy. lastDumpExit=$lastDumpExitCode lastPullExit=$lastPullExitCode lastDumpOutput=$lastDumpOutput"
 }
 
 function Assert-UiContains {
@@ -310,6 +382,69 @@ function Tap-UntilUiContains {
         }
     }
     throw "Expected UI to contain '$Label' after tapping $X,$Y."
+}
+
+function Swipe-UntilUiContains {
+    param([string]$Needle, [string]$Label, [int]$Attempts = 6)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $xml = Get-UiXml
+        if ($xml.Contains($Needle)) {
+            return $xml
+        }
+        Invoke-Adb @("shell", "input", "swipe", "540", "1900", "540", "900", "400") | Out-Null
+        Start-Sleep -Milliseconds 700
+    }
+
+    $xml = Get-UiXml
+    if ($xml.Contains($Needle)) {
+        return $xml
+    }
+    throw "Expected UI to contain '$Label' after swiping."
+}
+
+function Tap-UiNodeByText {
+    param([string]$Xml, [string]$Text, [string]$Label)
+    $escapedText = [System.Security.SecurityElement]::Escape($Text)
+    $pattern = "text=""$([regex]::Escape($escapedText))""[^>]*bounds=""\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""
+    $match = [regex]::Match($Xml, $pattern)
+    if (-not $match.Success) {
+        throw "Unable to find UI node by text '$Label'."
+    }
+    $left = [int]$match.Groups[1].Value
+    $top = [int]$match.Groups[2].Value
+    $right = [int]$match.Groups[3].Value
+    $bottom = [int]$match.Groups[4].Value
+    Invoke-Adb @("shell", "input", "tap", "$([int](($left + $right) / 2))", "$([int](($top + $bottom) / 2))") | Out-Null
+    Start-Sleep -Milliseconds 900
+}
+
+function Enter-ProjectWorkspaceIfNeeded {
+    param([string]$Xml)
+    $projectManagementText = U @(0x9879,0x76EE,0x7BA1,0x7406)
+    $projectWorkspaceText = U @(0x9879,0x76EE,0x5DE5,0x4F5C,0x53F0)
+    $enterText = U @(0x8FDB,0x5165)
+    $selectText = U @(0x9009,0x62E9)
+    if ($Xml.Contains($projectWorkspaceText)) {
+        return $Xml
+    }
+    if (-not $Xml.Contains($projectManagementText)) {
+        return $Xml
+    }
+    if ($Xml.Contains($enterText)) {
+        Tap-UiNodeByText $Xml $enterText "enter selected project"
+    } elseif ($Xml.Contains($selectText)) {
+        Tap-UiNodeByText $Xml $selectText "select project"
+    } else {
+        throw "Project management screen did not expose an enter/select action."
+    }
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+        $nextXml = Get-UiXml
+        if ($nextXml.Contains($projectWorkspaceText)) {
+            return $nextXml
+        }
+        Start-Sleep -Milliseconds 700
+    }
+    throw "Project workspace did not open from project management."
 }
 
 function Tap-UiNodeByContentDescription {
@@ -409,6 +544,7 @@ if ($configRaw -notlike "*password_hash*") {
 
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "rm", "-rf", "files/inbox", "files/state") | Out-Null
+Invoke-Adb @("shell", "run-as", $packageName, "rm", "-f", "shared_prefs/camera_connector_storage.xml") | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "mkdir", "-p", "files/inbox", "files/state") | Out-Null
 Invoke-Adb @("push", $configPath, "/data/local/tmp/camera-connector.json") | Out-Null
 Invoke-Adb @("shell", "chmod", "644", "/data/local/tmp/camera-connector.json") | Out-Null
@@ -430,8 +566,10 @@ try {
 
     $hello = Read-FtpReply $reader
     if (-not $hello.StartsWith("220")) { throw "FTP greeting failed: $hello" }
-    Send-FtpCommand $writer $reader "USER $Username" "331" | Out-Null
-    Send-FtpCommand $writer $reader "PASS $Password" "230" | Out-Null
+    $userReply = Send-FtpCommandAny $writer $reader "USER $Username" @("331", "230")
+    if ($userReply.StartsWith("331")) {
+        Send-FtpCommand $writer $reader "PASS $Password" "230" | Out-Null
+    }
     Send-FtpCommand $writer $reader "TYPE I" "200" | Out-Null
     $uploadIndex = 0
     foreach ($case in $uploadCases) {
@@ -446,21 +584,29 @@ try {
     Remove-AdbForward $controlForward
 }
 
-$inboxListing = (& $adb -s $Serial shell run-as $packageName ls "files/inbox") -join "`n"
-$transferLog = Get-AndroidFileText "files/state/transfer-log.jsonl"
+$transferLog = Wait-AndroidTransferLog $uploadCases
+$transferRecords = @(
+    $transferLog -split "`n" |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_ | ConvertFrom-Json }
+)
 foreach ($case in $uploadCases) {
-    if ($case.ExpectExactStoredFile) {
-        $uploadedSize = ((& $adb -s $Serial shell run-as $packageName stat -c "%s" "files/inbox/$($case.ExpectedStoredName)") -join "`n").Trim()
-        if ([int64]$uploadedSize -ne $case.Bytes.Length) {
-            throw "Uploaded file size mismatch for $($case.ExpectedStoredName). Expected $($case.Bytes.Length), got $uploadedSize."
-        }
+    $matchingRecords = @(
+        $transferRecords |
+            Where-Object {
+                $_.original_path -like "*/$($case.Filename)" -and
+                    [int64]$_.size_bytes -eq [int64]$case.Bytes.Length
+            }
+    )
+    if ($matchingRecords.Count -eq 0) {
+        throw "Android transfer log did not include uploaded case with expected size: $($case.Label)"
     }
     if ($transferLog -notmatch [regex]::Escape($case.Filename)) {
         throw "Android transfer log did not include uploaded case: $($case.Label)"
     }
 }
-if (([regex]::Matches($inboxListing, "EDGE_DUPLICATE(?: \(\d+\))?\.JPG")).Count -lt 2) {
-    throw "Duplicate upload boundary did not leave at least two EDGE_DUPLICATE JPG files in inbox."
+if (([regex]::Matches($transferLog, "EDGE_DUPLICATE\.JPG")).Count -lt 2 -and ($uploadCases | Where-Object { $_.Filename -eq "EDGE_DUPLICATE.JPG" }).Count -gt 0) {
+    throw "Duplicate upload boundary did not leave at least two EDGE_DUPLICATE JPG transfer records."
 }
 
 if ($transferLog -notmatch $sampleRawName -or $transferLog -notmatch $sampleJpegName) {
@@ -477,37 +623,42 @@ if ($configAfter -like "*$Password*") {
 
 Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 3
-$inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox"
+$xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
+$inboxUi = Tap-UntilUiContains 250 680 $sampleJpegName "uploaded asset in project photos"
 Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
 Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
 Assert-UiNotContains $inboxUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo inbox"
-Assert-UiContains $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
-Tap-UiNodeByContentDescription $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
+Assert-UiContains $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
+Tap-UiNodeByContentDescription $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
 $gridPrefs = Get-AndroidFileText "shared_prefs/camera_connector_storage.xml"
-if ($gridPrefs -notmatch 'name="inbox_grid_columns"\s+value="2"') {
-    throw "Android inbox grid preference did not persist 2-column selection."
+if ($gridPrefs -notmatch 'name="project_photo_grid_columns"\s+value="2"') {
+    throw "Android project photo grid preference did not persist 2-column selection."
 }
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
 Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 2
-$inboxUi = Tap-UntilUiContains 540 2240 $sampleJpegName "uploaded asset in inbox after restart"
-Assert-UiContains $inboxUi (U @(0x6536,0x4EF6,0x7BB1,0x0032,0x5217,0x89C6,0x56FE)) "persisted 2-column grid control after restart"
+$xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
+$inboxUi = Tap-UntilUiContains 250 680 $sampleJpegName "uploaded asset in project photos after restart"
+Assert-UiContains $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "persisted 2-column grid control after restart"
 Tap-UiNodeByContentDescription $inboxUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile"
 $detailUi = Get-UiXml
 Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
-Assert-UiContains $detailUi (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
-Assert-UiContains $detailUi $sampleJpegName "photo detail jpeg file"
-Invoke-Adb @("shell", "input", "swipe", "540", "1900", "540", "900", "400") | Out-Null
-Start-Sleep -Milliseconds 700
-$detailFilesUi = Get-UiXml
+$detailSourceUi = Swipe-UntilUiContains (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
+Assert-UiContains $detailSourceUi $sampleJpegName "photo detail jpeg file"
+$detailFilesUi = Swipe-UntilUiContains $sampleRawName "photo detail raw file"
 Assert-UiContains $detailFilesUi $sampleRawName "photo detail raw file"
 Invoke-Adb @("shell", "input", "keyevent", "4") | Out-Null
 Start-Sleep -Milliseconds 700
-$transferUi = Tap-UntilUiContains 900 2240 "completed=$($uploadCases.Count)" "uploaded transfer summary"
-Assert-UiContains $transferUi "failed=0" "uploaded transfer failure count"
-Assert-UiContains $transferUi "total=$($uploadCases.Count)" "uploaded transfer total count"
-Assert-UiContains $transferUi "EDGE_DUPLICATE" "visible duplicate transfer row"
+$projectUi = Get-UiXml
+Tap-UiNodeByText $projectUi (U @(0x8BCA,0x65AD)) "global diagnostics destination"
+Start-Sleep -Milliseconds 900
+$transferUi = Get-UiXml
+Assert-UiContains $transferUi (U @(0x8BCA,0x65AD,0x65E5,0x5FD7)) "diagnostics transfer surface"
+Assert-UiContains $transferUi (U @(0x5DF2,0x5B8C,0x6210)) "completed transfer status"
+if (($uploadCases | Where-Object { $_.Filename -eq "EDGE_DUPLICATE.JPG" }).Count -gt 0) {
+    Assert-UiContains $transferUi "EDGE_DUPLICATE" "visible duplicate transfer row"
+}
 Assert-UiContains $transferUi $DeviceName "transfer device name"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
 if ($LASTEXITCODE -ne 0) {

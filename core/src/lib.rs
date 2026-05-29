@@ -8,7 +8,8 @@ pub mod storage;
 
 pub use error::{ImporterError, Result};
 pub use model::{
-    group_received_assets, ImportSource, ObjectFormat, ReceivedAsset, ReceivedAssetGroup,
+    group_received_assets, AssetFormatRole, ImportSource, ObjectFormat, ReceivedAsset,
+    ReceivedAssetGroup,
 };
 pub use push::{
     CameraConnectorConfig, FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer,
@@ -36,7 +37,8 @@ pub use service::{
     TransferRecordView, TransferSummary,
 };
 pub use storage::{
-    LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectStatus,
-    PublishQueueItem, PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore,
-    StagedObject, StoredAsset, StoredAssetGroup, StoredReceiverAccount,
+    LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectCapabilities,
+    ProjectKind, ProjectStatus, ProjectView, PublishQueueItem, PublishQueueSummary, PublishState,
+    PublishTransferMetadata, SqliteStore, StagedObject, StoredAsset, StoredAssetGroup,
+    StoredReceiverAccount,
 };

@@ -228,6 +228,23 @@ try {
         return $reply
     }
 
+    function Send-FtpCommandAny {
+        param(
+            [System.IO.StreamWriter] $Writer,
+            [System.IO.StreamReader] $Reader,
+            [string] $Command,
+            [string[]] $Prefixes
+        )
+        $Writer.WriteLine($Command)
+        $reply = Read-FtpReply $Reader
+        foreach ($prefix in $Prefixes) {
+            if ($reply.StartsWith($prefix)) {
+                return $reply
+            }
+        }
+        throw "FTP command '$Command' expected one of $($Prefixes -join ', '), got '$reply'"
+    }
+
     $control = [System.Net.Sockets.TcpClient]::new("127.0.0.1", 2221)
     try {
         $stream = $control.GetStream()
@@ -238,8 +255,10 @@ try {
 
         $hello = Read-FtpReply $reader
         if (!$hello.StartsWith("220")) { throw "FTP greeting failed: $hello" }
-        Send-FtpCommand $writer $reader "USER verify" "331" | Out-Null
-        Send-FtpCommand $writer $reader "PASS secret" "230" | Out-Null
+        $userReply = Send-FtpCommandAny $writer $reader "USER verify" @("331", "230")
+        if ($userReply.StartsWith("331")) {
+            Send-FtpCommand $writer $reader "PASS secret" "230" | Out-Null
+        }
         Send-FtpCommand $writer $reader "TYPE I" "200" | Out-Null
         $pasv = Send-FtpCommand $writer $reader "PASV" "227"
         if ($pasv -notmatch "\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)") {

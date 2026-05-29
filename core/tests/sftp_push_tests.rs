@@ -41,8 +41,13 @@ impl client::Handler for CapturingServerKey {
 async fn sftp_server_accepts_password_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let state_dir = tempfile::tempdir().expect("state dir should be created");
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let project = store
+        .create_project("SFTP Upload")
+        .expect("project should create");
     let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path())
         .with_state_dir(state_dir.path())
+        .with_active_project(project.project_id.clone())
         .with_account(ReceiverAccount::new(
             "camera",
             Some("secret"),
@@ -129,10 +134,9 @@ async fn sftp_server_accepts_password_upload() {
     assert!(!temp_dir.path().join("sftp-host-key").exists());
     assert!(state_dir.path().join("sftp-host-key").exists());
 
-    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
     let page = store
-        .asset_group_page("project-inbox", AssetGroupQuery::default(), 0, 25)
-        .expect("inbox project groups should query");
+        .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("project groups should query");
     assert_eq!(page.total_groups, 1);
     assert_eq!(page.groups[0].group_key, "IMG_1001");
 }

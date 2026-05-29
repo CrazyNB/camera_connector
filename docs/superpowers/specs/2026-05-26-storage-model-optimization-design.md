@@ -111,7 +111,7 @@ Responsibilities:
 
 - Create, update, archive, and list projects.
 - Track the active project used by every new import.
-- Require a selected project, or an explicit system project such as "Inbox", before receiving uploads.
+- Require an explicit selected user project before receiving uploads.
 - Provide the required dashboard and inbox scope for viewing assets.
 - Provide project-level output preferences when needed.
 - Support manual reassignment of assets or groups from one project to another.
@@ -171,8 +171,11 @@ Core tables:
 - `assets`
 - `asset_groups`
 - `publish_queue`
+- `receiver_accounts`
 - `connected_devices`
 - `receiver_status`
+
+There is intentionally no `import_sessions` table. A receive/import event is represented by project-scoped `transfers`, `assets`, and `asset_groups`; every uploaded photo must belong to a project before it appears in user-facing views.
 
 Asset model:
 
@@ -253,7 +256,7 @@ The project model is both the user-facing and operational organization boundary.
 Assignment rules:
 
 - Use the active project selected in the UI when the receiver starts.
-- If no active project exists, either block receiver start until the user chooses or creates one, or use an explicit system project such as "Inbox" when the product chooses a low-friction default.
+- If no active project exists, block receiver/import indexing until the user chooses or creates one.
 - Do not create unprojected assets.
 
 Project metadata should not replace original camera path. The original path stays diagnostic metadata. Project identity is product organization.
@@ -307,7 +310,7 @@ Recommended flow:
 
 1. `CoreGatewayFactory` seeds app-private `staging_dir` and `state_dir`.
 2. Android persists selected SAF/MediaStore targets in `AndroidStorageGateway`.
-3. The user selects an active project, or the app uses an explicit system project such as "Inbox".
+3. The user selects an active project; if no project is selected, receiver start or upload indexing fails with a clear create/select-project action.
 4. The Rust receiver writes staged files only.
 5. Android or a native platform adapter publishes staged files into the selected target.
 6. The final transfer record stores project identity and platform `StoredObjectLocation`.
@@ -344,7 +347,7 @@ This milestone should land the durable architecture in one pass:
 - Record `final_location` for all new records, including local paths.
 - Add cleanup for stale incomplete temp files.
 - Make dashboard and inbox queries project-scoped.
-- Ensure a system Inbox project when no user-selected project exists, then treat it as the active project instead of falling back to global views.
+- Require an explicit user-created project before imports. If no active project exists, receiving/upload indexing fails with a clear "create and select a project first" error instead of creating a system Inbox fallback.
 
 ### Platform checkpoints
 
@@ -353,8 +356,9 @@ After the foundation schema exists, platform capabilities can be enabled behind 
 - Stop treating Android SAF labels as `output_dir`.
 - Add Android storage config for selected final targets.
 - Keep native receiver writing app-private staged files.
-- Add SAF and MediaStore publishers.
-- Add preview opening from `document_uri` and `media_uri`.
+- Add SAF publisher first.
+- Keep MediaStore publisher deferred until real-device validation proves it is needed.
+- Add preview opening from `document_uri`; keep `media_uri` preview support as compatibility plumbing, not an Android MVP publishing requirement.
 - Add retry and recovery UI for failed publishes.
 - Keep desktop local folder behavior unchanged.
 
@@ -395,7 +399,7 @@ Android tests:
 
 - SAF permission persistence and revocation handling.
 - Publish to selected document tree.
-- Publish to MediaStore.
+- MediaStore publishing only if it is explicitly resumed after device validation.
 - Preview loading from platform URI.
 - Receiver continues while publish queue retries are pending.
 

@@ -62,8 +62,6 @@ char *camera_connector_mobile_core_restore_project_json(
 
 char *camera_connector_mobile_core_active_project_json(const CameraConnectorMobileCore *core);
 
-char *camera_connector_mobile_core_ensure_active_project_json(const CameraConnectorMobileCore *core);
-
 char *camera_connector_mobile_core_project_dashboard_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,

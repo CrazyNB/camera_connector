@@ -88,7 +88,14 @@ if ($LASTEXITCODE -ne 0) {
 
 Start-Sleep -Seconds 2
 
-$appPid = (& $adb @adbArgs shell pidof $packageName) -join "`n"
+$appPid = ""
+for ($attempt = 1; $attempt -le 15; $attempt++) {
+    $appPid = (& $adb @adbArgs shell pidof $packageName) -join "`n"
+    if ($appPid.Trim().Length -gt 0) {
+        break
+    }
+    Start-Sleep -Seconds 1
+}
 if ($appPid.Trim().Length -eq 0) {
     Collect-Diagnostics "smoke-process-missing"
     throw "App process is not running after launch."

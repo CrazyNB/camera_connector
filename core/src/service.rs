@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     append_transfer_record, group_received_assets, read_connected_devices,
-    read_receiver_runtime_status, read_transfer_log, scan_inbox_groups, CameraConnectorConfig,
-    ConnectedDevice, ImportSource, ObjectFormat, PublishQueueItem, PublishQueueSummary,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore, StoredAsset,
-    StoredObjectLocation, TransferRecord, TransferStatus,
+    read_receiver_runtime_status, read_transfer_log, scan_inbox_groups, AssetFormatRole,
+    CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat, PublishQueueItem,
+    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
+    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore,
+    StoredAsset, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -62,6 +62,7 @@ pub struct AssetGroupQuery {
     pub original_path: Option<String>,
     pub remote_addr: Option<String>,
     pub format: Option<ObjectFormat>,
+    pub role: Option<AssetFormatRole>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,8 +226,9 @@ impl CameraConnectorService {
             request.password.as_deref(),
             config.source_name.as_deref(),
         )?;
-        config.active_project_id =
-            Some(ensure_active_project_in_state_dir(&config.state_dir)?.project_id);
+        config.active_project_id = SqliteStore::open_state_dir(&config.state_dir)?
+            .active_project()?
+            .map(|project| project.project_id);
         Ok(config)
     }
 
@@ -272,10 +274,6 @@ impl CameraConnectorService {
 
     pub fn active_project(&self) -> Result<Option<crate::Project>> {
         self.storage_store()?.active_project()
-    }
-
-    pub fn ensure_active_project(&self) -> Result<crate::Project> {
-        ensure_active_project_in_state_dir(self.storage_state_dir()?)
     }
 
     pub fn list_projects(&self) -> Result<Vec<crate::Project>> {
@@ -684,14 +682,17 @@ impl CameraConnectorService {
         let transfer_query = transfer_query_from_asset_query(&asset_query);
         let transfers =
             self.project_transfer_summary_with_query(project_id, transfer_query.clone())?;
+        let output_dir = receiver_status
+            .as_ref()
+            .and_then(|status| status.output_dir.clone())
+            .or_else(|| receiver_settings.output_dir.clone())
+            .or_else(|| Some(CameraConnectorConfig::default_output_dir()));
         Ok(CameraConnectorDashboard {
             receiver_settings,
             paths: SystemPathsView {
                 config_path: self.config_path(),
                 state_dir: state_dir.clone(),
-                output_dir: receiver_status
-                    .as_ref()
-                    .and_then(|status| status.output_dir.clone()),
+                output_dir,
             },
             receiver_status,
             accounts,
@@ -703,16 +704,6 @@ impl CameraConnectorService {
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,
         })
     }
-}
-
-fn ensure_active_project_in_state_dir(state_dir: impl AsRef<Path>) -> Result<crate::Project> {
-    let store = SqliteStore::open_state_dir(state_dir)?;
-    if let Some(project) = store.active_project()? {
-        return Ok(project);
-    }
-    let project = store.ensure_inbox_project()?;
-    store.set_active_project(&project.project_id)?;
-    Ok(project)
 }
 
 fn receiver_account_configs_from_state_dir(
@@ -902,6 +893,10 @@ fn asset_matches(asset: &ReceivedAsset, query: &AssetGroupQuery) -> bool {
         && query
             .format
             .map(|expected| asset.format == expected)
+            .unwrap_or(true)
+        && query
+            .role
+            .map(|expected| asset.format.role() == expected)
             .unwrap_or(true)
 }
 

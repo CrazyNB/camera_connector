@@ -99,7 +99,7 @@ Validate local ingest without a camera:
 target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 --output C:\Users\hxn\Pictures\CameraConnector --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --source ftp --source-name "Studio Camera"
 ```
 
-`receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the active project in SQLite. If the state directory has no active project yet, it creates and selects the system Inbox project first.
+`receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the active project in SQLite. If the state directory has no active project, the operation fails and the caller must create/select a project first.
 
 List project assets and RAW/JPEG groups from SQLite:
 
@@ -155,7 +155,7 @@ target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json restore --id project-...
 ```
 
-Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project rename` updates the display name and slug without changing the project id or active selection; `project active` ensures a default Inbox project exists when no project has been selected yet. Archiving keeps regular project data queryable but clears it as the active import target until it is restored and selected again. The system Inbox project is the import fallback and cannot be archived or renamed.
+Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project rename` updates the display name and slug without changing the project id or active selection; `project active` returns the current active project and errors when no project has been selected. Archiving keeps project data queryable but clears it as the active import target until it is restored and selected again. There is no default Inbox fallback; imports must be attached to an explicit user-created project.
 
 Read the project-scoped dashboard model in one command:
 

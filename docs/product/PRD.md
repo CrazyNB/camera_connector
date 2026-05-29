@@ -105,12 +105,12 @@ P2:
 | RX-005 | Flat safe path handling | P0 | `/DCIM/100CANON/IMG_1001.CR3` lands as `IMG_1001.CR3`; traversal and unsafe filename characters cannot escape output folder |
 | RX-005A | Storage separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload inbox contains camera files and temporary upload files only |
 | RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
-| RX-007 | Inbox scan | P0 | Receiver output folder can be scanned into grouped assets |
+| RX-007 | Project asset scan | P0 | Receiver output can be indexed into grouped assets under an explicit shooting project |
 | RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
 | RX-008A | Duplicate detection | P0 | Re-uploaded assets from the same account/source and original camera path expose duplicate index and duplicate count in grouped asset views |
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename, platform final location, bytes, protocol, optional login username, remote address, and optional source name |
-| RX-011 | Tag-style filters and virtual paths | P0 | Inbox and transfer views can filter by format, login username, source name, remote address, transfer id, and original path; display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
+| RX-011 | Tag-style filters and virtual paths | P0 | Project photo and diagnostics views can filter by format, login username, transfer id, and original path; display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
 | RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; FTP and SFTP receivers authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
 | RX-012A | Receiver settings configuration | P0 | Core config persists receiver defaults including protocol, bind host, camera-facing port, optional output/state directories, advertised host, and source name; Android presents one unified port and writes it to the relevant core port fields; runtime start requests can override these values without rewriting saved config |
 | RX-013 | Connected device view | P0 | FTP and SFTP receivers record current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |

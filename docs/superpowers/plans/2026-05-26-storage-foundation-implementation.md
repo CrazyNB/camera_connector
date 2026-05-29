@@ -48,7 +48,7 @@
 - Test: `core/tests/sftp_push_tests.rs`
 
 - [x] Write failing tests proving FTP/SFTP uploads create SQLite transfer, asset, and group rows under the active project.
-- [x] Add `active_project_id` to receiver config and require it for storage-indexed receiver writes, defaulting tests to an explicit Inbox project.
+- [x] Add `active_project_id` to receiver config and require it for storage-indexed receiver writes, with tests using explicit user-created projects.
 - [x] After a completed transfer is appended to `transfer-log.jsonl`, also record it in `SqliteStore`.
 - [x] Run `cargo test -p camera_connector_core ftp_push_tests sftp_push_tests storage_store_tests`.
 - [x] Commit with message `Index receiver uploads in SQLite`.

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.Settings
+import com.cameraconnector.app.core.DEFAULT_CAMERA_CONNECT_HOST
 
 class AndroidStorageGateway(private val context: Context) {
     private val preferences: SharedPreferences =
@@ -35,12 +36,24 @@ class AndroidStorageGateway(private val context: Context) {
     fun selectedInboxUri(): Uri? =
         preferences.getString(KEY_INBOX_URI, null)?.let(Uri::parse)
 
-    fun inboxGridColumnCount(): Int =
-        preferences.getInt(KEY_INBOX_GRID_COLUMNS, DEFAULT_INBOX_GRID_COLUMNS).coerceIn(2, 3)
+    fun projectPhotoGridColumnCount(): Int =
+        preferences.getInt(KEY_PROJECT_PHOTO_GRID_COLUMNS, DEFAULT_PROJECT_PHOTO_GRID_COLUMNS).coerceIn(2, 3)
 
-    fun persistInboxGridColumnCount(columnCount: Int) {
+    fun persistProjectPhotoGridColumnCount(columnCount: Int) {
         preferences.edit()
-            .putInt(KEY_INBOX_GRID_COLUMNS, columnCount.coerceIn(2, 3))
+            .putInt(KEY_PROJECT_PHOTO_GRID_COLUMNS, columnCount.coerceIn(2, 3))
+            .apply()
+    }
+
+    fun cameraConnectHost(): String =
+        preferences.getString(KEY_CAMERA_CONNECT_HOST, null)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_CAMERA_CONNECT_HOST
+
+    fun persistCameraConnectHost(host: String) {
+        preferences.edit()
+            .putString(KEY_CAMERA_CONNECT_HOST, host.trim().ifBlank { DEFAULT_CAMERA_CONNECT_HOST })
             .apply()
     }
 
@@ -52,7 +65,8 @@ class AndroidStorageGateway(private val context: Context) {
     private companion object {
         const val KEY_INBOX_URI = "inbox_uri"
         const val KEY_INBOX_LABEL = "inbox_label"
-        const val KEY_INBOX_GRID_COLUMNS = "inbox_grid_columns"
-        const val DEFAULT_INBOX_GRID_COLUMNS = 3
+        const val KEY_PROJECT_PHOTO_GRID_COLUMNS = "project_photo_grid_columns"
+        const val KEY_CAMERA_CONNECT_HOST = "camera_connect_host"
+        const val DEFAULT_PROJECT_PHOTO_GRID_COLUMNS = 3
     }
 }

@@ -4,60 +4,78 @@
 
 The prototype presents the product shell for a push-mode camera receiver. It is intentionally close to the current core read model so mobile development can map screens to service calls without inventing a second product model.
 
-The prototype path is:
+The early HTML prototype path is:
 
 ```text
 prototypes/camera-connector/index.html
 ```
 
+The current Android interaction and visual direction should follow the Figma design:
+
+```text
+https://www.figma.com/design/mKSknurwc2LWS83UWe0ReA
+```
+
 ## 2. Navigation Model
 
-The primary mobile navigation has three bottom tabs:
+The mobile shell has two navigation levels.
 
-- Overview
-- Inbox
-- Transfers
+Global navigation:
 
-Configuration and account management are secondary pages, not primary tabs:
+- Projects
+- Accounts
+- Settings
 
-- Receiver Settings
-- Device Accounts
+Settings secondary navigation:
 
-This keeps the daily workflow focused on receiver health, imported files, and transfer diagnostics. Setup and account management stay reachable from Overview cards and secondary page links.
+- Diagnostics
+
+Project workspace:
+
+- Receiver launch/status panel
+- Photos grid
+
+This keeps project-scoped work inside a selected shooting project while account management and settings remain global. Diagnostics sit under Settings instead of consuming a primary tab. Receiver start/stop belongs inside the active project workspace so every import has an explicit project boundary.
 
 ## 3. Primary Flow
 
 ```mermaid
 flowchart TD
-  A["Open app"] --> B["Overview"]
-  B --> C["Start or inspect receiver"]
-  B --> D["Open Receiver Settings if setup is needed"]
-  B --> E["Open Device Accounts if credentials are needed"]
-  C --> F["Show camera-facing host, port, protocol, username"]
-  F --> G["User configures camera FTP/SFTP profile"]
-  G --> H["Camera uploads files"]
-  H --> I["Receiver stages bytes, then publishes completed files"]
-  H --> J["SQLite stores project, transfer, asset, group, and publish state"]
-  I --> K["Project inbox groups RAW/JPEG/video assets"]
-  J --> L["Transfers tab shows completed and failed records"]
+  A["Open app"] --> B["Projects"]
+  B --> C["Create or select project"]
+  C --> D["Project Workspace"]
+  D --> E["Start or inspect receiver"]
+  D --> F["Edit receiver setup inline if needed"]
+  A --> G["Accounts"]
+  G --> H["Configure camera credentials"]
+  E --> I["Show camera-facing host, port, protocol, username"]
+  I --> J["User configures camera FTP/SFTP profile"]
+  J --> K["Camera uploads files"]
+  K --> L["Receiver stages bytes, then publishes completed files"]
+  K --> M["SQLite stores project, transfer, asset, group, and publish state"]
+  L --> N["Project Photos shows grouped RAW/JPEG/video assets"]
+  M --> O["Receiver status summarizes transfer and publish health"]
+  M --> P["Settings Diagnostics shows operational rows and errors"]
 ```
 
 ## 4. Screens
 
-### Overview
+### Project Workspace
 
-Purpose: provide the receiver dashboard and operational shortcuts.
+Purpose: receive into the active project while keeping the photo grid as the main information surface.
 
 Content:
 
-- Receiver status: phase, protocol, bind host, port, advertised host.
+- Receiver launch/status panel: phase, protocol, bind host, port, camera-facing IP, advertised host.
+- Stopped state: expanded setup panel with the primary Start action.
+- Running state: compact collapsed status with an expand/control affordance.
 - Transfer health: total completed and failed count.
 - Asset summary: total groups and format counts.
 - Current account/device state: account username, device name, online state, active connection count, latest IP/port.
 - Recent failures with error text and virtual display path.
 - Config/state/output path summary.
 - Active project summary.
-- Entry points to Receiver Settings and Device Accounts.
+- Photos grid as the default body below receiver status.
 
 ### Projects
 
@@ -68,31 +86,28 @@ Content:
 - Project list with active and archived states.
 - Create project.
 - Select active project before starting or inspecting imports.
-- System Inbox project for low-friction imports when no explicit project has been chosen; this fallback project cannot be archived.
+- Explicit project selection before imports; the app does not create a default Inbox fallback.
 
-### Receiver Settings
+### Receiver Setup
 
-Purpose: configure local receiver defaults and camera-facing setup values.
+Purpose: configure local receiver defaults and camera-facing setup values inside the active project workspace.
 
-Entry: secondary page from Overview.
+Entry: expanded project receiver panel.
 
 Content:
 
 - Protocol: FTP or SFTP.
-- Bind host.
+- Bind host, defaulting to `0.0.0.0` for the native listener.
 - Unified camera-facing port.
-- Advertised host shown to the camera.
-- Source name.
-- Upload/output location.
-- State/log location.
+- Camera-facing IP shown to the camera, defaulting to a user-editable `192.168.50.1` style LAN address.
 - Read-only camera setup summary: server, port, passive mode, account, password configured state.
-- Link to Device Accounts.
+Account management is linked from the global Accounts destination, not owned by receiver settings.
 
-### Device Accounts
+### Accounts
 
 Purpose: manage stable device identity and see mutable connection state.
 
-Entry: secondary page from Overview or Receiver Settings.
+Entry: global destination.
 
 Content:
 
@@ -102,52 +117,67 @@ Content:
 - Edit account: device name, username, password setup.
 - IP policy: IP is a connection attribute, not account identity.
 
-### Inbox
+### Photos
 
 Purpose: show successfully published camera files.
 
 Content:
 
-- Project-scoped inbox assets backed by SQLite.
+- Project-scoped asset groups backed by SQLite.
 - RAW+JPEG grouping.
 - Video groups.
+- Photo grid with JPEG preview when available.
+- Tap preview to open group detail.
+- Long press to enter selection mode for bulk movement.
 - Format filters: All, JPG, RAW, Video.
 - Tag filters: source name, username, original path, transfer id, remote IP.
 - Virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF`.
 - Duplicate index/count for repeated imports from the same account/source and original camera path.
 
-### Transfers
+### Settings
 
-Purpose: show live and historical transfer diagnostics.
+Purpose: hold global app preferences and secondary operational tools.
 
 Content:
 
-- Current upload progress when available.
-- Completed and failed transfer rows.
+- Output directory selection.
+- Photo grid density.
+- Diagnostics entry.
+- App/runtime preferences that are not project-owned.
+
+### Settings Diagnostics
+
+Purpose: show live and historical operational diagnostics that are not owned by the photo browsing workflow.
+
+Content:
+
+- Current receiver and account health.
+- Completed and failed transfer rows when available.
 - Failure error text.
-- Transfer id, username, source name, original path, remote IP, final location type.
-- Status filter: all, completed, failed.
-- Guidance that retry is initiated from the camera.
+- Transfer id, username, source name, original path, remote IP, final location type when exposed by the core.
+- Guidance that camera transfer retry is initiated from the camera; publish retry remains available from receiver status when staged bytes can be retried.
 
 ## 5. Data Contract Alignment
 
 The prototype maps to `CameraConnectorDashboard`:
 
-- `receiver_status` -> Overview receiver card.
-- `paths` -> Overview path summary and Receiver Settings path fields.
-- `accounts` -> Overview account summary and Device Accounts list.
-- `devices` -> Device Accounts connection records.
-- `transfers` -> Overview transfer health metrics.
-- `recent_failures` -> Overview recent failures and Transfers failure rows.
-- `assets` -> Project-scoped inbox asset groups and format/source filters.
+- `receiver_status` -> project receiver panel and collapsed status.
+- `paths` -> project receiver summary and Settings output fields.
+- `accounts` -> project receiver account summary and global Accounts list.
+- `devices` -> global Accounts and Settings diagnostics connection records.
+- `transfers` -> project receiver health metrics and Settings diagnostics rows.
+- `recent_failures` -> project receiver failures and Settings diagnostics failure rows.
+- `assets` -> Project Photos grid and shared format/source filters.
 
-Project actions map to `CameraConnectorService::create_project`, `set_active_project`, `ensure_active_project`, and `project_dashboard`. On first launch, the app ensures a system Inbox project so uploads and views always have a project boundary. Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
+Project actions map to `CameraConnectorService::create_project`, `set_active_project`, `active_project`, and `project_dashboard`. On first launch, the app shows project management and requires the user to choose or create a project before uploads can be accepted. Configuration updates map to `CameraConnectorService::set_receiver_settings` and account management maps to `set_account` / `remove_account`.
 
 ## 6. Visual Direction
 
 - Keep the interface operational and dense.
-- Bottom tabs are only stable primary destinations.
-- Secondary pages use a top-left back action.
+- Global navigation should stay compact: Projects, Accounts, Settings.
+- Diagnostics should be a Settings secondary page, not a primary tab.
+- Project workspace should be photo-first, with receiver launch/status occupying only the space needed for the current receiver state.
+- Child pages use a top-left back action.
 - Use status pills for receiver, account, and transfer state.
 - Use compact cards for repeated items only; avoid landing-page composition.
 - Keep long paths and filenames wrap-safe on narrow screens.

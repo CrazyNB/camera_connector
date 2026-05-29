@@ -22,18 +22,18 @@ The Android source now has a native gateway boundary:
 - `ReceiverForegroundService` also runs a publish queue worker that claims staged items from Rust and publishes them through the Android storage boundary; when the user has selected a document tree it publishes to SAF and records `document_uri`, otherwise it falls back to app-private file storage. The worker resolves the target for each publish so changing or reauthorizing the output directory can recover queued failures without restarting the receiver.
 - The foreground notification can reopen the app and exposes a Stop action so receiver shutdown is available outside the Compose UI.
 - `AndroidPermissionGateway` gates receiver start on Android 13+ notification permission.
-- The Overview screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
-- The Overview screen can save receiver protocol, bind host, and one unified camera-facing port through the native gateway; the Kotlin adapter writes that port into both core protocol fields so the UI does not expose duplicate port settings.
-- The Transfers screen reads native dashboard transfer counts and recent failure rows, including virtual display paths and core error messages.
+- The Accounts screen can create camera accounts with device name, username, and a write-only password that is handed to the Rust core for hashed persistence.
+- The project receiver panel applies protocol, bind host, one unified camera-facing port, and the camera-facing setup IP when Start is pressed; the Kotlin adapter writes that port into both core protocol fields so the UI does not expose duplicate port settings.
+- Diagnostics are reachable from Settings and read native dashboard transfer counts plus recent failure rows, including virtual display paths and core error messages.
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
 - The Output card launches Android's document tree picker and persists the selected inbox URI label; native imports use that selected SAF tree as the final publish target when it is available.
-- The Overview receiver tags surface pending and failed publish queue counts from the Rust dashboard, so SAF permission loss or other retryable publish failures are visible in-app.
-- The Transfers screen includes recent publish queue failures with the affected filename and last error, alongside completed imports and failed receiver transfers.
+- The receiver panel and collapsed running status surface pending and failed publish queue counts from the Rust dashboard, so SAF permission loss or other retryable publish failures are visible in-app.
+- Publish queue failures remain visible through the receiver status and Settings diagnostics surface, alongside completed imports and failed receiver transfers.
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
-- The Inbox screen uses a photo-first grid with persisted 2-column/3-column preference, compact tile labels, image previews from local paths, SAF document URIs, and MediaStore image URIs when JPEG data is available, plus a detail screen for full source/file metadata.
+- The app opens on Project Management. Entering a project opens the photo-first project workspace: the receiver launch panel starts expanded while stopped, collapses into a compact running status after start, and the rest of the page is the project photo grid with compact tiles, JPEG previews from local paths or SAF document URIs, tap-to-detail, and long-press selection.
 
 The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation.
 
@@ -88,13 +88,21 @@ The smoke pass builds and installs the debug APK, grants notification permission
 
 If the APK was already installed manually after approving a phone-side USB install prompt, pass `-SkipInstall` to validate the installed app launch and diagnostics without reinstalling.
 
+For a real-camera Android validation pass, run the connected-device smoke first, then use the Android Physical Device Test Template in `docs\compatibility.md` to record camera login, foreground service behavior, SAF publish, project photo/detail visibility, transfer rows, and diagnostics path.
+
+To generate a per-device real-camera test record with prefilled adb preflight data:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare_android_real_camera_test.ps1 -Serial <serial> -RunSmoke -SkipInstall
+```
+
 To verify Android FTP import with a real RAW/JPEG folder, pass `-RealAssetDirectory` to the emulator upload script:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_emulator_ftp_upload.ps1 -Serial emulator-5554 -RealAssetDirectory "D:\ps\Photos\2026\5\5.4"
 ```
 
-The script finds a matching RAW/JPEG filename stem, uploads the real bytes through the Android receiver, and verifies the transfer log, inbox grid, JPEG preview, photo detail, and transfer list. Without this parameter it still uses the small synthetic RAW/JPEG pair for quick smoke runs.
+The script finds a matching RAW/JPEG filename stem, uploads the real bytes through the Android receiver, and verifies the transfer log, project photo grid, JPEG preview, photo detail, and transfer list. Without this parameter it still uses the small synthetic RAW/JPEG pair for quick smoke runs.
 
 To preflight a connected Android device before installing:
 

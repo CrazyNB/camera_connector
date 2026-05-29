@@ -1,4 +1,39 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AssetFormatRole {
+    Jpeg,
+    Raw,
+    Video,
+    Other,
+}
+
+impl AssetFormatRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Raw => "raw",
+            Self::Video => "video",
+            Self::Other => "other",
+        }
+    }
+}
+
+impl FromStr for AssetFormatRole {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "jpeg" | "jpg" => Ok(Self::Jpeg),
+            "raw" => Ok(Self::Raw),
+            "video" | "movie" => Ok(Self::Video),
+            "other" | "unknown" => Ok(Self::Other),
+            _ => Err(()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ObjectFormat {
@@ -25,22 +60,38 @@ impl ObjectFormat {
             return Self::Unknown;
         };
 
-        match extension.to_ascii_lowercase().as_str() {
-            "jpg" | "jpeg" => Self::Jpeg,
-            "nef" => Self::Nef,
-            "nrw" => Self::Nrw,
-            "cr2" => Self::Cr2,
-            "cr3" => Self::Cr3,
-            "arw" | "srf" | "sr2" => Self::Arw,
-            "raf" => Self::Raf,
-            "rw2" | "rwl" => Self::Rw2,
-            "orf" => Self::Orf,
-            "pef" => Self::Pef,
-            "dng" => Self::Dng,
-            "mov" => Self::Mov,
-            "mp4" => Self::Mp4,
-            "tif" | "tiff" => Self::Tiff,
-            _ => Self::Unknown,
+        extension.parse().unwrap_or(Self::Unknown)
+    }
+
+    pub fn role(self) -> AssetFormatRole {
+        if self == Self::Jpeg {
+            AssetFormatRole::Jpeg
+        } else if self.is_raw() {
+            AssetFormatRole::Raw
+        } else if self.is_video() {
+            AssetFormatRole::Video
+        } else {
+            AssetFormatRole::Other
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpeg",
+            Self::Nef => "nef",
+            Self::Nrw => "nrw",
+            Self::Cr2 => "cr2",
+            Self::Cr3 => "cr3",
+            Self::Arw => "arw",
+            Self::Raf => "raf",
+            Self::Rw2 => "rw2",
+            Self::Orf => "orf",
+            Self::Pef => "pef",
+            Self::Dng => "dng",
+            Self::Mov => "mov",
+            Self::Mp4 => "mp4",
+            Self::Tiff => "tiff",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -66,5 +117,30 @@ impl ObjectFormat {
 
     pub fn is_supported_media(self) -> bool {
         self == Self::Jpeg || self == Self::Tiff || self.is_raw() || self.is_video()
+    }
+}
+
+impl FromStr for ObjectFormat {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value.trim().to_ascii_lowercase().as_str() {
+            "jpg" | "jpeg" => Self::Jpeg,
+            "nef" => Self::Nef,
+            "nrw" => Self::Nrw,
+            "cr2" => Self::Cr2,
+            "cr3" => Self::Cr3,
+            "arw" | "srf" | "sr2" => Self::Arw,
+            "raf" => Self::Raf,
+            "rw2" | "rwl" => Self::Rw2,
+            "orf" => Self::Orf,
+            "pef" => Self::Pef,
+            "dng" => Self::Dng,
+            "mov" => Self::Mov,
+            "mp4" => Self::Mp4,
+            "tif" | "tiff" => Self::Tiff,
+            "unknown" => Self::Unknown,
+            _ => return Err(()),
+        })
     }
 }

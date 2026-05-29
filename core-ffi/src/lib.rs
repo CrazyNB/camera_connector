@@ -1,11 +1,13 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorDashboard, CameraConnectorRuntime, CameraConnectorService,
-    ImporterError, PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig,
-    ReceiverSettingsUpdate, StoredObjectLocation,
+    AssetFormatRole, AssetGroupPage, AssetGroupQuery, CameraConnectorDashboard,
+    CameraConnectorRuntime, CameraConnectorService, ImporterError, ObjectFormat, Project,
+    PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig, ReceiverSettingsUpdate,
+    StoredObjectLocation,
 };
 use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JClass, JString};
@@ -22,6 +24,10 @@ pub enum MobileCoreError {
     InvalidProtocol(String),
     #[error("invalid storage location kind: {0}")]
     InvalidLocationKind(String),
+    #[error("invalid asset format: {0}")]
+    InvalidAssetFormat(String),
+    #[error("invalid asset role: {0}")]
+    InvalidAssetRole(String),
     #[error("mobile core pointer is null")]
     NullCore,
     #[error("input pointer is null: {0}")]
@@ -56,6 +62,16 @@ pub struct MobileReceiverSettingsPatch {
     pub advertised_host: Option<String>,
     pub source_name: Option<String>,
     pub defer_publish: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MobileAssetGroupQuery {
+    pub username: Option<String>,
+    pub source_name: Option<String>,
+    pub original_path: Option<String>,
+    pub remote_addr: Option<String>,
+    pub format: Option<String>,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +109,7 @@ impl MobileCore {
 
     pub fn create_project_json(&self, name: String) -> MobileCoreResult<String> {
         let project = self.service.create_project(name)?;
-        Ok(serde_json::to_string(&project)?)
+        project_json(project)
     }
 
     pub fn rename_project_json(
@@ -102,12 +118,12 @@ impl MobileCore {
         name: String,
     ) -> MobileCoreResult<String> {
         let project = self.service.rename_project(&project_id, name)?;
-        Ok(serde_json::to_string(&project)?)
+        project_json(project)
     }
 
     pub fn list_projects_json(&self) -> MobileCoreResult<String> {
         let projects = self.service.list_projects()?;
-        Ok(serde_json::to_string(&projects)?)
+        project_list_json(projects)
     }
 
     pub fn set_active_project_json(&self, project_id: String) -> MobileCoreResult<String> {
@@ -116,27 +132,22 @@ impl MobileCore {
             .service
             .active_project()?
             .ok_or_else(|| ImporterError::internal("active project was not found after update"))?;
-        Ok(serde_json::to_string(&project)?)
+        project_json(project)
     }
 
     pub fn archive_project_json(&self, project_id: String) -> MobileCoreResult<String> {
         let project = self.service.archive_project(&project_id)?;
-        Ok(serde_json::to_string(&project)?)
+        project_json(project)
     }
 
     pub fn restore_project_json(&self, project_id: String) -> MobileCoreResult<String> {
         let project = self.service.restore_project(&project_id)?;
-        Ok(serde_json::to_string(&project)?)
+        project_json(project)
     }
 
     pub fn active_project_json(&self) -> MobileCoreResult<String> {
         let project = self.service.active_project()?;
-        Ok(serde_json::to_string(&project)?)
-    }
-
-    pub fn ensure_active_project_json(&self) -> MobileCoreResult<String> {
-        let project = self.service.ensure_active_project()?;
-        Ok(serde_json::to_string(&project)?)
+        project_option_json(project)
     }
 
     pub fn project_dashboard_json(
@@ -153,6 +164,23 @@ impl MobileCore {
             false,
         )?;
         Ok(serde_json::to_string(&dashboard)?)
+    }
+
+    pub fn project_asset_group_page_json(
+        &self,
+        project_id: String,
+        query_json: String,
+        offset: u32,
+        limit: u32,
+    ) -> MobileCoreResult<String> {
+        let query = asset_group_query_from_json(&query_json)?;
+        let page: AssetGroupPage = self.service.project_asset_group_page_with_query(
+            &project_id,
+            query,
+            offset as usize,
+            limit as usize,
+        )?;
+        Ok(serde_json::to_string(&page)?)
     }
 
     pub fn project_group_assets_json(
@@ -491,21 +519,6 @@ pub unsafe extern "C" fn camera_connector_mobile_core_active_project_json(
     })
 }
 
-/// # Safety
-///
-/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
-#[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_ensure_active_project_json(
-    core: *const MobileCore,
-) -> *mut c_char {
-    ffi_response(|| {
-        let project = core_ref(core)?.ensure_active_project_json()?;
-        parse_json_value(&project)
-    })
-}
-
-/// # Safety
-///
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// `project_id` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
@@ -519,6 +532,27 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_dashboard_json(
         let project_id = required_c_string(project_id, "project_id")?;
         let dashboard = core_ref(core)?.project_dashboard_json(project_id, offset, limit)?;
         parse_json_value(&dashboard)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` and `query_json` must be valid, null-terminated UTF-8 C strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_project_asset_group_page_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+    query_json: *const c_char,
+    offset: u32,
+    limit: u32,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let query_json = required_c_string(query_json, "query_json")?;
+        let page =
+            core_ref(core)?.project_asset_group_page_json(project_id, query_json, offset, limit)?;
+        parse_json_value(&page)
     })
 }
 
@@ -738,6 +772,61 @@ fn parse_json_value(json: &str) -> MobileCoreResult<Value> {
     Ok(serde_json::from_str(json)?)
 }
 
+fn project_json(project: Project) -> MobileCoreResult<String> {
+    Ok(serde_json::to_string(&project.into_view())?)
+}
+
+fn project_option_json(project: Option<Project>) -> MobileCoreResult<String> {
+    Ok(serde_json::to_string(&project.map(Project::into_view))?)
+}
+
+fn project_list_json(projects: Vec<Project>) -> MobileCoreResult<String> {
+    let views = projects
+        .into_iter()
+        .map(Project::into_view)
+        .collect::<Vec<_>>();
+    Ok(serde_json::to_string(&views)?)
+}
+
+fn asset_group_query_from_json(query_json: &str) -> MobileCoreResult<AssetGroupQuery> {
+    let query: MobileAssetGroupQuery = if query_json.trim().is_empty() {
+        MobileAssetGroupQuery::default()
+    } else {
+        serde_json::from_str(query_json)?
+    };
+    Ok(AssetGroupQuery {
+        username: query.username.and_then(non_blank),
+        source_name: query.source_name.and_then(non_blank),
+        original_path: query.original_path.and_then(non_blank),
+        remote_addr: query.remote_addr.and_then(non_blank),
+        format: query
+            .format
+            .and_then(non_blank)
+            .map(|value| {
+                ObjectFormat::from_str(&value)
+                    .map_err(|_| MobileCoreError::InvalidAssetFormat(value))
+            })
+            .transpose()?,
+        role: query
+            .role
+            .and_then(non_blank)
+            .map(|value| {
+                AssetFormatRole::from_str(&value)
+                    .map_err(|_| MobileCoreError::InvalidAssetRole(value))
+            })
+            .transpose()?,
+    })
+}
+
+fn non_blank(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn core_ref<'a>(core: *const MobileCore) -> MobileCoreResult<&'a MobileCore> {
     if core.is_null() {
         Err(MobileCoreError::NullCore)
@@ -947,21 +1036,6 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_active
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_ensureActiveProjectJson(
-    mut env: EnvUnowned,
-    _class: JClass,
-    handle: jlong,
-) -> jstring {
-    env.with_env(|env| {
-        java_response(env, || {
-            let project = mobile_core_from_handle(handle)?.ensure_active_project_json()?;
-            parse_json_value(&project)
-        })
-    })
-    .resolve::<ThrowRuntimeExAndDefault>()
-}
-
-#[no_mangle]
 pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projectDashboardJson(
     mut env: EnvUnowned,
     _class: JClass,
@@ -979,6 +1053,32 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
                 limit.max(0) as u32,
             )?;
             parse_json_value(&dashboard)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projectAssetGroupPageJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    query_json: JString,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        let query_json = required_java_string(env, query_json, "query_json");
+        java_response(env, || {
+            let page = mobile_core_from_handle(handle)?.project_asset_group_page_json(
+                project_id?,
+                query_json?,
+                offset.max(0) as u32,
+                limit.max(0) as u32,
+            )?;
+            parse_json_value(&page)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()

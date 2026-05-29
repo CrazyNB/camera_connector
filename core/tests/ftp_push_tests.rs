@@ -12,8 +12,13 @@ use tokio::time::{sleep, Duration};
 async fn ftp_server_accepts_passive_stor_upload() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let state_dir = tempfile::tempdir().expect("state dir should be created");
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let project = store
+        .create_project("FTP Upload")
+        .expect("project should create");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
         .with_state_dir(state_dir.path())
+        .with_active_project(project.project_id.clone())
         .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
     let server = FtpPushServer::bind(config)
         .await
@@ -180,8 +185,13 @@ async fn ftp_server_indexes_uploads_under_active_project() {
 async fn ftp_server_defers_final_publish_when_configured() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let state_dir = tempfile::tempdir().expect("state dir should be created");
+    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
+    let project = store
+        .create_project("Deferred FTP Project")
+        .expect("project should create");
     let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
         .with_state_dir(state_dir.path())
+        .with_active_project(project.project_id.clone())
         .with_deferred_publish();
     let server = FtpPushServer::bind(config)
         .await
@@ -232,15 +242,14 @@ async fn ftp_server_defers_final_publish_when_configured() {
     let records = read_transfer_log(state_dir.path()).expect("transfer log should read");
     assert!(records.is_empty());
 
-    let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
     let summary = store
-        .publish_queue_summary("project-inbox")
+        .publish_queue_summary(&project.project_id)
         .expect("queue summary should read");
     assert_eq!(summary.staged_count, 1);
     assert_eq!(summary.pending_count, 1);
     assert_eq!(summary.completed_count, 0);
     let page = store
-        .asset_group_page("project-inbox", AssetGroupQuery::default(), 0, 25)
+        .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 25)
         .expect("asset groups should query");
     assert_eq!(page.total_groups, 0);
 

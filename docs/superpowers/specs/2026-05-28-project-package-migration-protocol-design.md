@@ -137,4 +137,4 @@ The durable cross-platform contract is the protocol's ordered matching policy ov
 
 ## Open Implementation Timing
 
-This spec should stay dormant until the Android import pipeline and multi-project workflow are validated. The next practical milestone remains end-to-end Android FTP upload verification and real-camera compatibility testing.
+This spec should stay dormant until the Android project workflow is validated on a physical device with a real camera. Emulator FTP upload is already covered by verification scripts; the remaining practical milestone is real-camera compatibility and Android device behavior under hotspot/LAN, foreground-service, and SAF publishing constraints.

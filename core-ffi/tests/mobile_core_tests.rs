@@ -93,8 +93,14 @@ fn mobile_core_removes_account_as_json() {
     let value: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(value["username"], "camera01");
     assert_eq!(value["removed"], true);
-    let project: Value = serde_json::from_str(&core.ensure_active_project_json().unwrap()).unwrap();
+    let project: Value = serde_json::from_str(
+        &core
+            .create_project_json("Account Dashboard".to_string())
+            .unwrap(),
+    )
+    .unwrap();
     let project_id = project["project_id"].as_str().unwrap().to_string();
+    core.set_active_project_json(project_id.clone()).unwrap();
     let dashboard: Value =
         serde_json::from_str(&core.project_dashboard_json(project_id, 0, 25).unwrap()).unwrap();
     assert_eq!(dashboard["accounts"].as_array().unwrap().len(), 0);
@@ -149,20 +155,31 @@ fn mobile_core_manages_projects_as_json() {
 }
 
 #[test]
-fn mobile_core_ensures_active_project_as_json() {
+fn mobile_core_exposes_project_capabilities_as_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
     let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
 
-    let ensured_json = core.ensure_active_project_json().unwrap();
-    let ensured: Value = serde_json::from_str(&ensured_json).unwrap();
+    let created: Value = serde_json::from_str(
+        &core
+            .create_project_json("Client Capability Shoot".to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    let archived: Value = serde_json::from_str(
+        &core
+            .archive_project_json(created["project_id"].as_str().unwrap().to_string())
+            .unwrap(),
+    )
+    .unwrap();
 
-    assert_eq!(ensured["project_id"], "project-inbox");
-    assert_eq!(ensured["name"], "Inbox");
-    let active: Value = serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
-    assert_eq!(active["project_id"], "project-inbox");
-    let projects: Value = serde_json::from_str(&core.list_projects_json().unwrap()).unwrap();
-    assert_eq!(projects.as_array().unwrap().len(), 1);
+    assert_eq!(created["kind"], "User");
+    assert_eq!(created["capabilities"]["can_archive"], true);
+    assert_eq!(created["capabilities"]["can_rename"], true);
+    assert_eq!(created["capabilities"]["can_accept_moved_groups"], true);
+    assert_eq!(archived["capabilities"]["can_be_active_project"], false);
+    assert_eq!(archived["capabilities"]["can_archive"], false);
+    assert_eq!(archived["capabilities"]["can_restore"], true);
 }
 
 #[test]
@@ -474,6 +491,61 @@ fn mobile_core_moves_project_group_json() {
     assert_eq!(source_dashboard["assets"]["total_groups"], 0);
     assert_eq!(target_dashboard["assets"]["total_groups"], 1);
     assert_eq!(target_dashboard["assets"]["summary"]["asset_count"], 2);
+}
+
+#[test]
+fn mobile_core_returns_project_asset_group_page_json_with_query() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile Query").unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:mobile-query-jpg", "DCIM/100/IMG_7001.JPG", 20),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:mobile-query-raw", "DCIM/100/IMG_7001.NEF", 21),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:mobile-query-video", "DCIM/100/VID_7002.MP4", 22),
+        )
+        .unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let raw_page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(
+                project.project_id.clone(),
+                r#"{"role":"raw"}"#.to_string(),
+                0,
+                25,
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let video_page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(
+                project.project_id,
+                r#"{"role":"video"}"#.to_string(),
+                0,
+                25,
+            )
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(raw_page["total_groups"], 1);
+    assert_eq!(raw_page["groups"][0]["group_key"], "IMG_7001");
+    assert_eq!(video_page["total_groups"], 1);
+    assert_eq!(video_page["groups"][0]["group_key"], "VID_7002");
 }
 
 #[test]

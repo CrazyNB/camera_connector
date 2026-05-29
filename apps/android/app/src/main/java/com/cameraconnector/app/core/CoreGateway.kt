@@ -7,6 +7,11 @@ import kotlinx.coroutines.flow.asStateFlow
 interface CoreGateway {
     fun observeDashboard(): Flow<DashboardState>
     fun observeProjects(): Flow<ProjectState>
+    suspend fun loadInbox(
+        query: InboxAssetQuery = InboxAssetQuery(),
+        offset: Int = 0,
+        limit: Int = 2_000,
+    ): List<InboxAsset>
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
     suspend fun renameProject(projectId: String, name: String)
@@ -45,6 +50,11 @@ data class ProjectSummary(
     val status: String,
     val createdAtMs: Long,
     val updatedAtMs: Long,
+    val canBeActiveProject: Boolean = status.equals("Active", ignoreCase = true),
+    val canArchive: Boolean = canBeActiveProject,
+    val canRename: Boolean = true,
+    val canRestore: Boolean = status.equals("Archived", ignoreCase = true),
+    val canAcceptMovedGroups: Boolean = canBeActiveProject,
 )
 
 data class ReceiverState(
@@ -102,7 +112,25 @@ data class InboxAsset(
     val rawPath: String? = null,
     val jpegPath: String? = null,
     val videoPath: String? = null,
+    val hasRaw: Boolean = rawPath != null,
+    val hasJpeg: Boolean = jpegPath != null,
+    val hasVideo: Boolean = videoPath != null,
 )
+
+data class InboxAssetQuery(
+    val username: String? = null,
+    val sourceName: String? = null,
+    val originalPath: String? = null,
+    val remoteAddr: String? = null,
+    val format: String? = null,
+    val role: InboxAssetRole? = null,
+)
+
+enum class InboxAssetRole(val wireName: String) {
+    Jpeg("jpeg"),
+    Raw("raw"),
+    Video("video"),
+}
 
 data class TransferRow(
     val id: String,
@@ -136,7 +164,7 @@ class PreviewCoreGateway : CoreGateway {
                 protocol = "FTP",
                 authMode = "Accounts",
                 accountCount = 1,
-                host = "192.168.137.1",
+                host = DEFAULT_LISTEN_HOST,
                 port = 2121,
                 outputLabel = "选择收件箱文件夹",
                 message = null,
@@ -162,6 +190,20 @@ class PreviewCoreGateway : CoreGateway {
     override fun observeDashboard(): Flow<DashboardState> = dashboard.asStateFlow()
 
     override fun observeProjects(): Flow<ProjectState> = projects.asStateFlow()
+
+    override suspend fun loadInbox(query: InboxAssetQuery, offset: Int, limit: Int): List<InboxAsset> =
+        dashboard.value.inbox
+            .asSequence()
+            .filter { asset -> query.username == null || asset.username == query.username }
+            .filter { asset -> query.sourceName == null || asset.displaySource == query.sourceName }
+            .filter { asset ->
+                query.originalPath == null ||
+                    asset.originalPath.orEmpty().contains(query.originalPath, ignoreCase = true)
+            }
+            .filter { asset -> query.role == null || asset.matchesRole(query.role) }
+            .drop(offset.coerceAtLeast(0))
+            .take(limit.coerceAtLeast(0))
+            .toList()
 
     override suspend fun createProject(name: String): ProjectSummary {
         val project = ProjectSummary(
@@ -284,4 +326,10 @@ class PreviewCoreGateway : CoreGateway {
     }
 
     override suspend fun retryFailedPublishes() = Unit
+}
+
+private fun InboxAsset.matchesRole(role: InboxAssetRole): Boolean = when (role) {
+    InboxAssetRole.Jpeg -> hasJpeg
+    InboxAssetRole.Raw -> hasRaw
+    InboxAssetRole.Video -> hasVideo
 }

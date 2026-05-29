@@ -99,7 +99,6 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_archive_project_json`
 - `camera_connector_mobile_core_restore_project_json`
 - `camera_connector_mobile_core_active_project_json`
-- `camera_connector_mobile_core_ensure_active_project_json`
 - `camera_connector_mobile_core_project_dashboard_json`
 - `camera_connector_mobile_core_project_group_assets_json`
 - `camera_connector_mobile_core_move_project_group_json`
@@ -145,21 +144,22 @@ The Android source now has the Kotlin side of that bridge:
 - The foreground notification deep-links back into `MainActivity` and exposes a Stop action backed by an immutable service `PendingIntent`.
 - Receiver service lifecycle events are logged through the `CameraConnectorReceiver` tag so adb diagnostics can separate app receiver failures from generic Android runtime crashes.
 - Connected-device smoke testing builds, installs, launches, verifies package presence, and collects adb diagnostics through `scripts\smoke_android_device.ps1`.
-- Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, inbox photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
+- Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, project photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
 - The same upload verifier accepts `-RealAssetDirectory`, selects a matching RAW/JPEG filename stem from the folder, and uploads the real bytes. It has been exercised with Nikon `.NEF + .JPG` files from `D:\ps\Photos\2026\5\5.4`.
 - Device account setup flows through the same gateway: Compose collects device name, camera login username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
-- Receiver setup also flows through the gateway: Compose can save protocol, bind host, and one unified camera-facing port while keeping Android output storage behind the platform publish boundary. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
-- The native dashboard includes both runtime status and saved receiver settings. Android uses runtime status while the receiver is running, and falls back to saved settings while stopped so saved protocol/host/port changes are reflected immediately in Overview.
-- Emulator UI verification now covers saving SFTP settings and confirming the Overview endpoint updates before switching the emulator-only bind host to `0.0.0.0` for start/stop verification.
+- Receiver setup also flows through the gateway: the project receiver panel edits protocol, bind host, one unified camera-facing port, and the camera-facing setup IP. Pressing Start applies the current form and starts the foreground receiver; there is no separate save button. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
+- The native dashboard includes both runtime status and saved receiver settings. Android uses runtime status while the receiver is running, and falls back to saved settings while stopped so protocol/host/port changes are reflected immediately in the project receiver panel and collapsed running status.
+- Emulator UI verification covers the two-level shell, Project Management startup surface, photo-first project workspace, global Projects/Accounts/Settings destinations, Settings diagnostics, account-gated receiver start, switching the emulator-only bind host to `0.0.0.0`, and receiver start/stop.
 - Transfer diagnostics are mapped from the native dashboard into Compose: transfer counts remain visible and recent failed transfers show the core-provided virtual display path plus error text.
-- Account connection diagnostics are also mapped: Overview can show active connection count, latest remote endpoint, last seen time, and last disconnected time without treating IP address as account identity.
-- Receiver runtime diagnostics are mapped as well: Overview shows phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
-- Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Output card shows the selection. Native imports stage into app-private storage first, then the Android publish worker writes to the selected SAF tree and records `document_uri`; without a selected tree it falls back to app-private file storage. The worker resolves the publish target per item, and core defers failed publish retries through `next_attempt_at_ms`, so storage permission loss remains visible without hammering the selected target while the receiver keeps running. When the user reselects or reauthorizes the output directory, Android releases failed publish retry delays for the active project so queued staged files can recover immediately. The Overview screen also shows a retry action whenever failed publishes exist, using the same project-scoped retry release path and starting a one-shot publish drain so retry works even when the receiver loop is not already running.
-- Android maps the native dashboard `publish_queue` summary into its UI model. The Overview receiver tags surface pending or failed publishes so storage permission loss and other recoverable publish failures are visible without inspecting logs.
-- The native dashboard also exposes recent project-scoped publish failures. Android appends those failures to the Transfers list with the affected filename and last error so output permission problems are actionable from the normal diagnostics surface.
-- UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible Overview error card.
+- Account connection diagnostics are also mapped: Accounts and diagnostics can show active connection count, latest remote endpoint, last seen time, and last disconnected time without treating IP address as account identity.
+- Receiver runtime diagnostics are mapped as well: the receiver panel and collapsed status show phase, authentication mode, account count, and core failure message so service start failures are visible in-app.
+- Android directory selection is wired at the platform boundary: `MainActivity` launches SAF document tree selection, `AndroidStorageGateway` persists the URI permission and display label, and the Settings output row shows the selection. Native imports stage into app-private storage first, then the Android publish worker writes to the selected SAF tree and records `document_uri`; without a selected tree it falls back to app-private file storage. The worker resolves the publish target per item, and core defers failed publish retries through `next_attempt_at_ms`, so storage permission loss remains visible without hammering the selected target while the receiver keeps running. When the user reselects or reauthorizes the output directory, Android releases failed publish retry delays for the active project so queued staged files can recover immediately. Receiver status and Settings diagnostics can trigger the same project-scoped retry release path and start a one-shot publish drain, so retry works even when the receiver loop is not already running.
+- Android maps the native dashboard `publish_queue` summary into its UI model. The receiver panel and collapsed status surface pending or failed publishes so storage permission loss and other recoverable publish failures are visible without inspecting logs.
+- The native dashboard also exposes recent project-scoped publish failures. Android surfaces those failures through receiver status and Settings diagnostics so output permission problems stay actionable without a separate project Transfers page.
+- UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible local error card on the relevant project, account, or settings surface.
 - UI actions also publish an in-flight label while native gateway calls are running. Related controls are disabled during that window to avoid duplicate start, stop, settings, or account operations.
-- The Inbox UI is photo-first: it defaults to a persisted 3-column grid, allows a 2-column switch, keeps tile metadata compact, uses JPEG previews when available, and moves full path/source/RAW-JPEG detail into the photo detail screen.
+- The Android shell follows a two-level project model. Global navigation owns Projects, Accounts, and Settings. Settings owns diagnostics as a secondary page. Projects opens the Figma-aligned Project Management surface by default; entering a project opens the photo-first workspace. Receiver start/stop and receiver setup live at the top of that project workspace so imports always have an explicit project scope.
+- The Project Photos UI is photo-first: grid density is configured from Settings, tile metadata stays compact, JPEG previews are used when available, and group detail opens by tapping the preview. Long press enters selection mode for bulk group movement. Newly received and unresolved material is represented through project-scoped filters and diagnostics rather than a separate Inbox tab.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
@@ -172,7 +172,6 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 - `archiveProjectJson`
 - `restoreProjectJson`
 - `activeProjectJson`
-- `ensureActiveProjectJson`
 - `projectDashboardJson`
 - `projectGroupAssetsJson`
 - `moveProjectGroupJson`
@@ -211,13 +210,13 @@ Native gateway builds can be produced without editing source code:
 gradle :app:assembleDebug -PcameraConnector.useNativeCore=true
 ```
 
-The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. Account setup, receiver network settings, project state, SAF publishing, and publish queue visibility also cross the gateway, keeping authentication, import state, and dashboard persistence in the shared core. The remaining bridge work is native gateway device smoke testing and optional MediaStore publishing.
+The native gateway now routes start/stop through `ReceiverForegroundService`, so Android owns the long-running foreground lifecycle while Rust owns receiver behavior and status. Account setup, receiver network settings, project state, SAF publishing, and publish queue visibility also cross the gateway, keeping authentication, import state, and dashboard persistence in the shared core. The remaining bridge work is native gateway smoke testing on a physical device.
 
 `NativeCoreGateway` polls the native dashboard every 2 seconds while it is open. This keeps receiver status, connected accounts, transfer failures, and newly imported assets moving into Compose without coupling the UI to service internals.
 
-Native receiver `local_addr` values are parsed into separate host and port fields before they reach Compose, so the Overview screen can render a stable `host:port` label across FTP, SFTP, IPv4, hostnames, and bracketed IPv6 addresses.
+Native receiver `local_addr` values are parsed into separate host and port fields before they reach Compose, so the project receiver panel can render a stable `host:port` label across FTP, SFTP, IPv4, hostnames, and bracketed IPv6 addresses.
 
-Android 13+ notification permission is treated as a receiver start prerequisite. `AndroidPermissionGateway` checks `POST_NOTIFICATIONS`, `MainActivity` owns the permission launcher, and the Overview screen disables Start until notifications are available.
+Android 13+ notification permission is treated as a receiver start prerequisite. `AndroidPermissionGateway` checks `POST_NOTIFICATIONS`, `MainActivity` owns the permission launcher, and the project receiver panel blocks Start with a visible reason until notifications are available.
 
 ## 6. Storage Strategy
 
@@ -232,6 +231,8 @@ The Android bootstrap only seeds `output_dir` and `state_dir` into native receiv
 
 Android URI values stay inside the storage gateway. The dashboard and inbox still use product concepts: source name, username, transfer id, original path, format, duplicate count, and final location kind.
 
+Cross-platform project package migration is not part of the Android storage model. It remains a deferred protocol over exported project facts, documented in `docs/superpowers/specs/2026-05-28-project-package-migration-protocol-design.md`.
+
 ## 7. Receiver Lifecycle
 
 The receiver starts through `ReceiverForegroundService`.
@@ -243,18 +244,20 @@ Rules:
 - UI treats missing listener or failed service start as stopped with a visible failure.
 - If notification permission or storage permission is missing, the UI surfaces setup actions instead of silently failing.
 
-## 8. First Android Slice
+## 8. Current Android Slice
 
-The first buildable slice should include:
+The current Android slice is project-based:
 
-1. Compose shell with Overview, Inbox, and Transfers bottom tabs.
-2. Secondary entry points for Receiver Settings and Device Accounts.
-3. Foreground service stub with notification channel.
-4. Storage gateway for SAF directory selection and persisted URI permission.
-5. `CoreGateway` interface and in-memory gateway.
-6. A native bridge placeholder that can later be replaced by UniFFI/JNI bindings.
+1. Global shell with Projects, Accounts, and Settings.
+2. Project Management as the startup surface, with create/select project actions.
+3. Photo-first project workspace with receiver launch/status at the top.
+4. Receiver control inside the active project workspace.
+5. Account management as a global surface because accounts are not project-owned.
+6. Settings-owned output selection and diagnostics.
+7. Publish queue visibility through receiver status and diagnostics.
+8. Native gateway backed by the Rust core and Android foreground service.
 
-After the skeleton compiles, the next milestone is connecting the foreground service to the Rust core on Android.
+The next milestone is physical-device verification with a real camera: Android foreground-service lifecycle, hotspot/LAN reachability, camera FTP login, RAW/JPEG upload, SAF publish recovery, and project-scoped photo/detail/transfer visibility.
 
 ## 9. Current Version Targets
 

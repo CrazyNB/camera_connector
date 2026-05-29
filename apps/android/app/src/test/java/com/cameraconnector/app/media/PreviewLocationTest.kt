@@ -1,4 +1,4 @@
-package com.cameraconnector.app.ui
+package com.cameraconnector.app.media
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
