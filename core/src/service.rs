@@ -5,11 +5,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     append_transfer_record, group_received_assets, read_connected_devices,
-    read_receiver_runtime_status, read_transfer_log, scan_inbox_groups, AssetFormatRole,
-    CameraConnectorConfig, ConnectedDevice, ImportSource, ObjectFormat, PublishQueueItem,
-    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SqliteStore,
-    StoredAsset, StoredObjectLocation, TransferRecord, TransferStatus,
+    read_receiver_runtime_status, read_transfer_log, recommend_from_scores, scan_inbox_groups,
+    score_preview_sample, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
+    BurstGroup, CameraConnectorConfig, ConnectedDevice, ImportSource, NewAnalysisJob, ObjectFormat,
+    PreviewSample, PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig,
+    QualityScore, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus,
+    ReceiverSettingsConfig, Result, ReviewQueueSummary, SelectionRecommendation,
+    SelectionRecommendationStatus, SelectionSource, SqliteStore, StoredAsset, StoredObjectLocation,
+    StrategyProfile, TransferRecord, TransferStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -63,6 +66,32 @@ pub struct AssetGroupQuery {
     pub remote_addr: Option<String>,
     pub format: Option<ObjectFormat>,
     pub role: Option<AssetFormatRole>,
+    pub sort: AssetGroupSort,
+    pub recommendation_state: Option<String>,
+    pub score_min: Option<f64>,
+    pub score_max: Option<f64>,
+    pub analysis_status: Option<String>,
+    pub review_queue: Option<String>,
+    pub strategy_profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AssetGroupSort {
+    #[default]
+    LatestReceived,
+    Filename,
+    GroupBestScore,
+}
+
+impl AssetGroupSort {
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "latest_received" | "latest" | "received" => Some(Self::LatestReceived),
+            "filename" | "name" => Some(Self::Filename),
+            "group_best_score" | "best_score" | "score" => Some(Self::GroupBestScore),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,7 +133,7 @@ pub struct AssetGroupSummary {
     pub remote_addr_counts: Vec<AssetFacetCount>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssetGroupPage {
     pub groups: Vec<ReceivedAssetGroup>,
     pub summary: AssetGroupSummary,
@@ -147,13 +176,20 @@ pub struct PublishQueueFailureView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisDrainSummary {
+    pub claimed_count: usize,
+    pub completed_count: usize,
+    pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SystemPathsView {
     pub config_path: PathBuf,
     pub state_dir: PathBuf,
     pub output_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CameraConnectorDashboard {
     pub receiver_status: Option<ReceiverRuntimeStatus>,
     pub receiver_settings: ReceiverSettingsConfig,
@@ -315,6 +351,345 @@ impl CameraConnectorService {
             .release_failed_publish_retries(project_id)
     }
 
+    pub fn drain_analysis_jobs(&self, limit: usize) -> Result<AnalysisDrainSummary> {
+        let store = self.storage_store()?;
+        let now = current_time_ms();
+        let jobs = store.claim_analysis_jobs(now, limit)?;
+        let claimed_count = jobs.len();
+        let mut completed_count = 0;
+        let mut failed_count = 0;
+
+        for job in jobs {
+            match run_analysis_job(&store, &job) {
+                Ok(()) => {
+                    store.complete_analysis_job(&job.job_id)?;
+                    completed_count += 1;
+                }
+                Err(error) => {
+                    let retry_at = current_time_ms().saturating_add(30_000);
+                    store.fail_analysis_job(&job.job_id, &error.to_string(), retry_at)?;
+                    failed_count += 1;
+                }
+            }
+        }
+
+        Ok(AnalysisDrainSummary {
+            claimed_count,
+            completed_count,
+            failed_count,
+        })
+    }
+
+    pub fn score_asset_group_preview(
+        &self,
+        asset_group_id: &str,
+        sample: PreviewSample,
+        scorer_version: &str,
+    ) -> Result<QualityScore> {
+        let score = score_preview_sample(asset_group_id, sample, scorer_version, current_time_ms());
+        let store = self.storage_store()?;
+        let saved = store.save_quality_score(score)?;
+        if let Some(burst) = store.burst_group_for_asset_group(&saved.asset_group_id)? {
+            let profile = default_strategy_profile(&store)?;
+            let dedupe_key = recommend_job_dedupe_key(&burst.burst_group_id, &profile);
+            let mut job = NewAnalysisJob::new(
+                &burst.project_id,
+                AnalysisJobType::RecommendBurstGroup,
+                AnalysisEntityType::BurstGroup,
+                &burst.burst_group_id,
+                &dedupe_key,
+            );
+            job.priority = 25;
+            store.enqueue_analysis_job(job)?;
+        }
+        Ok(saved)
+    }
+
+    pub fn recommend_burst_group(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        let store = self.storage_store()?;
+        let burst = store
+            .burst_group(burst_group_id)?
+            .ok_or_else(|| crate::ImporterError::internal("burst group not found"))?;
+        let profile = strategy_profile_id
+            .and_then(|profile_id| {
+                store.strategy_profiles().ok().and_then(|profiles| {
+                    profiles
+                        .into_iter()
+                        .find(|profile| profile.profile_id == profile_id)
+                })
+            })
+            .unwrap_or_else(StrategyProfile::general);
+        let scores = store.quality_scores_for_asset_groups(&burst.member_group_ids, "local-v1")?;
+        let recommendation = recommend_from_scores(
+            burst_group_id,
+            &profile,
+            &scores,
+            burst.grouping_version,
+            current_time_ms(),
+        );
+        store.save_selection_recommendation(recommendation)
+    }
+
+    pub fn accept_recommended_best(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_review_recommendation_status(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::Accepted,
+        )
+    }
+
+    pub fn mark_burst_needs_review(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_review_recommendation_status(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::NeedsReview,
+        )
+    }
+
+    pub fn restore_automatic_recommendation(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_review_recommendation_status(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::Ready,
+        )
+    }
+
+    pub fn clear_recommendation(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_latest_recommendation_decision(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::Cleared,
+            |recommendation| {
+                recommendation.best_asset_group_id = None;
+                recommendation.alternate_asset_group_ids.clear();
+                recommendation.low_score_asset_group_ids.clear();
+                recommendation.near_duplicate_asset_group_ids.clear();
+                recommendation.reasons = vec!["user cleared recommendation".to_string()];
+            },
+        )
+    }
+
+    pub fn keep_all_candidates(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_latest_recommendation_decision(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::KeptAll,
+            |recommendation| {
+                recommendation.low_score_asset_group_ids.clear();
+                recommendation.near_duplicate_asset_group_ids.clear();
+                recommendation.reasons = vec!["user kept all candidates".to_string()];
+            },
+        )
+    }
+
+    pub fn hide_low_score_candidates(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        self.update_latest_recommendation_decision(
+            burst_group_id,
+            strategy_profile_id,
+            SelectionRecommendationStatus::LowScoreHidden,
+            |recommendation| {
+                let low_score_ids = recommendation.low_score_asset_group_ids.clone();
+                recommendation
+                    .alternate_asset_group_ids
+                    .retain(|group_id| !low_score_ids.iter().any(|low_id| low_id == group_id));
+                recommendation.low_score_asset_group_ids.clear();
+                recommendation.reasons = vec!["user hid low-score candidates".to_string()];
+            },
+        )
+    }
+
+    pub fn override_recommended_best(
+        &self,
+        burst_group_id: &str,
+        best_asset_group_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<SelectionRecommendation> {
+        let store = self.storage_store()?;
+        let profile_id = normalized_strategy_profile_id(strategy_profile_id);
+        let burst = store
+            .burst_group(burst_group_id)?
+            .ok_or_else(|| crate::ImporterError::internal("burst group not found"))?;
+        let best_group_id = best_asset_group_id.trim();
+        if best_group_id.is_empty() {
+            return Err(crate::ImporterError::internal(
+                "best asset group id cannot be empty",
+            ));
+        }
+        if !burst
+            .member_group_ids
+            .iter()
+            .any(|member_group_id| member_group_id == best_group_id)
+        {
+            return Err(crate::ImporterError::internal(
+                "best asset group is not in burst group",
+            ));
+        }
+        let mut recommendation = store
+            .latest_selection_recommendation(burst_group_id, &profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("selection recommendation not found"))?;
+        recommendation.best_asset_group_id = Some(best_group_id.to_string());
+        recommendation.alternate_asset_group_ids = burst
+            .member_group_ids
+            .iter()
+            .filter(|member_group_id| member_group_id.as_str() != best_group_id)
+            .cloned()
+            .collect();
+        recommendation.source = SelectionSource::UserOverride;
+        recommendation.status = SelectionRecommendationStatus::UserOverridden;
+        recommendation.reasons = vec!["user selected best".to_string()];
+        recommendation.updated_at_ms = current_time_ms();
+        store.save_selection_recommendation(recommendation)
+    }
+
+    pub fn split_burst_member(
+        &self,
+        burst_group_id: &str,
+        member_group_id: &str,
+    ) -> Result<Option<BurstGroup>> {
+        self.storage_store()?
+            .split_burst_member(burst_group_id, member_group_id)
+    }
+
+    pub fn merge_burst_member(
+        &self,
+        target_burst_group_id: &str,
+        member_group_id: &str,
+    ) -> Result<Option<BurstGroup>> {
+        self.storage_store()?
+            .merge_burst_member(target_burst_group_id, member_group_id)
+    }
+
+    pub fn strategy_profiles(&self) -> Result<Vec<StrategyProfile>> {
+        self.storage_store()?.strategy_profiles()
+    }
+
+    pub fn save_custom_strategy_profile(
+        &self,
+        mut profile: StrategyProfile,
+    ) -> Result<StrategyProfile> {
+        let profile_id = profile.profile_id.trim();
+        if profile_id.is_empty() {
+            return Err(crate::ImporterError::internal(
+                "strategy profile id cannot be empty",
+            ));
+        }
+        if StrategyProfile::built_in_profiles()
+            .iter()
+            .any(|built_in| built_in.profile_id == profile_id)
+        {
+            return Err(crate::ImporterError::internal(
+                "built-in strategy profiles are read-only",
+            ));
+        }
+        profile.profile_id = profile_id.to_string();
+        profile.built_in = false;
+        profile.weights.composition = profile.weights.composition.clamp(0.0, 0.12);
+        profile.updated_at_ms = current_time_ms();
+        self.storage_store()?.save_strategy_profile(profile)
+    }
+
+    pub fn project_review_queue_summary(
+        &self,
+        project_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<ReviewQueueSummary> {
+        self.storage_store()?
+            .review_queue_summary(project_id, strategy_profile_id)
+    }
+
+    pub fn project_review_queue_asset_group_page(
+        &self,
+        project_id: &str,
+        strategy_profile_id: Option<&str>,
+        queue: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        self.storage_store()?.review_queue_asset_group_page(
+            project_id,
+            AssetGroupQuery {
+                review_queue: Some(queue.to_string()),
+                strategy_profile_id: strategy_profile_id.map(ToOwned::to_owned),
+                ..AssetGroupQuery::default()
+            },
+            offset,
+            limit,
+        )
+    }
+
+    pub fn project_selects_asset_group_page(
+        &self,
+        project_id: &str,
+        strategy_profile_id: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        self.storage_store()?.selects_asset_group_page(
+            project_id,
+            strategy_profile_id,
+            offset,
+            limit,
+        )
+    }
+
+    fn update_review_recommendation_status(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+        status: SelectionRecommendationStatus,
+    ) -> Result<SelectionRecommendation> {
+        let store = self.storage_store()?;
+        let profile_id = normalized_strategy_profile_id(strategy_profile_id);
+        store.update_latest_selection_recommendation_status(burst_group_id, &profile_id, status)
+    }
+
+    fn update_latest_recommendation_decision(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: Option<&str>,
+        status: SelectionRecommendationStatus,
+        update: impl FnOnce(&mut SelectionRecommendation),
+    ) -> Result<SelectionRecommendation> {
+        let store = self.storage_store()?;
+        let profile_id = normalized_strategy_profile_id(strategy_profile_id);
+        let mut recommendation = store
+            .latest_selection_recommendation(burst_group_id, &profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("selection recommendation not found"))?;
+        update(&mut recommendation);
+        recommendation.source = SelectionSource::UserOverride;
+        recommendation.status = status;
+        recommendation.updated_at_ms = current_time_ms();
+        store.save_selection_recommendation(recommendation)
+    }
+
     pub fn set_account(
         &self,
         username: impl Into<String>,
@@ -457,6 +832,17 @@ impl CameraConnectorService {
         offset: usize,
         limit: usize,
     ) -> Result<AssetGroupPage> {
+        if query
+            .review_queue
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some()
+        {
+            return self
+                .storage_store()?
+                .review_queue_asset_group_page(project_id, query, offset, limit);
+        }
         self.storage_store()?
             .asset_group_page(project_id, query, offset, limit)
     }
@@ -802,6 +1188,66 @@ fn accounts_with_devices(
             account
         })
         .collect()
+}
+
+fn run_analysis_job(store: &SqliteStore, job: &AnalysisJob) -> Result<()> {
+    match (job.job_type, job.entity_type) {
+        (AnalysisJobType::DetectBurstForAssetGroup, AnalysisEntityType::AssetGroup) => {
+            let profile = default_strategy_profile(store)?;
+            let _ =
+                store.detect_bursts_for_asset_group(&job.project_id, &job.entity_id, &profile)?;
+            Ok(())
+        }
+        (AnalysisJobType::ScoreAssetGroup, AnalysisEntityType::AssetGroup) => Ok(()),
+        (AnalysisJobType::RecommendBurstGroup, AnalysisEntityType::BurstGroup) => {
+            let profile = default_strategy_profile(store)?;
+            let burst = store
+                .burst_group(&job.entity_id)?
+                .ok_or_else(|| crate::ImporterError::internal("burst group not found"))?;
+            let scores =
+                store.quality_scores_for_asset_groups(&burst.member_group_ids, "local-v1")?;
+            let recommendation = recommend_from_scores(
+                &burst.burst_group_id,
+                &profile,
+                &scores,
+                burst.grouping_version,
+                current_time_ms(),
+            );
+            store.save_selection_recommendation(recommendation)?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn default_strategy_profile(store: &SqliteStore) -> Result<StrategyProfile> {
+    Ok(store
+        .strategy_profiles()?
+        .into_iter()
+        .find(|profile| profile.profile_id == "general")
+        .unwrap_or_else(StrategyProfile::general))
+}
+
+fn normalized_strategy_profile_id(strategy_profile_id: Option<&str>) -> String {
+    strategy_profile_id
+        .map(str::trim)
+        .filter(|profile_id| !profile_id.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "general".to_string())
+}
+
+fn recommend_job_dedupe_key(burst_group_id: &str, profile: &StrategyProfile) -> String {
+    format!(
+        "recommend:{burst_group_id}:{}:{}",
+        profile.profile_id, profile.strategy_version
+    )
+}
+
+fn current_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 fn summarize_asset_groups(groups: &[ReceivedAssetGroup]) -> AssetGroupSummary {

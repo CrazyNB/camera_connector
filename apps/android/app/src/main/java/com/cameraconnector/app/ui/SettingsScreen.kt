@@ -58,6 +58,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
@@ -68,6 +69,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -108,6 +110,7 @@ import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
+import com.cameraconnector.app.core.StrategyProfileUi
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
@@ -136,6 +139,10 @@ internal fun SettingsScreen(
     onOpenDiagnostics: () -> Unit,
     projectPhotoGridColumnCount: Int,
     onProjectPhotoGridColumnCountChange: (Int) -> Unit,
+    strategyProfiles: List<StrategyProfileUi>,
+    selectedStrategyProfileId: String,
+    onSelectedStrategyProfileChange: (String) -> Unit,
+    onSaveStrategyProfile: (StrategyProfileUi) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -196,6 +203,19 @@ internal fun SettingsScreen(
             }
         }
 
+        item {
+            Text("智能优选", style = MaterialTheme.typography.titleMedium)
+        }
+        item {
+            SmartSelectionStrategySettingsCard(
+                profiles = strategyProfiles,
+                selectedProfileId = selectedStrategyProfileId,
+                actionsEnabled = actionInFlight == null,
+                onSelectedProfileChange = onSelectedStrategyProfileChange,
+                onSaveProfile = onSaveStrategyProfile,
+            )
+        }
+
         if (notificationPermissionRequired && !notificationPermissionGranted) {
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
@@ -232,6 +252,119 @@ internal fun SettingsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SmartSelectionStrategySettingsCard(
+    profiles: List<StrategyProfileUi>,
+    selectedProfileId: String,
+    actionsEnabled: Boolean,
+    onSelectedProfileChange: (String) -> Unit,
+    onSaveProfile: (StrategyProfileUi) -> Unit,
+) {
+    val selectedProfile = selectedStrategyProfile(profiles, selectedProfileId)
+    var draftProfile by remember(selectedProfile?.profileId, selectedProfile?.updatedAtMs) {
+        mutableStateOf(selectedProfile)
+    }
+
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("连拍评分策略", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        draftProfile?.let {
+                            "${it.name} · ${if (it.builtIn) "内置" else "自定义"}"
+                        } ?: "正在加载策略",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                ElementTag(
+                    text = if (draftProfile?.llmEnabled == true) "LLM 可用" else "本地 CV",
+                    color = ElementBlue,
+                )
+            }
+
+            if (profiles.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(profiles, key = { it.profileId }) { profile ->
+                        FilterChipButton(
+                            label = profile.name,
+                            selected = profile.profileId == selectedProfileId,
+                            onClick = { onSelectedProfileChange(profile.profileId) },
+                        )
+                    }
+                }
+            }
+
+            val draft = draftProfile
+            if (draft == null) {
+                Text(
+                    "暂无可用策略，稍后会自动从 core 加载。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                StrategyWeightField.entries.forEach { field ->
+                    StrategyWeightSlider(
+                        field = field,
+                        value = draft.weightValue(field),
+                        onValueChange = { value ->
+                            draftProfile = draft.withStrategyWeight(field, value)
+                        },
+                    )
+                }
+                Button(
+                    onClick = {
+                        onSaveProfile(
+                            draft.asSavableCustomStrategyProfile(System.currentTimeMillis()),
+                        )
+                    },
+                    enabled = actionsEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = elementShape,
+                ) {
+                    Text(if (draft.builtIn) "保存为自定义策略" else "保存策略")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrategyWeightSlider(
+    field: StrategyWeightField,
+    value: Double,
+    onValueChange: (Double) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(field.label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                strategyWeightDisplayText(value),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.toDouble()) },
+            valueRange = field.range.start.toFloat()..field.range.endInclusive.toFloat(),
+            steps = 0,
+        )
     }
 }
 

@@ -1,30 +1,43 @@
 use std::ffi::{CStr, CString};
+use std::ptr;
 
 use serde_json::Value;
 
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, PublishTransferMetadata, StoredObjectLocation,
-    TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorService, PreviewSample, PublishTransferMetadata,
+    StoredObjectLocation, TransferRecord, TransferStatus,
 };
 use camera_connector_ffi::{
+    camera_connector_mobile_core_accept_recommended_best_json,
     camera_connector_mobile_core_active_project_json,
     camera_connector_mobile_core_archive_project_json,
     camera_connector_mobile_core_claim_next_publish_item_json,
+    camera_connector_mobile_core_clear_recommendation_json,
     camera_connector_mobile_core_complete_publish_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
-    camera_connector_mobile_core_free_string, camera_connector_mobile_core_list_projects_json,
+    camera_connector_mobile_core_free_string,
+    camera_connector_mobile_core_hide_low_score_candidates_json,
+    camera_connector_mobile_core_keep_all_candidates_json,
+    camera_connector_mobile_core_list_projects_json,
+    camera_connector_mobile_core_mark_burst_needs_review_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
+    camera_connector_mobile_core_merge_burst_member_json,
     camera_connector_mobile_core_move_project_group_json,
+    camera_connector_mobile_core_override_recommended_best_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_group_assets_json,
+    camera_connector_mobile_core_project_selects_asset_group_page_json,
     camera_connector_mobile_core_release_failed_publish_retries_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_rename_project_json,
+    camera_connector_mobile_core_restore_automatic_recommendation_json,
     camera_connector_mobile_core_restore_project_json,
+    camera_connector_mobile_core_review_queue_summary_json,
     camera_connector_mobile_core_save_device_account_json,
     camera_connector_mobile_core_save_receiver_settings_json,
     camera_connector_mobile_core_set_active_project_json,
+    camera_connector_mobile_core_split_burst_member_json,
     camera_connector_mobile_core_start_receiver_json,
     camera_connector_mobile_core_stop_receiver_json,
 };
@@ -376,6 +389,318 @@ fn ffi_moves_project_group_json_envelope() {
 }
 
 #[test]
+fn ffi_accepts_recommended_best_json_envelope() {
+    let fixture = recommended_burst_fixture("FFI Accept Decision");
+    let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
+
+    let accepted = take_ffi_string(unsafe {
+        camera_connector_mobile_core_accept_recommended_best_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let selects = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_selects_asset_group_page_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+            0,
+            25,
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let accepted: Value = serde_json::from_str(&accepted).unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    let selects: Value = serde_json::from_str(&selects).unwrap();
+    assert_eq!(accepted["ok"], true);
+    assert_eq!(accepted["value"]["status"], "Accepted");
+    assert_eq!(summary["ok"], true);
+    assert_eq!(summary["value"]["unconfirmed_best_count"], 0);
+    assert_eq!(summary["value"]["needs_review_count"], 0);
+    assert_eq!(selects["ok"], true);
+    assert_eq!(selects["value"]["total_groups"], 1);
+    assert_eq!(
+        selects["value"]["groups"][0]["group_id"].as_str(),
+        Some(fixture.best_group_id.to_str().unwrap()),
+    );
+}
+
+#[test]
+fn ffi_restores_automatic_recommendation_json_envelope() {
+    let fixture = recommended_burst_fixture("FFI Undo Decision");
+    let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
+
+    let accepted = take_ffi_string(unsafe {
+        camera_connector_mobile_core_accept_recommended_best_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let restored = take_ffi_string(unsafe {
+        camera_connector_mobile_core_restore_automatic_recommendation_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let accepted: Value = serde_json::from_str(&accepted).unwrap();
+    let restored: Value = serde_json::from_str(&restored).unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(accepted["ok"], true);
+    assert_eq!(restored["ok"], true);
+    assert_eq!(restored["value"]["status"], "Ready");
+    assert_eq!(summary["ok"], true);
+    assert_eq!(summary["value"]["unconfirmed_best_count"], 1);
+}
+
+#[test]
+fn ffi_overrides_recommended_best_json_envelope() {
+    let fixture = recommended_burst_fixture("FFI Override Decision");
+    let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
+
+    let overridden = take_ffi_string(unsafe {
+        camera_connector_mobile_core_override_recommended_best_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            fixture.alternate_group_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let overridden: Value = serde_json::from_str(&overridden).unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(overridden["ok"], true);
+    assert_eq!(overridden["value"]["status"], "UserOverridden");
+    assert_eq!(
+        overridden["value"]["best_asset_group_id"].as_str(),
+        Some(fixture.alternate_group_id.to_str().unwrap()),
+    );
+    assert_eq!(summary["value"]["user_overridden_count"], 1);
+}
+
+#[test]
+fn ffi_marks_burst_needs_review_json_envelope() {
+    let fixture = recommended_burst_fixture("FFI Review Decision");
+    let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
+
+    let marked = take_ffi_string(unsafe {
+        camera_connector_mobile_core_mark_burst_needs_review_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let marked: Value = serde_json::from_str(&marked).unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(marked["ok"], true);
+    assert_eq!(marked["value"]["status"], "NeedsReview");
+    assert_eq!(summary["ok"], true);
+    assert_eq!(summary["value"]["unconfirmed_best_count"], 0);
+    assert_eq!(summary["value"]["needs_review_count"], 1);
+}
+
+#[test]
+fn ffi_applies_extended_review_decisions_json_envelopes() {
+    let clear_fixture = recommended_burst_fixture("FFI Clear Decision");
+    let clear_core =
+        unsafe { camera_connector_mobile_core_create(clear_fixture.config_path.as_ptr()) };
+    let cleared = take_ffi_string(unsafe {
+        camera_connector_mobile_core_clear_recommendation_json(
+            clear_core,
+            clear_fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(clear_core) };
+    let cleared: Value = serde_json::from_str(&cleared).unwrap();
+    assert_eq!(cleared["ok"], true);
+    assert_eq!(cleared["value"]["status"], "Cleared");
+    assert!(cleared["value"]["best_asset_group_id"].is_null());
+
+    let keep_fixture = recommended_burst_fixture("FFI Keep All Decision");
+    let keep_core =
+        unsafe { camera_connector_mobile_core_create(keep_fixture.config_path.as_ptr()) };
+    let kept = take_ffi_string(unsafe {
+        camera_connector_mobile_core_keep_all_candidates_json(
+            keep_core,
+            keep_fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let keep_summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            keep_core,
+            keep_fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(keep_core) };
+    let kept: Value = serde_json::from_str(&kept).unwrap();
+    let keep_summary: Value = serde_json::from_str(&keep_summary).unwrap();
+    assert_eq!(kept["ok"], true);
+    assert_eq!(kept["value"]["status"], "KeptAll");
+    assert_eq!(keep_summary["value"]["unconfirmed_best_count"], 0);
+
+    let low_fixture = low_score_burst_fixture("FFI Hide Low Score Decision");
+    let low_core = unsafe { camera_connector_mobile_core_create(low_fixture.config_path.as_ptr()) };
+    let hidden = take_ffi_string(unsafe {
+        camera_connector_mobile_core_hide_low_score_candidates_json(
+            low_core,
+            low_fixture.burst_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    let low_summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            low_core,
+            low_fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(low_core) };
+    let hidden: Value = serde_json::from_str(&hidden).unwrap();
+    let low_summary: Value = serde_json::from_str(&low_summary).unwrap();
+    assert_eq!(hidden["ok"], true);
+    assert_eq!(hidden["value"]["status"], "LowScoreHidden");
+    assert_eq!(low_summary["value"]["low_score_candidate_count"], 0);
+}
+
+#[test]
+fn ffi_splits_burst_member_json_envelope() {
+    let fixture = three_member_recommended_burst_fixture("FFI Split Decision");
+    let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
+
+    let updated = take_ffi_string(unsafe {
+        camera_connector_mobile_core_split_burst_member_json(
+            core,
+            fixture.burst_id.as_ptr(),
+            fixture.alternate_group_id.as_ptr(),
+        )
+    });
+    let summary = take_ffi_string(unsafe {
+        camera_connector_mobile_core_review_queue_summary_json(
+            core,
+            fixture.project_id.as_ptr(),
+            ptr::null(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let updated: Value = serde_json::from_str(&updated).unwrap();
+    let summary: Value = serde_json::from_str(&summary).unwrap();
+    assert_eq!(updated["ok"], true);
+    assert_eq!(updated["value"]["member_count"], 2);
+    assert_eq!(updated["value"]["recommendation_status"], "pending");
+    assert_eq!(summary["value"]["unconfirmed_best_count"], 0);
+    assert_eq!(summary["value"]["pending_count"], 2);
+}
+
+#[test]
+fn ffi_merges_burst_member_json_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Merge Decision").unwrap();
+    for (transfer_id, path, completed_at_ms) in [
+        ("ftp:ffi-merge-a-1", "DCIM/250/IMG_8251.JPG", 1000),
+        ("ftp:ffi-merge-a-2", "DCIM/250/IMG_8252.JPG", 1100),
+        ("ftp:ffi-merge-b-1", "DCIM/251/IMG_9251.JPG", 5000),
+        ("ftp:ffi-merge-b-2", "DCIM/251/IMG_9252.JPG", 5100),
+    ] {
+        service
+            .record_project_transfer(
+                &project.project_id,
+                completed_transfer(transfer_id, path, completed_at_ms),
+            )
+            .unwrap();
+    }
+    service.drain_analysis_jobs(10).unwrap();
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let target = page
+        .groups
+        .iter()
+        .find(|group| {
+            group
+                .primary
+                .original_path
+                .as_deref()
+                .map(|path| path.ends_with("IMG_8251.JPG"))
+                .unwrap_or(false)
+        })
+        .unwrap();
+    let source = page
+        .groups
+        .iter()
+        .find(|group| {
+            group
+                .primary
+                .original_path
+                .as_deref()
+                .map(|path| path.ends_with("IMG_9251.JPG"))
+                .unwrap_or(false)
+        })
+        .unwrap();
+    let target_burst_id =
+        CString::new(target.burst.as_ref().unwrap().burst_group_id.as_str()).unwrap();
+    let source_group_id = CString::new(source.group_id.as_ref().unwrap().as_str()).unwrap();
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes()).unwrap();
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+
+    let merged = take_ffi_string(unsafe {
+        camera_connector_mobile_core_merge_burst_member_json(
+            core,
+            target_burst_id.as_ptr(),
+            source_group_id.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let merged: Value = serde_json::from_str(&merged).unwrap();
+    assert_eq!(merged["ok"], true);
+    assert_eq!(merged["value"]["member_count"], 4);
+    assert_eq!(merged["value"]["recommendation_status"], "pending");
+    assert_eq!(merged["value"]["user_override_state"], "merge");
+}
+
+#[test]
 fn ffi_claims_and_updates_publish_queue_json_envelopes() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
@@ -595,6 +920,226 @@ fn ffi_starts_and_stops_receiver_with_envelopes() {
     assert_eq!(stopped["value"]["phase"], "Stopped");
 
     unsafe { camera_connector_mobile_core_destroy(core) };
+}
+
+struct RecommendedBurstFixture {
+    _temp: tempfile::TempDir,
+    config_path: CString,
+    project_id: CString,
+    burst_id: CString,
+    best_group_id: CString,
+    alternate_group_id: CString,
+}
+
+fn recommended_burst_fixture(project_name: &str) -> RecommendedBurstFixture {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project(project_name).unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:ffi-decision-1", "DCIM/100/IMG_7501.JPG", 1000),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:ffi-decision-2", "DCIM/100/IMG_7502.JPG", 1100),
+        )
+        .unwrap();
+    service.drain_analysis_jobs(10).unwrap();
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let burst_members = page
+        .groups
+        .iter()
+        .filter(|group| group.burst.is_some())
+        .collect::<Vec<_>>();
+    let burst_id = burst_members[0]
+        .burst
+        .as_ref()
+        .unwrap()
+        .burst_group_id
+        .clone();
+
+    for member in burst_members {
+        service
+            .score_asset_group_preview(
+                member.group_id.as_deref().unwrap(),
+                checkerboard_sample(16, 16),
+                "local-v1",
+            )
+            .unwrap();
+    }
+    let recommendation = service.recommend_burst_group(&burst_id, None).unwrap();
+    let best_group_id = recommendation.best_asset_group_id.unwrap();
+    let alternate_group_id = page
+        .groups
+        .iter()
+        .filter(|group| group.burst.is_some())
+        .filter_map(|group| group.group_id.as_ref())
+        .find(|group_id| *group_id != &best_group_id)
+        .cloned()
+        .unwrap();
+
+    RecommendedBurstFixture {
+        _temp: temp,
+        config_path: CString::new(config_path.to_string_lossy().as_bytes()).unwrap(),
+        project_id: CString::new(project.project_id).unwrap(),
+        burst_id: CString::new(burst_id).unwrap(),
+        best_group_id: CString::new(best_group_id).unwrap(),
+        alternate_group_id: CString::new(alternate_group_id).unwrap(),
+    }
+}
+
+fn low_score_burst_fixture(project_name: &str) -> RecommendedBurstFixture {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project(project_name).unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:ffi-low-1", "DCIM/110/IMG_7601.JPG", 1000),
+        )
+        .unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:ffi-low-2", "DCIM/110/IMG_7602.JPG", 1100),
+        )
+        .unwrap();
+    service.drain_analysis_jobs(10).unwrap();
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let burst_members = page
+        .groups
+        .iter()
+        .filter(|group| group.burst.is_some())
+        .collect::<Vec<_>>();
+    let burst_id = burst_members[0]
+        .burst
+        .as_ref()
+        .unwrap()
+        .burst_group_id
+        .clone();
+    let first_group_id = burst_members[0].group_id.clone().unwrap();
+    let second_group_id = burst_members[1].group_id.clone().unwrap();
+    service
+        .score_asset_group_preview(&first_group_id, flat_sample(16, 16, 128), "local-v1")
+        .unwrap();
+    service
+        .score_asset_group_preview(&second_group_id, checkerboard_sample(16, 16), "local-v1")
+        .unwrap();
+    let recommendation = service.recommend_burst_group(&burst_id, None).unwrap();
+    let best_group_id = recommendation.best_asset_group_id.unwrap();
+    let alternate_group_id = if best_group_id == first_group_id {
+        second_group_id
+    } else {
+        first_group_id
+    };
+
+    RecommendedBurstFixture {
+        _temp: temp,
+        config_path: CString::new(config_path.to_string_lossy().as_bytes()).unwrap(),
+        project_id: CString::new(project.project_id).unwrap(),
+        burst_id: CString::new(burst_id).unwrap(),
+        best_group_id: CString::new(best_group_id).unwrap(),
+        alternate_group_id: CString::new(alternate_group_id).unwrap(),
+    }
+}
+
+fn three_member_recommended_burst_fixture(project_name: &str) -> RecommendedBurstFixture {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project(project_name).unwrap();
+    for (transfer_id, path, completed_at_ms) in [
+        ("ftp:ffi-three-1", "DCIM/120/IMG_7701.JPG", 1000),
+        ("ftp:ffi-three-2", "DCIM/120/IMG_7702.JPG", 1100),
+        ("ftp:ffi-three-3", "DCIM/120/IMG_7703.JPG", 1200),
+    ] {
+        service
+            .record_project_transfer(
+                &project.project_id,
+                completed_transfer(transfer_id, path, completed_at_ms),
+            )
+            .unwrap();
+    }
+    service.drain_analysis_jobs(10).unwrap();
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .unwrap();
+    let burst_members = page
+        .groups
+        .iter()
+        .filter(|group| group.burst.is_some())
+        .collect::<Vec<_>>();
+    let burst_id = burst_members[0]
+        .burst
+        .as_ref()
+        .unwrap()
+        .burst_group_id
+        .clone();
+
+    for member in burst_members {
+        service
+            .score_asset_group_preview(
+                member.group_id.as_deref().unwrap(),
+                checkerboard_sample(16, 16),
+                "local-v1",
+            )
+            .unwrap();
+    }
+    let recommendation = service.recommend_burst_group(&burst_id, None).unwrap();
+    let best_group_id = recommendation.best_asset_group_id.unwrap();
+    let alternate_group_id = page
+        .groups
+        .iter()
+        .filter(|group| group.burst.is_some())
+        .filter_map(|group| group.group_id.as_ref())
+        .find(|group_id| *group_id != &best_group_id)
+        .cloned()
+        .unwrap();
+
+    RecommendedBurstFixture {
+        _temp: temp,
+        config_path: CString::new(config_path.to_string_lossy().as_bytes()).unwrap(),
+        project_id: CString::new(project.project_id).unwrap(),
+        burst_id: CString::new(burst_id).unwrap(),
+        best_group_id: CString::new(best_group_id).unwrap(),
+        alternate_group_id: CString::new(alternate_group_id).unwrap(),
+    }
+}
+
+fn flat_sample(width: usize, height: usize, value: u8) -> PreviewSample {
+    PreviewSample {
+        width,
+        height,
+        luma: vec![value; width * height],
+        preview_source: Some("test".to_string()),
+    }
+}
+
+fn checkerboard_sample(width: usize, height: usize) -> PreviewSample {
+    let mut luma = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            luma.push(if (x + y) % 2 == 0 { 0u8 } else { 255u8 });
+        }
+    }
+    PreviewSample {
+        width,
+        height,
+        luma,
+        preview_source: Some("test".to_string()),
+    }
 }
 
 fn completed_transfer(

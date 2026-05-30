@@ -19,6 +19,14 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     ): JSONObject =
         call { projectAssetGroupPageJson(handle, projectId, assetGroupQueryJson(query).toString(), offset, limit) }
 
+    fun projectSelectsAssetGroupPageJson(
+        projectId: String,
+        strategyProfileId: String? = null,
+        offset: Int,
+        limit: Int,
+    ): JSONObject =
+        call { projectSelectsAssetGroupPageJson(handle, projectId, strategyProfileId, offset, limit) }
+
     fun projectGroupAssetsJson(projectId: String, groupId: String): JSONArray =
         call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
             ?: JSONArray()
@@ -54,6 +62,62 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
 
     fun releaseFailedPublishRetries(projectId: String): JSONObject =
         call { releaseFailedPublishRetriesJson(handle, projectId) }
+
+    fun drainAnalysisJobs(limit: Int = 32): JSONObject =
+        call { drainAnalysisJobsJson(handle, limit.coerceAtLeast(0)) }
+
+    fun scoreAssetGroupPreview(
+        assetGroupId: String,
+        sampleJson: String,
+        scorerVersion: String = "local-v1",
+    ): JSONObject =
+        call { scoreAssetGroupPreviewJson(handle, assetGroupId, sampleJson, scorerVersion) }
+
+    fun recommendBurstGroup(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { recommendBurstGroupJson(handle, burstGroupId, strategyProfileId) }
+
+    fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { acceptRecommendedBestJson(handle, burstGroupId, strategyProfileId) }
+
+    fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { markBurstNeedsReviewJson(handle, burstGroupId, strategyProfileId) }
+
+    fun restoreAutomaticRecommendation(
+        burstGroupId: String,
+        strategyProfileId: String? = null,
+    ): JSONObject =
+        call { restoreAutomaticRecommendationJson(handle, burstGroupId, strategyProfileId) }
+
+    fun clearRecommendation(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { clearRecommendationJson(handle, burstGroupId, strategyProfileId) }
+
+    fun keepAllCandidates(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { keepAllCandidatesJson(handle, burstGroupId, strategyProfileId) }
+
+    fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String? = null): JSONObject =
+        call { hideLowScoreCandidatesJson(handle, burstGroupId, strategyProfileId) }
+
+    fun overrideRecommendedBest(
+        burstGroupId: String,
+        bestAssetGroupId: String,
+        strategyProfileId: String? = null,
+    ): JSONObject =
+        call { overrideRecommendedBestJson(handle, burstGroupId, bestAssetGroupId, strategyProfileId) }
+
+    fun splitBurstMember(burstGroupId: String, memberGroupId: String): JSONObject =
+        call { splitBurstMemberJson(handle, burstGroupId, memberGroupId) }
+
+    fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String): JSONObject =
+        call { mergeBurstMemberJson(handle, targetBurstGroupId, memberGroupId) }
+
+    fun strategyProfiles(): JSONArray =
+        call { strategyProfilesJson(handle) }.optJSONArray("value") ?: JSONArray()
+
+    fun saveStrategyProfile(profileJson: String): JSONObject =
+        call { saveStrategyProfileJson(handle, profileJson) }
+
+    fun reviewQueueSummary(projectId: String, strategyProfileId: String? = null): JSONObject =
+        call { reviewQueueSummaryJson(handle, projectId, strategyProfileId) }
 
     fun createProject(name: String): JSONObject =
         call { createProjectJson(handle, name) }
@@ -143,6 +207,13 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         offset: Int,
         limit: Int,
     ): String
+    private external fun projectSelectsAssetGroupPageJson(
+        handle: Long,
+        projectId: String,
+        strategyProfileId: String?,
+        offset: Int,
+        limit: Int,
+    ): String
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun moveProjectGroupJson(
         handle: Long,
@@ -161,6 +232,71 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     ): String
     private external fun markPublishFailedJson(handle: Long, queueId: String, error: String): String
     private external fun releaseFailedPublishRetriesJson(handle: Long, projectId: String): String
+    private external fun drainAnalysisJobsJson(handle: Long, limit: Int): String
+    private external fun scoreAssetGroupPreviewJson(
+        handle: Long,
+        assetGroupId: String,
+        sampleJson: String,
+        scorerVersion: String,
+    ): String
+    private external fun recommendBurstGroupJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun acceptRecommendedBestJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun markBurstNeedsReviewJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun restoreAutomaticRecommendationJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun clearRecommendationJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun keepAllCandidatesJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun hideLowScoreCandidatesJson(
+        handle: Long,
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun overrideRecommendedBestJson(
+        handle: Long,
+        burstGroupId: String,
+        bestAssetGroupId: String,
+        strategyProfileId: String?,
+    ): String
+    private external fun splitBurstMemberJson(
+        handle: Long,
+        burstGroupId: String,
+        memberGroupId: String,
+    ): String
+    private external fun mergeBurstMemberJson(
+        handle: Long,
+        targetBurstGroupId: String,
+        memberGroupId: String,
+    ): String
+    private external fun strategyProfilesJson(handle: Long): String
+    private external fun saveStrategyProfileJson(handle: Long, profileJson: String): String
+    private external fun reviewQueueSummaryJson(
+        handle: Long,
+        projectId: String,
+        strategyProfileId: String?,
+    ): String
     private external fun createProjectJson(handle: Long, name: String): String
     private external fun listProjectsJson(handle: Long): String
     private external fun setActiveProjectJson(handle: Long, projectId: String): String
@@ -213,6 +349,13 @@ internal fun assetGroupQueryJson(query: InboxAssetQuery): JSONObject =
         query.remoteAddr?.takeIf { it.isNotBlank() }?.let { put("remote_addr", it) }
         query.format?.takeIf { it.isNotBlank() }?.let { put("format", it) }
         query.role?.let { put("role", it.wireName) }
+        put("sort", query.sort.wireName)
+        query.recommendationState?.takeIf { it.isNotBlank() }?.let { put("recommendation_state", it) }
+        query.scoreMin?.let { put("score_min", it) }
+        query.scoreMax?.let { put("score_max", it) }
+        query.analysisStatus?.takeIf { it.isNotBlank() }?.let { put("analysis_status", it) }
+        query.reviewQueue?.takeIf { it.isNotBlank() }?.let { put("review_queue", it) }
+        query.strategyProfileId?.takeIf { it.isNotBlank() }?.let { put("strategy_profile_id", it) }
     }
 
 object NativeEnvelope {

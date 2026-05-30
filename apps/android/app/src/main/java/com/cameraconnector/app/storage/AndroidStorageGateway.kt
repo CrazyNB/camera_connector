@@ -57,6 +57,21 @@ class AndroidStorageGateway(private val context: Context) {
             .apply()
     }
 
+    fun smartSelectionStrategyProfileId(): String =
+        preferences.getString(KEY_SMART_SELECTION_STRATEGY_PROFILE_ID, null)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_SMART_SELECTION_STRATEGY_PROFILE_ID
+
+    fun persistSmartSelectionStrategyProfileId(profileId: String) {
+        preferences.edit()
+            .putString(
+                KEY_SMART_SELECTION_STRATEGY_PROFILE_ID,
+                profileId.trim().ifBlank { DEFAULT_SMART_SELECTION_STRATEGY_PROFILE_ID },
+            )
+            .apply()
+    }
+
     fun createAppNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -67,6 +82,8 @@ class AndroidStorageGateway(private val context: Context) {
         const val KEY_INBOX_LABEL = "inbox_label"
         const val KEY_PROJECT_PHOTO_GRID_COLUMNS = "project_photo_grid_columns"
         const val KEY_CAMERA_CONNECT_HOST = "camera_connect_host"
+        const val KEY_SMART_SELECTION_STRATEGY_PROFILE_ID = "smart_selection_strategy_profile_id"
         const val DEFAULT_PROJECT_PHOTO_GRID_COLUMNS = 3
+        const val DEFAULT_SMART_SELECTION_STRATEGY_PROFILE_ID = "general"
     }
 }

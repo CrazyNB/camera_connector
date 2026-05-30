@@ -30,7 +30,6 @@ import com.cameraconnector.app.core.PublishQueueState
 internal fun ReceiverHeroControl(
     running: Boolean,
     phase: String,
-    endpoint: String,
     onlineConnections: Int,
     accountCount: Int,
     publishQueue: PublishQueueState,
@@ -45,19 +44,12 @@ internal fun ReceiverHeroControl(
         modifier = modifier.padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            if (running) "接收服务运行中" else "接收服务已停止",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(endpoint, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(22.dp))
         PowerButton(
             running = running,
             enabled = enabled,
             onClick = onToggleReceiver,
         )
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ElementTag(
                 text = receiverPhaseLabel(phase),
@@ -92,7 +84,7 @@ internal fun ReceiverHeroControl(
                 Text("重试发布")
             }
         }
-        message?.let {
+        message?.takeIf { running }?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -108,7 +100,7 @@ internal fun PowerButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(168.dp),
+        modifier = Modifier.size(136.dp),
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = if (running) ElementDanger else ElementBlue,

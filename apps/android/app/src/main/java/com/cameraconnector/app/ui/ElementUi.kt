@@ -51,6 +51,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -261,6 +262,40 @@ internal fun ProcessingCard(action: String) {
             Text("处理中", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(action)
+        }
+    }
+}
+
+@Composable
+internal fun ActionLoadingOverlay(action: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ElementBackground.copy(alpha = 0.72f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            color = ElementSurface.copy(alpha = 0.96f),
+            shape = elementShape,
+            border = BorderStroke(1.dp, ElementCardBorder),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = ElementBlue,
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    action,
+                    color = ElementText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

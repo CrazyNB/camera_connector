@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ObjectFormat, ReceivedAsset};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReceivedAssetGroup {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_id: Option<String>,
@@ -13,6 +13,44 @@ pub struct ReceivedAssetGroup {
     pub jpeg: Option<ReceivedAsset>,
     pub raw: Option<ReceivedAsset>,
     pub video: Option<ReceivedAsset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burst: Option<ReceivedAssetBurstSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<ReceivedAssetQualitySummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReceivedAssetBurstSummary {
+    pub burst_group_id: String,
+    pub member_count: usize,
+    pub member_rank: usize,
+    pub recommendation_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best_asset_group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReceivedAssetQualitySummary {
+    pub overall: f64,
+    pub analysis_status: String,
+    pub scorer_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpness: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_clipping_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_clipping_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_confidence: Option<f64>,
+    pub analyzed_at_ms: i64,
 }
 
 pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGroup> {
@@ -53,6 +91,8 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
                 jpeg,
                 raw,
                 video,
+                burst: None,
+                quality: None,
             }
         })
         .collect();

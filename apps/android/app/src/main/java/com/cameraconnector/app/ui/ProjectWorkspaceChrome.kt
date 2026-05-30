@@ -42,6 +42,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
@@ -130,6 +131,7 @@ internal fun ProjectScopeCard(
     projectState: ProjectState,
     actionsEnabled: Boolean,
     onOpenProjects: () -> Unit,
+    onCollapse: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val project = projectState.activeProjectSummary()
@@ -151,35 +153,38 @@ internal fun ProjectScopeCard(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(
+                    onClick = onOpenProjects,
+                    enabled = actionsEnabled,
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = "返回项目管理",
+                        tint = ElementBlue,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    "当前项目",
-                    color = ElementInfo,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    project?.name ?: "正在初始化",
+                    project?.name ?: "项目",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(
-                onClick = onOpenProjects,
-                enabled = actionsEnabled,
-                shape = elementShape,
-                modifier = Modifier.height(36.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Icon(
-                    Icons.Outlined.Home,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("管理")
+            onCollapse?.let { collapse ->
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = collapse,
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.KeyboardArrowUp,
+                        contentDescription = "收起启动页",
+                        tint = ElementBlue,
+                    )
+                }
             }
         }
     }

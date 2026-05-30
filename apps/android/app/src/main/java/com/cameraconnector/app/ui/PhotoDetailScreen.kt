@@ -130,6 +130,15 @@ internal fun PhotoDetailScreen(
     asset: InboxAsset,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    actionsEnabled: Boolean = true,
+    onAcceptRecommendedBest: ((String) -> Unit)? = null,
+    onOverrideRecommendedBest: ((String, String) -> Unit)? = null,
+    onMarkBurstNeedsReview: ((String) -> Unit)? = null,
+    onRestoreAutomaticRecommendation: ((String) -> Unit)? = null,
+    onSplitBurstMember: ((String, String) -> Unit)? = null,
+    burstMembers: List<BurstMemberFilmstripItemUi> = emptyList(),
+    comparisonItems: List<BurstMemberFilmstripItemUi> = emptyList(),
+    onOpenBurstMember: ((InboxAsset) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val metadataLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
@@ -143,10 +152,17 @@ internal fun PhotoDetailScreen(
         }
     }
     var fullScreenPreview by remember { mutableStateOf(false) }
+    var burstComparisonOpen by remember(asset.assetSelectionId()) { mutableStateOf(false) }
     if (fullScreenPreview) {
         FullScreenPhotoPreview(
             asset = asset,
             onDismiss = { fullScreenPreview = false },
+        )
+    }
+    if (burstComparisonOpen && comparisonItems.size > 1) {
+        BurstComparisonDialog(
+            items = comparisonItems,
+            onDismiss = { burstComparisonOpen = false },
         )
     }
 
@@ -171,6 +187,21 @@ internal fun PhotoDetailScreen(
             onClick = { fullScreenPreview = true },
             modifier = Modifier.fillMaxWidth(),
         )
+        if (asset.quality != null || asset.burst != null) {
+            SmartSelectionDetailCard(
+                asset = asset,
+                actionsEnabled = actionsEnabled,
+                onAcceptRecommendedBest = onAcceptRecommendedBest,
+                onOverrideRecommendedBest = onOverrideRecommendedBest,
+                onMarkBurstNeedsReview = onMarkBurstNeedsReview,
+                onRestoreAutomaticRecommendation = onRestoreAutomaticRecommendation,
+                onSplitBurstMember = onSplitBurstMember,
+                burstMembers = burstMembers,
+                comparisonItems = comparisonItems,
+                onOpenComparison = { burstComparisonOpen = true },
+                onOpenBurstMember = onOpenBurstMember,
+            )
+        }
         photoMetadata?.lines()?.takeIf { it.isNotEmpty() }?.let { metadataLines ->
             ElementCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -201,6 +232,436 @@ internal fun PhotoDetailScreen(
                 DetailLine("RAW", asset.rawPath ?: "无")
                 DetailLine("JPEG", asset.jpegPath ?: "无")
                 DetailLine("视频", asset.videoPath ?: "无")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmartSelectionDetailCard(
+    asset: InboxAsset,
+    actionsEnabled: Boolean,
+    onAcceptRecommendedBest: ((String) -> Unit)?,
+    onOverrideRecommendedBest: ((String, String) -> Unit)?,
+    onMarkBurstNeedsReview: ((String) -> Unit)?,
+    onRestoreAutomaticRecommendation: ((String) -> Unit)?,
+    onSplitBurstMember: ((String, String) -> Unit)?,
+    burstMembers: List<BurstMemberFilmstripItemUi>,
+    comparisonItems: List<BurstMemberFilmstripItemUi>,
+    onOpenComparison: () -> Unit,
+    onOpenBurstMember: ((InboxAsset) -> Unit)?,
+) {
+    val quality = asset.quality
+    val burst = asset.burst
+    val score = asset.qualityScoreText()
+    val decision = photoDetailDecisionUi(asset, actionsEnabled)
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("智能优选", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        asset.qualityReasonText() ?: qualityStatusLabel(quality?.analysisStatus),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                score?.let {
+                    Surface(
+                        color = smartBadgeColor(asset).copy(alpha = 0.14f),
+                        contentColor = smartBadgeColor(asset),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, smartBadgeColor(asset).copy(alpha = 0.38f)),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(it, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("评分", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                asset.qualityBadgeText()?.let { ElementTag(it, smartBadgeColor(asset)) }
+                asset.groupBestBadgeText()?.let { ElementTag(it, ElementWarning) }
+                asset.burstBadgeText()?.let { ElementTag(it, ElementPurple) }
+                asset.recommendationBadgeText()?.let {
+                    ElementTag(it, if (asset.isBestRecommendedAsset()) ElementSuccess else ElementInfo)
+                }
+            }
+            quality?.let {
+                DetailLine("评分状态", qualityStatusLabel(it.analysisStatus))
+                asset.qualitySignalRows().takeIf { rows -> rows.isNotEmpty() }?.let { rows ->
+                    QualitySignalStrip(rows = rows)
+                }
+                it.scorerVersion?.takeIf { version -> version.isNotBlank() }?.let { version ->
+                    DetailLine("评分版本", version)
+                }
+                it.analyzedAtMs?.let { analyzedAtMs ->
+                    DetailLine("分析时间", formatEpochMillisForDisplay(analyzedAtMs))
+                }
+            }
+            burst?.let {
+                DetailLine(
+                    "连拍分组",
+                    asset.burstPositionBadgeText() ?: it.memberCount.toString(),
+                )
+                asset.groupBestScoreText()?.let { bestScore ->
+                    DetailLine("组内最高评分", bestScore)
+                }
+                DetailLine("推荐状态", recommendationStatusLabel(it.recommendationStatus))
+                it.bestAssetGroupId?.takeIf { bestId -> bestId.isNotBlank() }?.let { bestId ->
+                    DetailLine("当前优选", if (asset.isBestRecommendedAsset()) "当前照片" else bestId)
+                }
+            }
+            if (burstMembers.isNotEmpty()) {
+                Text("组内照片", style = MaterialTheme.typography.titleSmall)
+                DetailBurstMemberFilmstrip(
+                    memberItems = burstMembers,
+                    currentAssetId = asset.assetSelectionId(),
+                    onOpenBurstMember = onOpenBurstMember,
+                )
+                if (comparisonItems.size > 1) {
+                    OutlinedButton(
+                        onClick = onOpenComparison,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.45f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = ElementBlueSoft.copy(alpha = 0.5f),
+                            contentColor = ElementBlue,
+                        ),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text("对比组内照片", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            if (
+                decision.hasAnyAction &&
+                (
+                    onAcceptRecommendedBest != null ||
+                        onOverrideRecommendedBest != null ||
+                        onMarkBurstNeedsReview != null ||
+                        onRestoreAutomaticRecommendation != null ||
+                        onSplitBurstMember != null
+                    )
+            ) {
+                decision.disabledReason?.let { reason ->
+                    Text(
+                        reason,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    decision.acceptRecommendedBestBurstGroupId
+                        ?.takeIf { onAcceptRecommendedBest != null }
+                        ?.let { burstGroupId ->
+                            Button(
+                                onClick = { onAcceptRecommendedBest?.invoke(burstGroupId) },
+                                enabled = decision.acceptRecommendedBestEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ElementSuccess,
+                                    contentColor = ElementOnAccent,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text("接受推荐", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    decision.overrideRecommendedBestTarget
+                        ?.takeIf { onOverrideRecommendedBest != null }
+                        ?.let { target ->
+                            Button(
+                                onClick = {
+                                    onOverrideRecommendedBest?.invoke(
+                                        target.burstGroupId,
+                                        target.bestAssetGroupId,
+                                    )
+                                },
+                                enabled = decision.overrideRecommendedBestEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ElementSuccess,
+                                    contentColor = ElementOnAccent,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text("设为优选", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    decision.markNeedsReviewBurstGroupId
+                        ?.takeIf { onMarkBurstNeedsReview != null }
+                        ?.let { burstGroupId ->
+                            OutlinedButton(
+                                onClick = { onMarkBurstNeedsReview?.invoke(burstGroupId) },
+                                enabled = decision.markNeedsReviewEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, ElementBorder),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text("标记复核", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    decision.splitBurstTarget
+                        ?.takeIf { onSplitBurstMember != null }
+                        ?.let { target ->
+                            OutlinedButton(
+                                onClick = {
+                                    onSplitBurstMember?.invoke(
+                                        target.burstGroupId,
+                                        target.memberGroupId,
+                                    )
+                                },
+                                enabled = decision.splitBurstEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, ElementWarning.copy(alpha = 0.45f)),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = ElementControlSurface,
+                                    contentColor = ElementWarning,
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            ) {
+                                Text("\u79fb\u51fa\u8fde\u62cd\u7ec4", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    val restoreAutomaticBurstGroupId = decision.restoreAutomaticBurstGroupId
+                    if (restoreAutomaticBurstGroupId != null && onRestoreAutomaticRecommendation != null) {
+                        OutlinedButton(
+                            onClick = {
+                                onRestoreAutomaticRecommendation.invoke(restoreAutomaticBurstGroupId)
+                            },
+                            enabled = decision.restoreAutomaticEnabled,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, ElementBorder),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text("恢复自动推荐", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailBurstMemberFilmstrip(
+    memberItems: List<BurstMemberFilmstripItemUi>,
+    currentAssetId: String,
+    onOpenBurstMember: ((InboxAsset) -> Unit)?,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp),
+    ) {
+        items(memberItems, key = { it.asset.assetSelectionId() }) { item ->
+            val isCurrent = item.asset.assetSelectionId() == currentAssetId
+            Surface(
+                modifier = Modifier.width(112.dp),
+                color = ElementControlSurface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, if (isCurrent) ElementBlue else ElementBorder),
+            ) {
+                Column(
+                    modifier = Modifier.padding(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box {
+                        PhotoPreview(
+                            asset = item.asset,
+                            compactFallback = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f),
+                            onClick = onOpenBurstMember?.let { openMember ->
+                                { openMember(item.asset) }
+                            },
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ElementTag(item.badgeText, burstMemberDetailBadgeColor(item.badgeText))
+                        item.scoreText?.let { score ->
+                            Text(
+                                score,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    Text(
+                        item.asset.groupTitle(),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun burstMemberDetailBadgeColor(text: String): Color =
+    when (text) {
+        "最佳" -> ElementSuccess
+        "当前" -> ElementBlue
+        "低分" -> ElementWarning
+        "需复核" -> ElementWarning
+        else -> ElementInfo
+    }
+
+@Composable
+internal fun BurstComparisonDialog(
+    items: List<BurstMemberFilmstripItemUi>,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        ElementCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("组内对比", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "当前 / 优选 / 高分备选",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, ElementBorder),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    ) {
+                        Text("关闭")
+                    }
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(items, key = { it.asset.assetSelectionId() }) { item ->
+                        BurstComparisonCandidateCard(item)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BurstComparisonCandidateCard(item: BurstMemberFilmstripItemUi) {
+    Surface(
+        modifier = Modifier.width(180.dp),
+        color = ElementControlSurface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, ElementBorder),
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PhotoPreview(
+                asset = item.asset,
+                previewQuality = PreviewQuality.Detail,
+                contentScale = ContentScale.Fit,
+                compactFallback = true,
+                backgroundColor = Color.Black,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ElementTag(item.badgeText, burstMemberDetailBadgeColor(item.badgeText))
+                item.scoreText?.let { score ->
+                    Text(
+                        score,
+                        color = smartBadgeColor(item.asset),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            Text(
+                item.asset.groupTitle(),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            item.asset.qualitySignalRows().take(3).forEach { row ->
+                DetailLine(row.label, row.value)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QualitySignalStrip(rows: List<QualitySignalRow>) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 2.dp),
+    ) {
+        items(rows) { row ->
+            Surface(
+                color = ElementControlSurface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, ElementBorder),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        row.value,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        row.label,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }

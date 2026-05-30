@@ -124,6 +124,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 internal enum class InboxFilter(val label: String) {
     All("全部文件"),
@@ -173,6 +174,147 @@ internal fun InboxAsset.previewAccentColor(): Color = when {
     hasRaw -> ElementPurple
     hasJpeg -> ElementSuccess
     else -> ElementBlue
+}
+
+internal fun InboxAsset.qualityScoreText(): String? =
+    normalizedScoreText(quality?.overall)
+
+internal fun InboxAsset.qualityBadgeText(): String? =
+    qualityScoreText()?.let { "评分 $it" }
+        ?: quality?.analysisStatus?.let { qualityStatusLabel(it) }
+
+internal fun InboxAsset.groupBestScoreText(): String? =
+    normalizedScoreText(burst?.bestScore)
+
+internal fun InboxAsset.groupBestBadgeText(): String? {
+    val bestScore = groupBestScoreText() ?: return null
+    if (bestScore == qualityScoreText()) {
+        return null
+    }
+    return "组最高 $bestScore"
+}
+
+internal fun InboxAsset.burstBadgeText(): String? {
+    return burstPositionBadgeText()
+}
+
+internal fun InboxAsset.burstCountBadgeText(): String? {
+    val burst = burst ?: return null
+    if (burst.memberCount <= 1) return null
+    return burst.memberCount.toString()
+}
+
+internal fun InboxAsset.burstPositionBadgeText(): String? {
+    val burst = burst ?: return null
+    if (burst.memberCount <= 1) return null
+    return burst.memberRank?.takeIf { it > 0 }
+        ?.let { "$it/${burst.memberCount}" }
+        ?: burst.memberCount.toString()
+}
+
+internal fun InboxAsset.recommendationBadgeText(): String? =
+    when {
+        isBestRecommendedAsset() -> "优选"
+        burst?.recommendationStatus != null -> recommendationStatusLabel(burst.recommendationStatus)
+        else -> null
+    }
+
+internal fun InboxAsset.tileSmartMeta(): String? =
+    listOfNotNull(
+        qualityBadgeText(),
+        qualityReasonText(),
+        groupBestBadgeText(),
+        recommendationBadgeText(),
+    ).distinct().takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
+internal fun InboxAsset.qualityReasonText(): String? =
+    quality?.primaryReason
+        ?.takeIf { it.isNotBlank() }
+        ?.let(::smartReasonText)
+
+internal fun smartReasonText(reason: String): String {
+    val trimmed = reason.trim()
+    return when (trimmed.lowercase()) {
+        "balanced", "balanced technical score" -> "技术表现均衡"
+        "low sharpness" -> "锐度偏低"
+        "highlight clipping" -> "高光溢出"
+        "shadow clipping" -> "阴影过暗"
+        "weak exposure" -> "曝光偏弱"
+        "unsupported preview sample" -> "需要复核预览"
+        "no supported scores" -> "缺少可评分预览"
+        "some frames need review" -> "部分照片需要复核"
+        "edge weighted detail" -> "主体靠近边缘"
+        "low information area" -> "画面信息偏少"
+        else -> if (trimmed.startsWith("best technical score:", ignoreCase = true)) {
+            "技术分数领先"
+        } else {
+            trimmed
+        }
+    }
+}
+
+internal data class QualitySignalRow(
+    val label: String,
+    val value: String,
+)
+
+internal fun InboxAsset.qualitySignalRows(): List<QualitySignalRow> {
+    val quality = quality ?: return emptyList()
+    return listOfNotNull(
+        quality.sharpness?.let { QualitySignalRow("锐度", normalizedScoreText(it).orEmpty()) },
+        quality.exposure?.let { QualitySignalRow("曝光", normalizedScoreText(it).orEmpty()) },
+        quality.composition?.let { QualitySignalRow("构图", normalizedScoreText(it).orEmpty()) },
+        quality.highlightClippingPenalty?.let { QualitySignalRow("高光", normalizedScoreText(it).orEmpty()) },
+        quality.shadowClippingPenalty?.let { QualitySignalRow("阴影", normalizedScoreText(it).orEmpty()) },
+        quality.compositionConfidence?.let { QualitySignalRow("构图置信", normalizedScoreText(it).orEmpty()) },
+    ).filter { it.value.isNotBlank() }
+}
+
+internal fun InboxAsset.isBestRecommendedAsset(): Boolean {
+    val bestId = burst?.bestAssetGroupId?.takeIf { it.isNotBlank() } ?: return false
+    return bestId == id || bestId == groupKey
+}
+
+internal fun qualityStatusLabel(value: String?): String =
+    when (value?.lowercase()) {
+        "completed", "ready", "done" -> "已评分"
+        "pending", "queued" -> "待评分"
+        "running", "processing", "analyzing" -> "分析中"
+        "stale" -> "更新中"
+        "unsupported" -> "不支持评分"
+        "failed", "error" -> "评分失败"
+        null, "" -> "待评分"
+        else -> value
+    }
+
+internal fun recommendationStatusLabel(value: String?): String =
+    when (value?.lowercase()) {
+        "recommended", "completed", "ready", "done" -> "已推荐"
+        "accepted" -> "已精选"
+        "needs_review" -> "需要复核"
+        "user_overridden" -> "手动调整"
+        "pending", "queued" -> "待推荐"
+        "running", "processing", "analyzing" -> "推荐中"
+        "stale" -> "更新中"
+        "unsupported" -> "不支持推荐"
+        "failed", "error" -> "推荐失败"
+        null, "" -> "待推荐"
+        else -> value
+    }
+
+internal fun smartBadgeColor(asset: InboxAsset): Color = when {
+    asset.isBestRecommendedAsset() -> ElementSuccess
+    asset.quality?.analysisStatus?.equals("failed", ignoreCase = true) == true -> ElementDanger
+    asset.quality?.analysisStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
+    asset.qualityScoreText() != null -> ElementWarning
+    asset.burst != null -> ElementPurple
+    else -> ElementInfo
+}
+
+private fun normalizedScoreText(value: Double?): String? {
+    val raw = value?.takeIf { it.isFinite() } ?: return null
+    val normalized = if (raw <= 1.0) raw * 100.0 else raw
+    return normalized.coerceIn(0.0, 100.0).roundToInt().toString()
 }
 
 internal fun sourceGroupLabel(displayPath: String): String =

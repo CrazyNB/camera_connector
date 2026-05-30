@@ -48,6 +48,27 @@ class NativeCoreGateway(
             )
         }
 
+    override suspend fun loadSelects(
+        projectId: String?,
+        strategyProfileId: String?,
+        offset: Int,
+        limit: Int,
+    ): List<InboxAsset> =
+        withContext(Dispatchers.IO) {
+            val resolvedProjectId = projectId
+                ?: projects.value.activeProjectId
+                ?: loadProjects().activeProjectId
+                ?: return@withContext emptyList()
+            mapInboxAssets(
+                nativeCore.projectSelectsAssetGroupPageJson(
+                    projectId = resolvedProjectId,
+                    strategyProfileId = strategyProfileId,
+                    offset = offset,
+                    limit = limit,
+                ),
+            )
+        }
+
     suspend fun refresh() {
         val (nextProjects, nextDashboard) = withContext(Dispatchers.IO) {
             val loadedProjects = loadProjects()
@@ -143,6 +164,105 @@ class NativeCoreGateway(
                 ?: return@withContext
             nativeCore.releaseFailedPublishRetries(projectId)
             receiverServiceController.retryFailedPublishes()
+        }
+        refresh()
+    }
+
+    override suspend fun loadStrategyProfiles(): List<StrategyProfileUi> =
+        withContext(Dispatchers.IO) {
+            mapStrategyProfiles(nativeCore.strategyProfiles())
+        }
+
+    override suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi =
+        withContext(Dispatchers.IO) {
+            mapStrategyProfile(
+                nativeCore.saveStrategyProfile(profile.toStrategyProfileJson().toString()),
+            )
+        }
+
+    override suspend fun loadReviewQueueSummary(
+        projectId: String?,
+        strategyProfileId: String?,
+    ): ReviewQueueSummary =
+        withContext(Dispatchers.IO) {
+            val resolvedProjectId = projectId
+                ?: projects.value.activeProjectId
+                ?: loadProjects().activeProjectId
+                ?: return@withContext emptyReviewQueueSummary(strategyProfileId = strategyProfileId ?: "general")
+            mapReviewQueueSummary(
+                nativeCore.reviewQueueSummary(
+                    projectId = resolvedProjectId,
+                    strategyProfileId = strategyProfileId,
+                ),
+            )
+        }
+
+    override suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String?) {
+        withContext(Dispatchers.IO) {
+            nativeCore.acceptRecommendedBest(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String?) {
+        withContext(Dispatchers.IO) {
+            nativeCore.markBurstNeedsReview(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun restoreAutomaticRecommendation(
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ) {
+        withContext(Dispatchers.IO) {
+            nativeCore.restoreAutomaticRecommendation(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String?) {
+        withContext(Dispatchers.IO) {
+            nativeCore.clearRecommendation(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String?) {
+        withContext(Dispatchers.IO) {
+            nativeCore.keepAllCandidates(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String?) {
+        withContext(Dispatchers.IO) {
+            nativeCore.hideLowScoreCandidates(burstGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun overrideRecommendedBest(
+        burstGroupId: String,
+        bestAssetGroupId: String,
+        strategyProfileId: String?,
+    ) {
+        withContext(Dispatchers.IO) {
+            nativeCore.overrideRecommendedBest(burstGroupId, bestAssetGroupId, strategyProfileId)
+        }
+        refresh()
+    }
+
+    override suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.splitBurstMember(burstGroupId, memberGroupId)
+        }
+        refresh()
+    }
+
+    override suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.mergeBurstMember(targetBurstGroupId, memberGroupId)
         }
         refresh()
     }
@@ -473,10 +593,140 @@ internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
                     hasRaw = raw != null,
                     hasJpeg = jpeg != null || primary.optString("format").equals("Jpeg", ignoreCase = true),
                     hasVideo = video != null,
+                    burst = group.optJSONObject("burst")?.toInboxAssetBurst(),
+                    quality = group.optJSONObject("quality")?.toInboxAssetQuality(),
                 ),
             )
         }
     }
+}
+
+private fun JSONObject.toInboxAssetBurst(): InboxAssetBurst =
+    InboxAssetBurst(
+        burstGroupId = optString("burst_group_id"),
+        memberCount = optIntOrNull("member_count") ?: 0,
+        memberRank = optIntOrNull("member_rank"),
+        recommendationStatus = optStringOrNull("recommendation_status"),
+        bestAssetGroupId = optStringOrNull("best_asset_group_id"),
+        bestScore = optDoubleOrNull("best_score"),
+    )
+
+private fun JSONObject.toInboxAssetQuality(): InboxAssetQuality =
+    InboxAssetQuality(
+        overall = optDoubleOrNull("overall"),
+        analysisStatus = optStringOrNull("analysis_status"),
+        scorerVersion = optStringOrNull("scorer_version"),
+        primaryReason = optStringOrNull("primary_reason"),
+        analyzedAtMs = optLongOrNull("analyzed_at_ms"),
+        sharpness = optDoubleOrNull("sharpness"),
+        exposure = optDoubleOrNull("exposure"),
+        highlightClippingPenalty = optDoubleOrNull("highlight_clipping_penalty"),
+        shadowClippingPenalty = optDoubleOrNull("shadow_clipping_penalty"),
+        composition = optDoubleOrNull("composition"),
+        compositionConfidence = optDoubleOrNull("composition_confidence"),
+    )
+
+internal fun mapStrategyProfiles(profiles: JSONArray?): List<StrategyProfileUi> {
+    if (profiles == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until profiles.length()) {
+            profiles.optJSONObject(index)?.let { add(mapStrategyProfile(it)) }
+        }
+    }
+}
+
+internal fun mapStrategyProfile(value: JSONObject): StrategyProfileUi =
+    StrategyProfileUi(
+        profileId = value.optString("profile_id"),
+        name = value.optString("name"),
+        builtIn = value.optBoolean("built_in"),
+        strategyVersion = value.optString("strategy_version").ifBlank { "strategy-v1" },
+        burstWindowMs = value.optLong("burst_window_ms"),
+        minGroupSize = value.optInt("min_group_size"),
+        weights = mapStrategyWeights(value.optJSONObject("weights")),
+        rejectIfSharpnessBelow = value.optDoubleOrDefault("reject_if_sharpness_below", 0.25),
+        flagIfOverallBelow = value.optDoubleOrDefault("flag_if_overall_below", 0.40),
+        nearDuplicateSimilarityAbove = value.optDoubleOrDefault("near_duplicate_similarity_above", 0.92),
+        maxLlmCandidatesPerGroup = value.optInt("max_llm_candidates_per_group", 5),
+        autoDelete = value.optBoolean("auto_delete", false),
+        autoHideLowScore = value.optBoolean("auto_hide_low_score", false),
+        markBest = value.optBoolean("mark_best", true),
+        keepRawPairs = value.optBoolean("keep_raw_pairs", true),
+        llmEnabled = value.optBoolean("llm_enabled", false),
+        updatedAtMs = value.optLong("updated_at_ms"),
+    )
+
+private fun mapStrategyWeights(value: JSONObject?): StrategyWeightsUi =
+    StrategyWeightsUi(
+        sharpness = value.optDoubleOrDefault("sharpness", 0.40),
+        exposure = value.optDoubleOrDefault("exposure", 0.22),
+        composition = value.optDoubleOrDefault("composition", 0.12),
+        highlightClippingPenalty = value.optDoubleOrDefault("highlight_clipping_penalty", -0.14),
+        shadowClippingPenalty = value.optDoubleOrDefault("shadow_clipping_penalty", -0.08),
+        diversity = value.optDoubleOrDefault("diversity", 0.04),
+    )
+
+internal fun StrategyProfileUi.toStrategyProfileJson(): JSONObject =
+    JSONObject()
+        .put("profile_id", profileId)
+        .put("name", name)
+        .put("built_in", builtIn)
+        .put("strategy_version", strategyVersion)
+        .put("burst_window_ms", burstWindowMs)
+        .put("min_group_size", minGroupSize)
+        .put(
+            "weights",
+            JSONObject()
+                .put("sharpness", weights.sharpness)
+                .put("exposure", weights.exposure)
+                .put("composition", weights.composition)
+                .put("highlight_clipping_penalty", weights.highlightClippingPenalty)
+                .put("shadow_clipping_penalty", weights.shadowClippingPenalty)
+                .put("diversity", weights.diversity),
+        )
+        .put("reject_if_sharpness_below", rejectIfSharpnessBelow)
+        .put("flag_if_overall_below", flagIfOverallBelow)
+        .put("near_duplicate_similarity_above", nearDuplicateSimilarityAbove)
+        .put("max_llm_candidates_per_group", maxLlmCandidatesPerGroup)
+        .put("auto_delete", autoDelete)
+        .put("auto_hide_low_score", autoHideLowScore)
+        .put("mark_best", markBest)
+        .put("keep_raw_pairs", keepRawPairs)
+        .put("llm_enabled", llmEnabled)
+        .put("updated_at_ms", updatedAtMs)
+
+internal fun mapReviewQueueSummary(value: JSONObject?): ReviewQueueSummary {
+    if (value == null) {
+        return emptyReviewQueueSummary()
+    }
+    val queues = value.optJSONArray("queues")
+    return ReviewQueueSummary(
+        projectId = value.optString("project_id"),
+        strategyProfileId = value.optString("strategy_profile_id").ifBlank { "general" },
+        totalUnits = value.optInt("total_units"),
+        pendingCount = value.optInt("pending_count"),
+        unconfirmedBestCount = value.optInt("unconfirmed_best_count"),
+        needsReviewCount = value.optInt("needs_review_count"),
+        lowScoreCandidateCount = value.optInt("low_score_candidate_count"),
+        nearDuplicateCount = value.optInt("near_duplicate_count"),
+        unsupportedCount = value.optInt("unsupported_count"),
+        userOverriddenCount = value.optInt("user_overridden_count"),
+        queues = buildList {
+            if (queues != null) {
+                for (index in 0 until queues.length()) {
+                    val queue = queues.optJSONObject(index) ?: continue
+                    add(
+                        ReviewQueueCount(
+                            queue = queue.optString("queue"),
+                            count = queue.optInt("count"),
+                        ),
+                    )
+                }
+            }
+        },
+    )
 }
 
 private fun JSONObject.assetDisplayPath(): String =
@@ -488,6 +738,24 @@ private fun JSONObject.assetStorageLocation(): String? {
         .ifBlank { location.optString("uri") }
         .ifBlank { null }
 }
+
+private fun JSONObject.optStringOrNull(key: String): String? =
+    optString(key).takeIf { it.isNotBlank() }
+
+private fun JSONObject.optIntOrNull(key: String): Int? =
+    if (has(key) && !isNull(key)) optInt(key) else null
+
+private fun JSONObject.optLongOrNull(key: String): Long? =
+    if (has(key) && !isNull(key)) optLong(key) else null
+
+private fun JSONObject.optDoubleOrNull(key: String): Double? =
+    if (has(key) && !isNull(key)) optDouble(key).takeUnless { it.isNaN() } else null
+
+private fun JSONObject?.optDoubleOrDefault(key: String, default: Double): Double =
+    this?.takeIf { it.has(key) && !it.isNull(key) }
+        ?.optDouble(key)
+        ?.takeUnless { it.isNaN() }
+        ?: default
 
 internal fun mapPublishQueueState(value: JSONObject?): PublishQueueState =
     PublishQueueState(

@@ -446,6 +446,7 @@ async fn main() -> Result<()> {
                     remote_addr,
                     format: format.as_deref().map(parse_object_format).transpose()?,
                     role: None,
+                    ..AssetGroupQuery::default()
                 },
                 offset,
                 limit,
@@ -552,6 +553,7 @@ async fn main() -> Result<()> {
                 remote_addr,
                 format: format.as_deref().map(parse_object_format).transpose()?,
                 role: None,
+                ..AssetGroupQuery::default()
             };
             let groups = if let Some(project_id) = project_id {
                 let page = load_project_inbox_page(
@@ -2457,6 +2459,8 @@ mod tests {
                     jpeg: None,
                     raw: Some(asset),
                     video: None,
+                    burst: None,
+                    quality: None,
                 }],
                 summary: AssetGroupSummary {
                     group_count: 1,
@@ -2581,6 +2585,8 @@ mod tests {
             jpeg: None,
             raw: Some(asset),
             video: None,
+            burst: None,
+            quality: None,
         };
 
         let line = asset_group_line(&group);

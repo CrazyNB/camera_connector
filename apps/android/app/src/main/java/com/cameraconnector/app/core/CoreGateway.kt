@@ -12,6 +12,12 @@ interface CoreGateway {
         offset: Int = 0,
         limit: Int = 2_000,
     ): List<InboxAsset>
+    suspend fun loadSelects(
+        projectId: String? = null,
+        strategyProfileId: String? = null,
+        offset: Int = 0,
+        limit: Int = 2_000,
+    ): List<InboxAsset>
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
     suspend fun renameProject(projectId: String, name: String)
@@ -28,6 +34,25 @@ interface CoreGateway {
     suspend fun saveDeviceAccount(account: DeviceAccount, password: String?)
     suspend fun removeDeviceAccount(username: String)
     suspend fun retryFailedPublishes()
+    suspend fun loadStrategyProfiles(): List<StrategyProfileUi>
+    suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi
+    suspend fun loadReviewQueueSummary(
+        projectId: String? = null,
+        strategyProfileId: String? = null,
+    ): ReviewQueueSummary
+    suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun restoreAutomaticRecommendation(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String? = null)
+    suspend fun overrideRecommendedBest(
+        burstGroupId: String,
+        bestAssetGroupId: String,
+        strategyProfileId: String? = null,
+    )
+    suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String)
+    suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String)
 }
 
 data class DashboardState(
@@ -115,7 +140,83 @@ data class InboxAsset(
     val hasRaw: Boolean = rawPath != null,
     val hasJpeg: Boolean = jpegPath != null,
     val hasVideo: Boolean = videoPath != null,
+    val burst: InboxAssetBurst? = null,
+    val quality: InboxAssetQuality? = null,
 )
+
+data class InboxAssetBurst(
+    val burstGroupId: String,
+    val memberCount: Int,
+    val memberRank: Int?,
+    val recommendationStatus: String?,
+    val bestAssetGroupId: String?,
+    val bestScore: Double? = null,
+)
+
+data class InboxAssetQuality(
+    val overall: Double?,
+    val analysisStatus: String?,
+    val scorerVersion: String?,
+    val primaryReason: String?,
+    val analyzedAtMs: Long?,
+    val sharpness: Double? = null,
+    val exposure: Double? = null,
+    val highlightClippingPenalty: Double? = null,
+    val shadowClippingPenalty: Double? = null,
+    val composition: Double? = null,
+    val compositionConfidence: Double? = null,
+)
+
+data class StrategyWeightsUi(
+    val sharpness: Double,
+    val exposure: Double,
+    val composition: Double,
+    val highlightClippingPenalty: Double,
+    val shadowClippingPenalty: Double,
+    val diversity: Double,
+)
+
+data class StrategyProfileUi(
+    val profileId: String,
+    val name: String,
+    val builtIn: Boolean,
+    val strategyVersion: String,
+    val burstWindowMs: Long,
+    val minGroupSize: Int,
+    val weights: StrategyWeightsUi,
+    val rejectIfSharpnessBelow: Double,
+    val flagIfOverallBelow: Double,
+    val nearDuplicateSimilarityAbove: Double,
+    val maxLlmCandidatesPerGroup: Int = 5,
+    val autoDelete: Boolean = false,
+    val autoHideLowScore: Boolean,
+    val markBest: Boolean = true,
+    val keepRawPairs: Boolean = true,
+    val llmEnabled: Boolean,
+    val updatedAtMs: Long = 0,
+)
+
+data class ReviewQueueCount(
+    val queue: String,
+    val count: Int,
+)
+
+data class ReviewQueueSummary(
+    val projectId: String,
+    val strategyProfileId: String,
+    val totalUnits: Int,
+    val pendingCount: Int,
+    val unconfirmedBestCount: Int,
+    val needsReviewCount: Int,
+    val lowScoreCandidateCount: Int,
+    val nearDuplicateCount: Int,
+    val unsupportedCount: Int,
+    val userOverriddenCount: Int,
+    val queues: List<ReviewQueueCount>,
+) {
+    fun queueCount(queue: String): Int =
+        queues.firstOrNull { it.queue == queue }?.count ?: 0
+}
 
 data class InboxAssetQuery(
     val username: String? = null,
@@ -124,7 +225,20 @@ data class InboxAssetQuery(
     val remoteAddr: String? = null,
     val format: String? = null,
     val role: InboxAssetRole? = null,
+    val sort: PhotoSortMode = PhotoSortMode.LatestReceived,
+    val recommendationState: String? = null,
+    val scoreMin: Double? = null,
+    val scoreMax: Double? = null,
+    val analysisStatus: String? = null,
+    val reviewQueue: String? = null,
+    val strategyProfileId: String? = null,
 )
+
+enum class PhotoSortMode(val wireName: String, val label: String) {
+    LatestReceived("latest_received", "最新接收"),
+    Filename("filename", "文件名"),
+    GroupBestScore("group_best_score", "组内最高评分"),
+}
 
 enum class InboxAssetRole(val wireName: String) {
     Jpeg("jpeg"),
@@ -201,6 +315,47 @@ class PreviewCoreGateway : CoreGateway {
                     asset.originalPath.orEmpty().contains(query.originalPath, ignoreCase = true)
             }
             .filter { asset -> query.role == null || asset.matchesRole(query.role) }
+            .filter { asset ->
+                query.analysisStatus == null ||
+                    asset.quality?.analysisStatus.equals(query.analysisStatus, ignoreCase = true)
+            }
+            .filter { asset ->
+                query.recommendationState == null ||
+                    asset.burst?.recommendationStatus.equals(query.recommendationState, ignoreCase = true)
+            }
+            .filter { asset ->
+                query.scoreMin == null ||
+                    (asset.groupBestScore()?.let(::normalizedQueryScore) ?: -1.0) >= normalizedQueryScore(query.scoreMin)
+            }
+            .filter { asset ->
+                query.scoreMax == null ||
+                    (asset.groupBestScore()?.let(::normalizedQueryScore) ?: Double.POSITIVE_INFINITY) <= normalizedQueryScore(query.scoreMax)
+            }
+            .sortedWith(query.sort.previewComparator())
+            .let { assets ->
+                if (query.reviewQueue.isNullOrBlank()) {
+                    assets
+                } else {
+                    assets.collapsePreviewReviewUnits().asSequence()
+                }
+            }
+            .drop(offset.coerceAtLeast(0))
+            .take(limit.coerceAtLeast(0))
+            .toList()
+
+    override suspend fun loadSelects(
+        projectId: String?,
+        strategyProfileId: String?,
+        offset: Int,
+        limit: Int,
+    ): List<InboxAsset> =
+        dashboard.value.inbox
+            .asSequence()
+            .filter { asset ->
+                asset.burst?.recommendationStatus?.equals("accepted", ignoreCase = true) == true &&
+                    asset.isBestPreviewRepresentative()
+            }
+            .sortedWith(PhotoSortMode.GroupBestScore.previewComparator())
             .drop(offset.coerceAtLeast(0))
             .take(limit.coerceAtLeast(0))
             .toList()
@@ -326,6 +481,45 @@ class PreviewCoreGateway : CoreGateway {
     }
 
     override suspend fun retryFailedPublishes() = Unit
+
+    override suspend fun loadStrategyProfiles(): List<StrategyProfileUi> =
+        previewStrategyProfiles()
+
+    override suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi =
+        profile.copy(builtIn = false)
+
+    override suspend fun loadReviewQueueSummary(
+        projectId: String?,
+        strategyProfileId: String?,
+    ): ReviewQueueSummary =
+        emptyReviewQueueSummary(
+            projectId = projectId ?: projects.value.activeProjectId.orEmpty(),
+            strategyProfileId = strategyProfileId ?: "general",
+        )
+
+    override suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String?) = Unit
+
+    override suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String?) = Unit
+
+    override suspend fun restoreAutomaticRecommendation(
+        burstGroupId: String,
+        strategyProfileId: String?,
+    ) = Unit
+
+    override suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String?) = Unit
+
+    override suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String?) = Unit
+
+    override suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String?) = Unit
+
+    override suspend fun overrideRecommendedBest(
+        burstGroupId: String,
+        bestAssetGroupId: String,
+        strategyProfileId: String?,
+    ) = Unit
+
+    override suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String) = Unit
+    override suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String) = Unit
 }
 
 private fun InboxAsset.matchesRole(role: InboxAssetRole): Boolean = when (role) {
@@ -333,3 +527,83 @@ private fun InboxAsset.matchesRole(role: InboxAssetRole): Boolean = when (role) 
     InboxAssetRole.Raw -> hasRaw
     InboxAssetRole.Video -> hasVideo
 }
+
+private fun PhotoSortMode.previewComparator(): Comparator<InboxAsset> = when (this) {
+    PhotoSortMode.LatestReceived -> compareByDescending { it.receivedAt.toLongOrNull() ?: 0L }
+    PhotoSortMode.Filename -> compareBy { it.groupKey.ifBlank { it.displayPath } }
+    PhotoSortMode.GroupBestScore -> compareByDescending { asset ->
+        asset.groupBestScore()?.let(::normalizedQueryScore) ?: -1.0
+    }
+}
+
+private fun InboxAsset.groupBestScore(): Double? =
+    burst?.bestScore ?: quality?.overall
+
+private fun Sequence<InboxAsset>.collapsePreviewReviewUnits(): List<InboxAsset> =
+    toList()
+        .groupBy { asset -> asset.burst?.burstGroupId?.takeIf { it.isNotBlank() } ?: asset.id }
+        .values
+        .mapNotNull { assets ->
+            assets.firstOrNull { it.isBestPreviewRepresentative() }
+                ?: assets.maxByOrNull { it.groupBestScore()?.let(::normalizedQueryScore) ?: -1.0 }
+                ?: assets.firstOrNull()
+        }
+
+private fun InboxAsset.isBestPreviewRepresentative(): Boolean {
+    val bestId = burst?.bestAssetGroupId?.takeIf { it.isNotBlank() } ?: return false
+    return bestId == id || bestId == groupKey
+}
+
+private fun normalizedQueryScore(value: Double): Double =
+    if (value > 1.0) value / 100.0 else value
+
+internal fun emptyReviewQueueSummary(
+    projectId: String = "",
+    strategyProfileId: String = "general",
+): ReviewQueueSummary =
+    ReviewQueueSummary(
+        projectId = projectId,
+        strategyProfileId = strategyProfileId,
+        totalUnits = 0,
+        pendingCount = 0,
+        unconfirmedBestCount = 0,
+        needsReviewCount = 0,
+        lowScoreCandidateCount = 0,
+        nearDuplicateCount = 0,
+        unsupportedCount = 0,
+        userOverriddenCount = 0,
+        queues = listOf(
+            ReviewQueueCount("pending", 0),
+            ReviewQueueCount("unconfirmed_best", 0),
+            ReviewQueueCount("needs_review", 0),
+            ReviewQueueCount("low_score_candidates", 0),
+            ReviewQueueCount("near_duplicates", 0),
+            ReviewQueueCount("unsupported", 0),
+            ReviewQueueCount("user_overridden", 0),
+        ),
+    )
+
+private fun previewStrategyProfiles(): List<StrategyProfileUi> =
+    listOf(
+        StrategyProfileUi(
+            profileId = "general",
+            name = "General",
+            builtIn = true,
+            strategyVersion = "strategy-v1",
+            burstWindowMs = 1200,
+            minGroupSize = 2,
+            weights = StrategyWeightsUi(
+                sharpness = 0.40,
+                exposure = 0.22,
+                composition = 0.12,
+                highlightClippingPenalty = -0.14,
+                shadowClippingPenalty = -0.08,
+                diversity = 0.04,
+            ),
+            rejectIfSharpnessBelow = 0.25,
+            flagIfOverallBelow = 0.40,
+            nearDuplicateSimilarityAbove = 0.92,
+            autoHideLowScore = false,
+            llmEnabled = false,
+        ),
+    )

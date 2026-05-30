@@ -142,11 +142,12 @@ internal fun ProjectManagementScreen(
     val cleanProjectName = projectNameInput.trim()
     val actionsEnabled = actionInFlight == null
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         item {
             Column {
                 Text("项目管理", style = MaterialTheme.typography.headlineMedium)
@@ -160,10 +161,6 @@ internal fun ProjectManagementScreen(
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         item {
@@ -257,6 +254,10 @@ internal fun ProjectManagementScreen(
                     }
                 }
             }
+        }
+        }
+        actionInFlight?.let { action ->
+            ActionLoadingOverlay(action)
         }
     }
 }

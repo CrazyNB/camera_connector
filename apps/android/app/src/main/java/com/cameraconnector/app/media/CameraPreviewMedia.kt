@@ -7,9 +7,12 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.util.Locale
+import kotlin.math.roundToInt
 
 enum class PreviewQuality {
     Thumbnail,
@@ -106,6 +109,50 @@ fun loadPreviewBitmap(
             ) { File(location).inputStream() }
         }
     }.getOrNull()
+}
+
+fun loadPreviewSampleJson(
+    context: Context,
+    location: String?,
+    maxDimensionPx: Int = PREVIEW_SCORE_SAMPLE_MAX_DIMENSION_PX,
+): String {
+    val bitmap = loadPreviewBitmap(context, location, PreviewQuality.Thumbnail)
+        ?: return unsupportedPreviewSampleJson(location)
+    val targetMax = maxDimensionPx.coerceAtLeast(1)
+    val sourceWidth = bitmap.width.coerceAtLeast(1)
+    val sourceHeight = bitmap.height.coerceAtLeast(1)
+    val scale = (targetMax.toFloat() / maxOf(sourceWidth, sourceHeight).toFloat()).coerceAtMost(1f)
+    val sampleWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
+    val sampleHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
+    val luma = JSONArray()
+    for (y in 0 until sampleHeight) {
+        val sourceY = (y * sourceHeight / sampleHeight).coerceIn(0, sourceHeight - 1)
+        for (x in 0 until sampleWidth) {
+            val sourceX = (x * sourceWidth / sampleWidth).coerceIn(0, sourceWidth - 1)
+            luma.put(pixelLuma(bitmap.getPixel(sourceX, sourceY)))
+        }
+    }
+    return JSONObject()
+        .put("width", sampleWidth)
+        .put("height", sampleHeight)
+        .put("luma", luma)
+        .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        .toString()
+}
+
+private fun unsupportedPreviewSampleJson(location: String?): String =
+    JSONObject()
+        .put("width", 0)
+        .put("height", 0)
+        .put("luma", JSONArray())
+        .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        .toString()
+
+private fun pixelLuma(pixel: Int): Int {
+    val red = pixel shr 16 and 0xff
+    val green = pixel shr 8 and 0xff
+    val blue = pixel and 0xff
+    return (red * 0.2126 + green * 0.7152 + blue * 0.0722).roundToInt().coerceIn(0, 255)
 }
 
 fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
@@ -673,6 +720,7 @@ internal fun isJpegPreviewLocation(location: String?): Boolean {
 }
 
 private const val PREVIEW_MAX_DIMENSION_PX = 512
+private const val PREVIEW_SCORE_SAMPLE_MAX_DIMENSION_PX = 160
 private const val PREVIEW_DETAIL_MAX_DIMENSION_PX = 2400
 private const val PREVIEW_FULLSCREEN_MAX_DIMENSION_PX = 4096
 private const val THUMBNAIL_MEMORY_CACHE_MIN_BYTES = 16 * 1024 * 1024

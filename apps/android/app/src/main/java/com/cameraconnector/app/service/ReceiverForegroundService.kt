@@ -127,15 +127,38 @@ class ReceiverForegroundService : Service() {
         }
 
         val worker = createPublishWorker(core)
+        val storageGateway = AndroidStorageGateway(this)
+        val smartSelectionWorker = SmartSelectionAnalysisWorker(this, core) {
+            storageGateway.smartSelectionStrategyProfileId()
+        }
         publishWorkerJob = serviceScope.launch {
             while (isActive) {
                 runCatching {
                     worker.drainOnce()
                 }.onSuccess { result ->
+                    val analysis = runCatching { core.drainAnalysisJobs() }.getOrNull()
+                    val smartSelection = runCatching { smartSelectionWorker.drainOnce() }.getOrNull()
                     if (result.completedCount > 0 || result.failedCount > 0) {
                         Log.i(
                             LOG_TAG,
                             "publish queue drained completed=${result.completedCount} failed=${result.failedCount}",
+                        )
+                    }
+                    if (analysis?.optInt("completed_count")?.takeIf { it > 0 } != null) {
+                        Log.i(
+                            LOG_TAG,
+                            "analysis queue drained completed=${analysis.optInt("completed_count")}",
+                        )
+                    }
+                    if (
+                        smartSelection != null &&
+                        (smartSelection.scoredCount > 0 ||
+                            smartSelection.recommendedCount > 0 ||
+                            smartSelection.failedCount > 0)
+                    ) {
+                        Log.i(
+                            LOG_TAG,
+                            "smart selection drained scored=${smartSelection.scoredCount} recommended=${smartSelection.recommendedCount} failed=${smartSelection.failedCount}",
                         )
                     }
                 }.onFailure { error ->
@@ -151,11 +174,17 @@ class ReceiverForegroundService : Service() {
         val ownsCore = existingCore == null
         val core = existingCore ?: NativeMobileCore(configPath)
         runCatching {
-            createPublishWorker(core).drainOnce()
+            val result = createPublishWorker(core).drainOnce()
+            val analysis = core.drainAnalysisJobs()
+            val storageGateway = AndroidStorageGateway(this)
+            val smartSelection = SmartSelectionAnalysisWorker(this, core) {
+                storageGateway.smartSelectionStrategyProfileId()
+            }.drainOnce()
+            Triple(result, analysis, smartSelection)
         }.onSuccess { result ->
             Log.i(
                 LOG_TAG,
-                "publish retry drained completed=${result.completedCount} failed=${result.failedCount}",
+                "publish retry drained completed=${result.first.completedCount} failed=${result.first.failedCount} analysis=${result.second.optInt("completed_count")} smart_scored=${result.third.scoredCount} smart_recommended=${result.third.recommendedCount}",
             )
         }.onFailure { error ->
             Log.e(LOG_TAG, "publish retry drain failed", error)

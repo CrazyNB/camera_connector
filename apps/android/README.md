@@ -55,6 +55,12 @@ Run the Android build check from the repository root. It builds the Rust native 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
 ```
 
+To run Android unit tests with the same default JDK, SDK, and Gradle toolchain detection:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_unit_tests.ps1
+```
+
 To generate a debug APK that boots through the native gateway:
 
 ```powershell

@@ -69,6 +69,22 @@ char *camera_connector_mobile_core_project_dashboard_json(
     uint32_t limit
 );
 
+char *camera_connector_mobile_core_project_asset_group_page_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *query_json,
+    uint32_t offset,
+    uint32_t limit
+);
+
+char *camera_connector_mobile_core_project_selects_asset_group_page_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *strategy_profile_id,
+    uint32_t offset,
+    uint32_t limit
+);
+
 char *camera_connector_mobile_core_project_group_assets_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,
@@ -108,6 +124,94 @@ char *camera_connector_mobile_core_mark_publish_failed_json(
 char *camera_connector_mobile_core_release_failed_publish_retries_json(
     const CameraConnectorMobileCore *core,
     const char *project_id
+);
+
+char *camera_connector_mobile_core_drain_analysis_jobs_json(
+    const CameraConnectorMobileCore *core,
+    uint32_t limit
+);
+
+char *camera_connector_mobile_core_score_asset_group_preview_json(
+    const CameraConnectorMobileCore *core,
+    const char *asset_group_id,
+    const char *sample_json,
+    const char *scorer_version
+);
+
+char *camera_connector_mobile_core_recommend_burst_group_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_accept_recommended_best_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_mark_burst_needs_review_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_restore_automatic_recommendation_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_clear_recommendation_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_keep_all_candidates_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_hide_low_score_candidates_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_override_recommended_best_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *best_asset_group_id,
+    const char *strategy_profile_id
+);
+
+char *camera_connector_mobile_core_split_burst_member_json(
+    const CameraConnectorMobileCore *core,
+    const char *burst_group_id,
+    const char *member_group_id
+);
+
+char *camera_connector_mobile_core_merge_burst_member_json(
+    const CameraConnectorMobileCore *core,
+    const char *target_burst_group_id,
+    const char *member_group_id
+);
+
+char *camera_connector_mobile_core_strategy_profiles_json(
+    const CameraConnectorMobileCore *core
+);
+
+char *camera_connector_mobile_core_save_strategy_profile_json(
+    const CameraConnectorMobileCore *core,
+    const char *profile_json
+);
+
+char *camera_connector_mobile_core_review_queue_summary_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *strategy_profile_id
 );
 
 char *camera_connector_mobile_core_save_receiver_settings_json(

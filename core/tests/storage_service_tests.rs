@@ -684,7 +684,10 @@ fn service_project_dashboard_reports_configured_output_dir_when_receiver_stopped
         )
         .expect("project dashboard should build");
 
-    assert_eq!(dashboard.paths.output_dir.as_deref(), Some(output_dir.as_path()));
+    assert_eq!(
+        dashboard.paths.output_dir.as_deref(),
+        Some(output_dir.as_path())
+    );
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(output_dir);

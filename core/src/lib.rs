@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod error;
 pub mod model;
 pub mod push;
@@ -6,10 +7,17 @@ pub mod runtime;
 pub mod service;
 pub mod storage;
 
+pub use analysis::{
+    normalized_review_queue_key, recommend_from_scores, review_unit_flags, score_preview_sample,
+    AnalysisEntityType, AnalysisJob, AnalysisJobStatus, AnalysisJobType, BurstGroup,
+    NewAnalysisJob, PreviewSample, QualityAnalysisStatus, QualityScore, ReviewQueueCount,
+    ReviewQueueSummary, ReviewUnitFlags, SelectionRecommendation, SelectionRecommendationStatus,
+    SelectionSource, SignalScore, StrategyProfile, StrategyWeights,
+};
 pub use error::{ImporterError, Result};
 pub use model::{
     group_received_assets, AssetFormatRole, ImportSource, ObjectFormat, ReceivedAsset,
-    ReceivedAssetGroup,
+    ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetQualitySummary,
 };
 pub use push::{
     CameraConnectorConfig, FtpPushServer, PushProtocol, PushReceiverConfig, PushReceiverServer,
@@ -31,10 +39,10 @@ pub use runtime::{
     CameraConnectorRuntime, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus,
 };
 pub use service::{
-    AccountView, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    CameraConnectorDashboard, CameraConnectorService, ConnectedDeviceView, PublishQueueFailureView,
-    ReceiverConfigRequest, ReceiverSettingsUpdate, SystemPathsView, TransferQuery,
-    TransferRecordView, TransferSummary,
+    AccountView, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSort,
+    AssetGroupSummary, CameraConnectorDashboard, CameraConnectorService, ConnectedDeviceView,
+    PublishQueueFailureView, ReceiverConfigRequest, ReceiverSettingsUpdate, SystemPathsView,
+    TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
     LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectCapabilities,

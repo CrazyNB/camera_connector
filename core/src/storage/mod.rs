@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 mod pipeline;
@@ -7,10 +7,14 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    group_received_assets, AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSummary,
-    ConnectedDevice, ImportSource, ImporterError, ObjectFormat, PushProtocol, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase,
-    ReceiverRuntimeStatus, Result, StoredObjectLocation, TransferRecord, TransferStatus,
+    group_received_assets, normalized_review_queue_key, review_unit_flags, AnalysisEntityType,
+    AnalysisJob, AnalysisJobStatus, AnalysisJobType, AssetFacetCount, AssetGroupPage,
+    AssetGroupQuery, AssetGroupSort, AssetGroupSummary, BurstGroup, ConnectedDevice, ImportSource,
+    ImporterError, NewAnalysisJob, ObjectFormat, PushProtocol, QualityAnalysisStatus, QualityScore,
+    ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetQualitySummary,
+    ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, Result,
+    ReviewQueueSummary, SelectionRecommendation, SelectionRecommendationStatus, SelectionSource,
+    SignalScore, StoredObjectLocation, StrategyProfile, TransferRecord, TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
@@ -261,7 +265,10 @@ impl SqliteStore {
             std::fs::create_dir_all(parent)?;
         }
         let store = Self { db_path: path };
-        store.with_connection(|connection| initialize_schema(connection))?;
+        store.with_connection(|connection| {
+            initialize_schema(connection)?;
+            seed_builtin_strategy_profiles(connection)
+        })?;
         Ok(store)
     }
 
@@ -690,7 +697,15 @@ impl SqliteStore {
             ensure_project_is_active(&transaction, project_id)?;
             insert_transfer(&transaction, project_id, &record)?;
             if record.status == TransferStatus::Completed {
-                insert_asset_for_transfer(&transaction, project_id, &record)?;
+                if let Some(asset_group_id) =
+                    insert_asset_for_transfer(&transaction, project_id, &record)?
+                {
+                    enqueue_detect_burst_job_for_connection(
+                        &transaction,
+                        project_id,
+                        &asset_group_id,
+                    )?;
+                }
                 refresh_duplicate_info(&transaction, project_id)?;
             }
             transaction.commit()?;
@@ -714,11 +729,19 @@ impl SqliteStore {
                 if let Some(mut group) = group_received_assets(assets).into_iter().next() {
                     group.group_id = Some(stored_group.group_id);
                     if asset_group_matches(&group, &query) {
-                        groups.push(group);
+                        if let Some(group_id) = group.group_id.as_deref() {
+                            group.burst =
+                                burst_summary_for_asset_group(connection, project_id, group_id)?;
+                            group.quality = quality_summary_for_asset_group(connection, group_id)?;
+                        }
+                        if asset_group_matches_analysis(&group, &query) {
+                            groups.push(group);
+                        }
                     }
                 }
             }
 
+            sort_asset_groups_for_query(&mut groups, query.sort);
             let total_groups = groups.len();
             let summary = summarize_asset_groups(&groups);
             let page_groups = groups
@@ -863,6 +886,496 @@ impl SqliteStore {
 
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
         self.with_connection(|connection| stored_asset_groups_for_project(connection, project_id))
+    }
+
+    pub fn save_strategy_profile(&self, profile: StrategyProfile) -> Result<StrategyProfile> {
+        self.with_connection(|connection| save_strategy_profile_for_connection(connection, profile))
+    }
+
+    pub fn strategy_profiles(&self) -> Result<Vec<StrategyProfile>> {
+        self.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT profile_id, name, built_in, strategy_version, burst_window_ms,
+                        min_group_size, weights_json, thresholds_json, actions_json, llm_json,
+                        updated_at_ms
+                 FROM strategy_profiles
+                 ORDER BY built_in DESC,
+                    CASE profile_id
+                        WHEN 'general' THEN 0
+                        WHEN 'conservative' THEN 1
+                        WHEN 'portrait' THEN 2
+                        WHEN 'action' THEN 3
+                        WHEN 'landscape' THEN 4
+                        ELSE 100
+                    END,
+                    name ASC",
+            )?;
+            let rows = statement.query_map([], strategy_profile_from_row)?;
+            collect_rows(rows)
+        })
+    }
+
+    pub fn save_quality_score(&self, score: QualityScore) -> Result<QualityScore> {
+        self.with_connection(|connection| save_quality_score_for_connection(connection, score))
+    }
+
+    pub fn quality_score(
+        &self,
+        asset_group_id: &str,
+        scorer_version: &str,
+    ) -> Result<Option<QualityScore>> {
+        self.with_connection(|connection| {
+            quality_score_by_key(connection, asset_group_id, scorer_version)
+        })
+    }
+
+    pub fn save_selection_recommendation(
+        &self,
+        recommendation: SelectionRecommendation,
+    ) -> Result<SelectionRecommendation> {
+        self.with_connection(|connection| {
+            save_selection_recommendation_for_connection(connection, recommendation)
+        })
+    }
+
+    pub fn latest_selection_recommendation(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: &str,
+    ) -> Result<Option<SelectionRecommendation>> {
+        self.with_connection(|connection| {
+            latest_selection_recommendation_for_connection(
+                connection,
+                burst_group_id,
+                strategy_profile_id,
+            )
+        })
+    }
+
+    pub fn update_latest_selection_recommendation_status(
+        &self,
+        burst_group_id: &str,
+        strategy_profile_id: &str,
+        status: SelectionRecommendationStatus,
+    ) -> Result<SelectionRecommendation> {
+        self.with_connection(|connection| {
+            let recommendation = latest_selection_recommendation_for_connection(
+                connection,
+                burst_group_id,
+                strategy_profile_id,
+            )?
+            .ok_or_else(|| sqlite_data_error("selection recommendation not found"))?;
+            connection.execute(
+                "UPDATE selection_recommendations
+                 SET status = ?1, updated_at_ms = ?2
+                 WHERE recommendation_id = ?3",
+                params![
+                    status.as_str(),
+                    current_time_ms(),
+                    recommendation.recommendation_id
+                ],
+            )?;
+            selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
+                .ok_or_else(|| sqlite_data_error("selection recommendation not found"))
+        })
+    }
+
+    pub fn burst_group(&self, burst_group_id: &str) -> Result<Option<BurstGroup>> {
+        self.with_connection(|connection| burst_group_by_id(connection, burst_group_id))
+    }
+
+    pub fn burst_group_for_asset_group(&self, asset_group_id: &str) -> Result<Option<BurstGroup>> {
+        self.with_connection(|connection| {
+            let project_id = connection
+                .query_row(
+                    "SELECT project_id FROM asset_groups WHERE group_id = ?1",
+                    params![asset_group_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            project_id
+                .map(|project_id| {
+                    burst_group_for_member_group(connection, &project_id, asset_group_id)
+                })
+                .transpose()
+                .map(|value| value.flatten())
+                .map_err(Into::into)
+        })
+    }
+
+    pub fn split_burst_member(
+        &self,
+        burst_group_id: &str,
+        member_group_id: &str,
+    ) -> Result<Option<BurstGroup>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let result =
+                split_burst_member_for_connection(&transaction, burst_group_id, member_group_id)?;
+            transaction.commit()?;
+            Ok(result)
+        })
+    }
+
+    pub fn merge_burst_member(
+        &self,
+        target_burst_group_id: &str,
+        member_group_id: &str,
+    ) -> Result<Option<BurstGroup>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let result = merge_burst_member_for_connection(
+                &transaction,
+                target_burst_group_id,
+                member_group_id,
+            )?;
+            transaction.commit()?;
+            Ok(result)
+        })
+    }
+
+    pub fn quality_scores_for_asset_groups(
+        &self,
+        asset_group_ids: &[String],
+        scorer_version: &str,
+    ) -> Result<Vec<QualityScore>> {
+        self.with_connection(|connection| {
+            quality_scores_for_asset_group_ids(connection, asset_group_ids, scorer_version)
+        })
+    }
+
+    pub fn review_queue_summary(
+        &self,
+        project_id: &str,
+        strategy_profile_id: Option<&str>,
+    ) -> Result<ReviewQueueSummary> {
+        self.with_connection(|connection| {
+            let requested_profile_id = strategy_profile_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("general");
+            let profile = strategy_profile_by_id(connection, requested_profile_id)?
+                .unwrap_or_else(StrategyProfile::general);
+            let mut summary =
+                ReviewQueueSummary::empty(project_id.to_string(), profile.profile_id.clone());
+            let mut seen_burst_ids = BTreeSet::new();
+
+            for group in stored_asset_groups_for_project(connection, project_id)? {
+                if let Some(burst_summary) =
+                    burst_summary_for_asset_group(connection, project_id, &group.group_id)?
+                {
+                    if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
+                        continue;
+                    }
+                    let Some(burst) = burst_group_by_id(connection, &burst_summary.burst_group_id)?
+                    else {
+                        continue;
+                    };
+                    let scores = quality_scores_for_asset_group_ids(
+                        connection,
+                        &burst.member_group_ids,
+                        "local-v1",
+                    )?;
+                    let recommendation = latest_selection_recommendation_for_connection(
+                        connection,
+                        &burst.burst_group_id,
+                        &profile.profile_id,
+                    )?;
+                    summary.add_unit(
+                        recommendation.as_ref(),
+                        &scores,
+                        &profile,
+                        burst.user_override_state.as_deref(),
+                    );
+                } else {
+                    let scores = quality_scores_for_asset_group_ids(
+                        connection,
+                        std::slice::from_ref(&group.group_id),
+                        "local-v1",
+                    )?;
+                    summary.add_unit(None, &scores, &profile, None);
+                }
+            }
+
+            Ok(summary)
+        })
+    }
+
+    pub fn review_queue_asset_group_page(
+        &self,
+        project_id: &str,
+        query: AssetGroupQuery,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let requested_profile_id = query
+                .strategy_profile_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("general");
+            let profile = strategy_profile_by_id(connection, requested_profile_id)?
+                .unwrap_or_else(StrategyProfile::general);
+            let queue = normalized_review_queue_key(query.review_queue.as_deref().unwrap_or("all"));
+            let mut seen_burst_ids = BTreeSet::new();
+            let mut groups = Vec::new();
+
+            for stored_group in stored_asset_groups_for_project(connection, project_id)? {
+                if let Some(burst_summary) =
+                    burst_summary_for_asset_group(connection, project_id, &stored_group.group_id)?
+                {
+                    if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
+                        continue;
+                    }
+                    let Some(burst) = burst_group_by_id(connection, &burst_summary.burst_group_id)?
+                    else {
+                        continue;
+                    };
+                    let scores = quality_scores_for_asset_group_ids(
+                        connection,
+                        &burst.member_group_ids,
+                        "local-v1",
+                    )?;
+                    let recommendation = latest_selection_recommendation_for_connection(
+                        connection,
+                        &burst.burst_group_id,
+                        &profile.profile_id,
+                    )?;
+                    if !review_unit_flags(
+                        recommendation.as_ref(),
+                        &scores,
+                        &profile,
+                        burst.user_override_state.as_deref(),
+                    )
+                    .matches_queue(&queue)
+                    {
+                        continue;
+                    }
+                    let Some(representative_group_id) = representative_group_id_for_review_unit(
+                        &burst,
+                        recommendation.as_ref(),
+                        &scores,
+                    ) else {
+                        continue;
+                    };
+                    if let Some(group) = received_asset_group_for_group_id(
+                        connection,
+                        project_id,
+                        &representative_group_id,
+                    )? {
+                        if asset_group_matches(&group, &query)
+                            && asset_group_matches_analysis(&group, &query)
+                        {
+                            groups.push(group);
+                        }
+                    }
+                } else {
+                    let scores = quality_scores_for_asset_group_ids(
+                        connection,
+                        std::slice::from_ref(&stored_group.group_id),
+                        "local-v1",
+                    )?;
+                    if !review_unit_flags(None, &scores, &profile, None).matches_queue(&queue) {
+                        continue;
+                    }
+                    if let Some(group) = received_asset_group_for_group_id(
+                        connection,
+                        project_id,
+                        &stored_group.group_id,
+                    )? {
+                        if asset_group_matches(&group, &query)
+                            && asset_group_matches_analysis(&group, &query)
+                        {
+                            groups.push(group);
+                        }
+                    }
+                }
+            }
+
+            sort_asset_groups_for_query(&mut groups, AssetGroupSort::GroupBestScore);
+            let total_groups = groups.len();
+            let summary = summarize_asset_groups(&groups);
+            let page_groups = groups
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
+
+            Ok(AssetGroupPage {
+                groups: page_groups,
+                summary,
+                offset,
+                limit,
+                total_groups,
+                has_more: offset.saturating_add(limit) < total_groups,
+            })
+        })
+    }
+
+    pub fn selects_asset_group_page(
+        &self,
+        project_id: &str,
+        strategy_profile_id: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let requested_profile_id = strategy_profile_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("general");
+            let profile = strategy_profile_by_id(connection, requested_profile_id)?
+                .unwrap_or_else(StrategyProfile::general);
+            let mut seen_burst_ids = BTreeSet::new();
+            let mut groups = Vec::new();
+
+            for stored_group in stored_asset_groups_for_project(connection, project_id)? {
+                let Some(burst_summary) =
+                    burst_summary_for_asset_group(connection, project_id, &stored_group.group_id)?
+                else {
+                    continue;
+                };
+                if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
+                    continue;
+                }
+                let Some(recommendation) = latest_selection_recommendation_for_connection(
+                    connection,
+                    &burst_summary.burst_group_id,
+                    &profile.profile_id,
+                )?
+                else {
+                    continue;
+                };
+                if !matches!(
+                    recommendation.status,
+                    SelectionRecommendationStatus::Accepted
+                        | SelectionRecommendationStatus::UserOverridden
+                ) {
+                    continue;
+                }
+                let Some(best_group_id) = recommendation.best_asset_group_id.as_deref() else {
+                    continue;
+                };
+                if let Some(group) =
+                    received_asset_group_for_group_id(connection, project_id, best_group_id)?
+                {
+                    groups.push(group);
+                }
+            }
+
+            sort_asset_groups_for_query(&mut groups, AssetGroupSort::GroupBestScore);
+            let total_groups = groups.len();
+            let summary = summarize_asset_groups(&groups);
+            let page_groups = groups
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .collect::<Vec<_>>();
+
+            Ok(AssetGroupPage {
+                groups: page_groups,
+                summary,
+                offset,
+                limit,
+                total_groups,
+                has_more: offset.saturating_add(limit) < total_groups,
+            })
+        })
+    }
+
+    pub fn detect_bursts_for_asset_group(
+        &self,
+        project_id: &str,
+        asset_group_id: &str,
+        profile: &StrategyProfile,
+    ) -> Result<Vec<BurstGroup>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            ensure_project_exists(&transaction, project_id)?;
+            let groups = stored_asset_groups_for_project(&transaction, project_id)?;
+            if !groups.iter().any(|group| group.group_id == asset_group_id) {
+                transaction.commit()?;
+                return Ok(Vec::new());
+            }
+
+            let bursts =
+                rebuild_burst_groups_for_project(&transaction, project_id, groups, profile)?;
+            transaction.commit()?;
+            Ok(bursts
+                .into_iter()
+                .filter(|burst| {
+                    burst
+                        .member_group_ids
+                        .iter()
+                        .any(|member_group_id| member_group_id == asset_group_id)
+                })
+                .collect())
+        })
+    }
+
+    pub fn enqueue_analysis_job(&self, job: NewAnalysisJob) -> Result<AnalysisJob> {
+        self.with_connection(|connection| enqueue_analysis_job_for_connection(connection, job))
+    }
+
+    pub fn claim_analysis_jobs(&self, now_ms: i64, limit: usize) -> Result<Vec<AnalysisJob>> {
+        self.with_connection(|connection| {
+            claim_analysis_jobs_for_connection(connection, now_ms, limit)
+        })
+    }
+
+    pub fn complete_analysis_job(&self, job_id: &str) -> Result<()> {
+        self.with_connection(|connection| {
+            let changed = connection.execute(
+                "UPDATE background_jobs
+                 SET status = ?1, last_error = NULL, next_attempt_at_ms = NULL, updated_at_ms = ?2
+                 WHERE job_id = ?3",
+                params![
+                    AnalysisJobStatus::Completed.as_str(),
+                    current_time_ms(),
+                    job_id
+                ],
+            )?;
+            if changed == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "analysis job not found".to_string(),
+                )
+                .into());
+            }
+            Ok(())
+        })
+    }
+
+    pub fn fail_analysis_job(
+        &self,
+        job_id: &str,
+        error: &str,
+        next_attempt_at_ms: i64,
+    ) -> Result<()> {
+        self.with_connection(|connection| {
+            let changed = connection.execute(
+                "UPDATE background_jobs
+                 SET status = ?1, attempts = attempts + 1, last_error = ?2,
+                     next_attempt_at_ms = ?3, updated_at_ms = ?4
+                 WHERE job_id = ?5",
+                params![
+                    AnalysisJobStatus::Failed.as_str(),
+                    error,
+                    next_attempt_at_ms,
+                    current_time_ms(),
+                    job_id,
+                ],
+            )?;
+            if changed == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "analysis job not found".to_string(),
+                )
+                .into());
+            }
+            Ok(())
+        })
     }
 
     pub fn transfer_counts(&self, project_id: &str) -> Result<(usize, usize, usize)> {
@@ -1062,7 +1575,14 @@ impl SqliteStore {
                 error: None,
             };
             insert_transfer(&transaction, &item.project_id, &record)?;
-            insert_asset_for_transfer(&transaction, &item.project_id, &record)?;
+            let asset_group_id = insert_asset_for_transfer(&transaction, &item.project_id, &record)?;
+            if let Some(asset_group_id) = asset_group_id {
+                enqueue_detect_burst_job_for_connection(
+                    &transaction,
+                    &item.project_id,
+                    &asset_group_id,
+                )?;
+            }
             refresh_duplicate_info(&transaction, &item.project_id)?;
             let changed = transaction.execute(
                 "UPDATE publish_queue
@@ -1331,6 +1851,783 @@ fn stored_asset_group_by_id(
         .optional()
 }
 
+#[derive(Debug, Clone)]
+struct BurstCandidate {
+    group: StoredAssetGroup,
+    source_identity: Option<String>,
+    sequence_number: Option<i64>,
+    event_time_ms: Option<i64>,
+}
+
+fn rebuild_burst_groups_for_project(
+    connection: &Connection,
+    project_id: &str,
+    groups: Vec<StoredAssetGroup>,
+    profile: &StrategyProfile,
+) -> std::result::Result<Vec<BurstGroup>, rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM burst_group_members
+         WHERE burst_group_id IN (
+            SELECT burst_group_id FROM burst_groups WHERE project_id = ?1
+         )",
+        params![project_id],
+    )?;
+    connection.execute(
+        "DELETE FROM burst_groups WHERE project_id = ?1",
+        params![project_id],
+    )?;
+
+    let manual_merge_groups = manual_merge_member_groups(connection, project_id)?;
+    let manual_merge_member_group_ids = manual_merge_groups
+        .values()
+        .flat_map(|member_group_ids| member_group_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let split_excluded_member_group_ids =
+        manual_split_excluded_member_group_ids(connection, project_id)?;
+    let mut candidates = groups
+        .into_iter()
+        .filter(|group| group.has_jpeg || group.has_raw)
+        .filter(|group| !split_excluded_member_group_ids.contains(&group.group_id))
+        .filter(|group| !manual_merge_member_group_ids.contains(&group.group_id))
+        .map(|group| {
+            let source_identity =
+                burst_source_identity_for_group(connection, project_id, &group.group_id)?
+                    .or_else(|| group.source_identity.clone());
+            let sequence_number = trailing_sequence_number(&group.display_key);
+            let event_time_ms = group
+                .first_capture_at_ms
+                .or(group.first_received_at_ms)
+                .or(Some(group.created_at_ms));
+            Ok(BurstCandidate {
+                group,
+                source_identity,
+                sequence_number,
+                event_time_ms,
+            })
+        })
+        .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+
+    candidates.sort_by(|left, right| {
+        (
+            left.source_identity.as_deref().unwrap_or_default(),
+            left.group
+                .original_parent_path
+                .as_deref()
+                .unwrap_or_default(),
+            left.sequence_number.unwrap_or(i64::MAX),
+            left.event_time_ms.unwrap_or(i64::MAX),
+            left.group.display_key.as_str(),
+            left.group.group_id.as_str(),
+        )
+            .cmp(&(
+                right.source_identity.as_deref().unwrap_or_default(),
+                right
+                    .group
+                    .original_parent_path
+                    .as_deref()
+                    .unwrap_or_default(),
+                right.sequence_number.unwrap_or(i64::MAX),
+                right.event_time_ms.unwrap_or(i64::MAX),
+                right.group.display_key.as_str(),
+                right.group.group_id.as_str(),
+            ))
+    });
+
+    let mut runs: Vec<Vec<BurstCandidate>> = Vec::new();
+    let mut current_run: Vec<BurstCandidate> = Vec::new();
+    for candidate in candidates {
+        let continues_current_run = current_run
+            .last()
+            .map(|previous| burst_candidates_are_adjacent(previous, &candidate, profile))
+            .unwrap_or(false);
+        if !continues_current_run && !current_run.is_empty() {
+            runs.push(std::mem::take(&mut current_run));
+        }
+        current_run.push(candidate);
+    }
+    if !current_run.is_empty() {
+        runs.push(current_run);
+    }
+
+    let now = current_time_ms();
+    let mut bursts = Vec::new();
+    for run in runs {
+        if run.len() < profile.min_group_size {
+            continue;
+        }
+        let member_group_ids = run
+            .iter()
+            .map(|candidate| candidate.group.group_id.clone())
+            .collect::<Vec<_>>();
+        let stable_members = member_group_ids.join(",");
+        let burst_group_id = format!(
+            "burst-{}",
+            stable_key(&format!(
+                "{project_id}\t{}\t{stable_members}",
+                profile.strategy_version
+            ))
+        );
+        let started_at_ms = run
+            .iter()
+            .filter_map(|candidate| candidate.event_time_ms)
+            .min();
+        let ended_at_ms = run
+            .iter()
+            .filter_map(|candidate| candidate.event_time_ms)
+            .max();
+        let source_identity = run
+            .first()
+            .and_then(|candidate| candidate.source_identity.clone());
+        let burst = BurstGroup {
+            burst_group_id: burst_group_id.clone(),
+            project_id: project_id.to_string(),
+            source_identity,
+            started_at_ms,
+            ended_at_ms,
+            member_count: member_group_ids.len(),
+            member_group_ids,
+            grouping_version: 1,
+            recommendation_status: SelectionRecommendationStatus::Pending.as_str().to_string(),
+            user_override_state: None,
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        insert_burst_group(connection, &burst)?;
+        bursts.push(burst);
+    }
+
+    for (burst_group_id, member_group_ids) in manual_merge_groups {
+        let mut member_groups = Vec::new();
+        for member_group_id in member_group_ids {
+            if let Some(group) = stored_asset_group_by_id(connection, project_id, &member_group_id)?
+            {
+                member_groups.push(group);
+            }
+        }
+        member_groups.sort_by(|left, right| {
+            (
+                left.first_capture_at_ms
+                    .or(left.first_received_at_ms)
+                    .or(Some(left.created_at_ms)),
+                left.display_key.as_str(),
+                left.group_id.as_str(),
+            )
+                .cmp(&(
+                    right
+                        .first_capture_at_ms
+                        .or(right.first_received_at_ms)
+                        .or(Some(right.created_at_ms)),
+                    right.display_key.as_str(),
+                    right.group_id.as_str(),
+                ))
+        });
+        if member_groups.len() < profile.min_group_size {
+            continue;
+        }
+
+        let member_group_ids = member_groups
+            .iter()
+            .map(|group| group.group_id.clone())
+            .collect::<Vec<_>>();
+        let started_at_ms = member_groups
+            .iter()
+            .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+            .min();
+        let ended_at_ms = member_groups
+            .iter()
+            .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+            .max();
+        let source_identity = common_burst_source_identity(connection, project_id, &member_groups)?;
+        let burst = BurstGroup {
+            burst_group_id,
+            project_id: project_id.to_string(),
+            source_identity,
+            started_at_ms,
+            ended_at_ms,
+            member_count: member_group_ids.len(),
+            member_group_ids,
+            grouping_version: 1,
+            recommendation_status: SelectionRecommendationStatus::Pending.as_str().to_string(),
+            user_override_state: Some("merge".to_string()),
+            created_at_ms: now,
+            updated_at_ms: now,
+        };
+        insert_burst_group(connection, &burst)?;
+        bursts.push(burst);
+    }
+
+    Ok(bursts)
+}
+
+fn burst_source_identity_for_group(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Option<String>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT COALESCE(NULLIF(username, ''), NULLIF(source_identity, ''), NULLIF(remote_addr, ''))
+             FROM assets
+             WHERE project_id = ?1 AND group_id = ?2
+             ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC
+             LIMIT 1",
+            params![project_id, group_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map(|value| value.flatten())
+}
+
+fn common_burst_source_identity(
+    connection: &Connection,
+    project_id: &str,
+    groups: &[StoredAssetGroup],
+) -> std::result::Result<Option<String>, rusqlite::Error> {
+    let mut common: Option<String> = None;
+    for group in groups {
+        let source_identity =
+            burst_source_identity_for_group(connection, project_id, &group.group_id)?
+                .or_else(|| group.source_identity.clone());
+        match (&common, source_identity) {
+            (None, Some(value)) => common = Some(value),
+            (Some(left), Some(right)) if left == &right => {}
+            (Some(_), Some(_)) => return Ok(None),
+            (_, None) => {}
+        }
+    }
+    Ok(common)
+}
+
+fn manual_split_excluded_member_group_ids(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<BTreeSet<String>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT member_group_id
+         FROM burst_member_overrides
+         WHERE project_id = ?1 AND action = 'split_exclude'",
+    )?;
+    let rows = statement.query_map(params![project_id], |row| row.get::<_, String>(0))?;
+    collect_rows(rows).map(|values| values.into_iter().collect())
+}
+
+fn manual_merge_member_groups(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<BTreeMap<String, Vec<String>>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT override_group_id, member_group_id
+         FROM burst_member_overrides
+         WHERE project_id = ?1
+           AND action = 'merge_include'
+           AND override_group_id IS NOT NULL
+         ORDER BY override_group_id ASC, member_group_id ASC",
+    )?;
+    let rows = statement.query_map(params![project_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut groups = BTreeMap::new();
+    for row in rows {
+        let (override_group_id, member_group_id) = row?;
+        groups
+            .entry(override_group_id)
+            .or_insert_with(Vec::new)
+            .push(member_group_id);
+    }
+    Ok(groups)
+}
+
+fn burst_candidates_are_adjacent(
+    previous: &BurstCandidate,
+    candidate: &BurstCandidate,
+    profile: &StrategyProfile,
+) -> bool {
+    if previous.source_identity != candidate.source_identity
+        || previous.group.original_parent_path != candidate.group.original_parent_path
+    {
+        return false;
+    }
+
+    let sequence_is_adjacent = previous
+        .sequence_number
+        .zip(candidate.sequence_number)
+        .map(|(left, right)| right > left && right - left <= 1)
+        .unwrap_or(false);
+    let time_is_adjacent = previous
+        .event_time_ms
+        .zip(candidate.event_time_ms)
+        .map(|(left, right)| right >= left && right - left <= profile.burst_window_ms)
+        .unwrap_or(false);
+
+    sequence_is_adjacent || time_is_adjacent
+}
+
+fn insert_burst_group(
+    connection: &Connection,
+    burst: &BurstGroup,
+) -> std::result::Result<(), rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO burst_groups (
+            burst_group_id, project_id, source_identity, started_at_ms, ended_at_ms,
+            member_count, grouping_version, recommendation_status, user_override_state,
+            created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            burst.burst_group_id,
+            burst.project_id,
+            burst.source_identity,
+            burst.started_at_ms,
+            burst.ended_at_ms,
+            burst.member_count as i64,
+            burst.grouping_version,
+            burst.recommendation_status,
+            burst.user_override_state,
+            burst.created_at_ms,
+            burst.updated_at_ms,
+        ],
+    )?;
+
+    for (index, member_group_id) in burst.member_group_ids.iter().enumerate() {
+        connection.execute(
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
+             VALUES (?1, ?2, ?3)",
+            params![burst.burst_group_id, member_group_id, index as i64],
+        )?;
+    }
+    Ok(())
+}
+
+fn burst_summary_for_asset_group(
+    connection: &Connection,
+    project_id: &str,
+    asset_group_id: &str,
+) -> std::result::Result<Option<ReceivedAssetBurstSummary>, rusqlite::Error> {
+    let summary = connection
+        .query_row(
+            "SELECT bg.burst_group_id, bg.member_count, bgm.member_rank,
+                    COALESCE((
+                        SELECT recommendation.status
+                        FROM selection_recommendations recommendation
+                        WHERE recommendation.burst_group_id = bg.burst_group_id
+                        ORDER BY recommendation.updated_at_ms DESC, recommendation.recommendation_id DESC
+                        LIMIT 1
+                    ), bg.recommendation_status) AS recommendation_status,
+                    (
+                        SELECT recommendation.best_asset_group_id
+                        FROM selection_recommendations recommendation
+                        WHERE recommendation.burst_group_id = bg.burst_group_id
+                        ORDER BY recommendation.updated_at_ms DESC, recommendation.recommendation_id DESC
+                        LIMIT 1
+                    ) AS best_asset_group_id
+             FROM burst_group_members bgm
+             JOIN burst_groups bg ON bg.burst_group_id = bgm.burst_group_id
+             WHERE bg.project_id = ?1 AND bgm.member_group_id = ?2
+             ORDER BY bg.updated_at_ms DESC, bg.burst_group_id DESC
+             LIMIT 1",
+            params![project_id, asset_group_id],
+            |row| {
+                Ok(ReceivedAssetBurstSummary {
+                    burst_group_id: row.get(0)?,
+                    member_count: row.get::<_, i64>(1)? as usize,
+                    member_rank: row.get::<_, i64>(2)? as usize,
+                    recommendation_status: row.get(3)?,
+                    best_asset_group_id: row.get(4)?,
+                    best_score: None,
+                })
+            },
+        )
+        .optional()?;
+    summary
+        .map(|mut summary| {
+            summary.best_score =
+                burst_best_score_for_burst_group(connection, &summary.burst_group_id)?;
+            Ok(summary)
+        })
+        .transpose()
+}
+
+fn burst_best_score_for_burst_group(
+    connection: &Connection,
+    burst_group_id: &str,
+) -> std::result::Result<Option<f64>, rusqlite::Error> {
+    connection.query_row(
+        "SELECT MAX(qs.overall)
+         FROM quality_scores qs
+         JOIN burst_group_members bgm ON bgm.member_group_id = qs.asset_group_id
+         WHERE bgm.burst_group_id = ?1
+           AND qs.analysis_status = 'ready'
+           AND qs.analyzed_at_ms = (
+               SELECT MAX(latest.analyzed_at_ms)
+               FROM quality_scores latest
+               WHERE latest.asset_group_id = qs.asset_group_id
+           )",
+        params![burst_group_id],
+        |row| row.get::<_, Option<f64>>(0),
+    )
+}
+
+fn burst_group_by_id(
+    connection: &Connection,
+    burst_group_id: &str,
+) -> std::result::Result<Option<BurstGroup>, rusqlite::Error> {
+    let Some(mut burst) = connection
+        .query_row(
+            "SELECT burst_group_id, project_id, source_identity, started_at_ms, ended_at_ms,
+                    member_count, grouping_version, recommendation_status, user_override_state,
+                    created_at_ms, updated_at_ms
+             FROM burst_groups
+             WHERE burst_group_id = ?1",
+            params![burst_group_id],
+            |row| {
+                Ok(BurstGroup {
+                    burst_group_id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    source_identity: row.get(2)?,
+                    started_at_ms: row.get(3)?,
+                    ended_at_ms: row.get(4)?,
+                    member_count: row.get::<_, i64>(5)? as usize,
+                    member_group_ids: Vec::new(),
+                    grouping_version: row.get(6)?,
+                    recommendation_status: row.get(7)?,
+                    user_override_state: row.get(8)?,
+                    created_at_ms: row.get(9)?,
+                    updated_at_ms: row.get(10)?,
+                })
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+
+    let mut statement = connection.prepare(
+        "SELECT member_group_id
+         FROM burst_group_members
+         WHERE burst_group_id = ?1
+         ORDER BY member_rank ASC, member_group_id ASC",
+    )?;
+    let rows = statement.query_map(params![burst_group_id], |row| row.get(0))?;
+    burst.member_group_ids = collect_rows(rows)?;
+    burst.member_count = burst.member_group_ids.len();
+    Ok(Some(burst))
+}
+
+fn split_burst_member_for_connection(
+    connection: &Connection,
+    burst_group_id: &str,
+    member_group_id: &str,
+) -> std::result::Result<Option<BurstGroup>, rusqlite::Error> {
+    let Some(burst) = burst_group_by_id(connection, burst_group_id)? else {
+        return Ok(None);
+    };
+    let member_group_id = member_group_id.trim();
+    if member_group_id.is_empty() {
+        return Err(sqlite_data_error("member group id cannot be empty"));
+    }
+    if !burst
+        .member_group_ids
+        .iter()
+        .any(|group_id| group_id == member_group_id)
+    {
+        return Err(sqlite_data_error("member group is not in burst group"));
+    }
+
+    let remaining_member_ids = burst
+        .member_group_ids
+        .iter()
+        .filter(|group_id| group_id.as_str() != member_group_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let now = current_time_ms();
+
+    connection.execute(
+        "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
+        params![burst_group_id],
+    )?;
+    connection.execute(
+        "INSERT OR REPLACE INTO burst_member_overrides (
+            project_id, member_group_id, action, override_group_id, created_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            burst.project_id,
+            member_group_id,
+            "split_exclude",
+            None::<String>,
+            now
+        ],
+    )?;
+
+    if remaining_member_ids.len() < 2 {
+        connection.execute(
+            "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
+            params![burst_group_id],
+        )?;
+        connection.execute(
+            "DELETE FROM burst_groups WHERE burst_group_id = ?1",
+            params![burst_group_id],
+        )?;
+        return Ok(None);
+    }
+
+    connection.execute(
+        "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
+        params![burst_group_id],
+    )?;
+    for (index, member_group_id) in remaining_member_ids.iter().enumerate() {
+        connection.execute(
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
+             VALUES (?1, ?2, ?3)",
+            params![burst_group_id, member_group_id, index as i64],
+        )?;
+    }
+    connection.execute(
+        "UPDATE burst_groups
+         SET member_count = ?1,
+             grouping_version = grouping_version + 1,
+             recommendation_status = ?2,
+             user_override_state = ?3,
+             updated_at_ms = ?4
+         WHERE burst_group_id = ?5",
+        params![
+            remaining_member_ids.len() as i64,
+            SelectionRecommendationStatus::Pending.as_str(),
+            "split",
+            now,
+            burst_group_id,
+        ],
+    )?;
+
+    burst_group_by_id(connection, burst_group_id)
+}
+
+fn merge_burst_member_for_connection(
+    connection: &Connection,
+    target_burst_group_id: &str,
+    member_group_id: &str,
+) -> std::result::Result<Option<BurstGroup>, rusqlite::Error> {
+    let Some(target_burst) = burst_group_by_id(connection, target_burst_group_id)? else {
+        return Ok(None);
+    };
+    let member_group_id = member_group_id.trim();
+    if member_group_id.is_empty() {
+        return Err(sqlite_data_error("member group id cannot be empty"));
+    }
+    if target_burst
+        .member_group_ids
+        .iter()
+        .any(|group_id| group_id == member_group_id)
+    {
+        return Ok(Some(target_burst));
+    }
+    if stored_asset_group_by_id(connection, &target_burst.project_id, member_group_id)?.is_none() {
+        return Err(sqlite_data_error(
+            "member group not found in target project",
+        ));
+    }
+
+    let source_burst =
+        burst_group_for_member_group(connection, &target_burst.project_id, member_group_id)?;
+    if source_burst
+        .as_ref()
+        .is_some_and(|burst| burst.burst_group_id == target_burst.burst_group_id)
+    {
+        return Ok(Some(target_burst));
+    }
+
+    let mut merged_member_ids = Vec::new();
+    for group_id in target_burst.member_group_ids.iter() {
+        push_unique_string(&mut merged_member_ids, group_id.clone());
+    }
+    if let Some(source_burst) = source_burst.as_ref() {
+        for group_id in source_burst.member_group_ids.iter() {
+            push_unique_string(&mut merged_member_ids, group_id.clone());
+        }
+    } else {
+        push_unique_string(&mut merged_member_ids, member_group_id.to_string());
+    }
+
+    let now = current_time_ms();
+    connection.execute(
+        "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
+        params![target_burst.burst_group_id],
+    )?;
+    if let Some(source_burst) = source_burst.as_ref() {
+        connection.execute(
+            "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
+            params![source_burst.burst_group_id],
+        )?;
+        connection.execute(
+            "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
+            params![source_burst.burst_group_id],
+        )?;
+        connection.execute(
+            "DELETE FROM burst_groups WHERE burst_group_id = ?1",
+            params![source_burst.burst_group_id],
+        )?;
+    }
+
+    connection.execute(
+        "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
+        params![target_burst.burst_group_id],
+    )?;
+    for (index, member_group_id) in merged_member_ids.iter().enumerate() {
+        connection.execute(
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
+             VALUES (?1, ?2, ?3)",
+            params![target_burst.burst_group_id, member_group_id, index as i64],
+        )?;
+    }
+
+    let mut member_groups = Vec::new();
+    for member_group_id in merged_member_ids.iter() {
+        if let Some(group) =
+            stored_asset_group_by_id(connection, &target_burst.project_id, member_group_id)?
+        {
+            member_groups.push(group);
+        }
+        connection.execute(
+            "DELETE FROM burst_member_overrides
+             WHERE project_id = ?1 AND member_group_id = ?2
+               AND action IN ('split_exclude', 'merge_include')",
+            params![target_burst.project_id, member_group_id],
+        )?;
+        connection.execute(
+            "INSERT INTO burst_member_overrides (
+                project_id, member_group_id, action, override_group_id, created_at_ms
+             ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                target_burst.project_id,
+                member_group_id,
+                "merge_include",
+                target_burst.burst_group_id,
+                now,
+            ],
+        )?;
+    }
+
+    let started_at_ms = member_groups
+        .iter()
+        .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+        .min();
+    let ended_at_ms = member_groups
+        .iter()
+        .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+        .max();
+    let source_identity =
+        common_burst_source_identity(connection, &target_burst.project_id, &member_groups)?;
+    connection.execute(
+        "UPDATE burst_groups
+         SET source_identity = ?1,
+             started_at_ms = ?2,
+             ended_at_ms = ?3,
+             member_count = ?4,
+             grouping_version = grouping_version + 1,
+             recommendation_status = ?5,
+             user_override_state = ?6,
+             updated_at_ms = ?7
+         WHERE burst_group_id = ?8",
+        params![
+            source_identity,
+            started_at_ms,
+            ended_at_ms,
+            merged_member_ids.len() as i64,
+            SelectionRecommendationStatus::Pending.as_str(),
+            "merge",
+            now,
+            target_burst.burst_group_id,
+        ],
+    )?;
+
+    burst_group_by_id(connection, &target_burst.burst_group_id)
+}
+
+fn burst_group_for_member_group(
+    connection: &Connection,
+    project_id: &str,
+    member_group_id: &str,
+) -> std::result::Result<Option<BurstGroup>, rusqlite::Error> {
+    let burst_group_id = connection
+        .query_row(
+            "SELECT bg.burst_group_id
+             FROM burst_group_members bgm
+             JOIN burst_groups bg ON bg.burst_group_id = bgm.burst_group_id
+             WHERE bg.project_id = ?1 AND bgm.member_group_id = ?2
+             ORDER BY bg.updated_at_ms DESC, bg.burst_group_id DESC
+             LIMIT 1",
+            params![project_id, member_group_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    burst_group_id
+        .map(|burst_group_id| burst_group_by_id(connection, &burst_group_id))
+        .transpose()
+        .map(|value| value.flatten())
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn quality_summary_for_asset_group(
+    connection: &Connection,
+    asset_group_id: &str,
+) -> std::result::Result<Option<ReceivedAssetQualitySummary>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
+                    capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
+                    shadow_clipping_json, composition_json, composition_confidence,
+                    similarity_cluster_id, overall, reasons_json, analyzed_at_ms
+             FROM quality_scores
+             WHERE asset_group_id = ?1
+             ORDER BY analyzed_at_ms DESC, scorer_version DESC
+             LIMIT 1",
+            params![asset_group_id],
+            quality_score_from_row,
+        )
+        .optional()
+        .map(|score| {
+            score.map(|score| ReceivedAssetQualitySummary {
+                overall: score.overall,
+                analysis_status: score.analysis_status.as_str().to_string(),
+                scorer_version: score.scorer_version,
+                primary_reason: score.reasons.first().cloned(),
+                sharpness: available_signal_value(score.sharpness),
+                exposure: available_signal_value(score.exposure),
+                highlight_clipping_penalty: available_signal_value(
+                    score.highlight_clipping_penalty,
+                ),
+                shadow_clipping_penalty: available_signal_value(score.shadow_clipping_penalty),
+                composition: available_signal_value(score.composition),
+                composition_confidence: Some(score.composition_confidence),
+                analyzed_at_ms: score.analyzed_at_ms,
+            })
+        })
+}
+
+fn available_signal_value(score: SignalScore) -> Option<f64> {
+    score.available.then_some(score.value)
+}
+
+fn trailing_sequence_number(value: &str) -> Option<i64> {
+    let reversed_digits = value
+        .chars()
+        .rev()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if reversed_digits.is_empty() {
+        return None;
+    }
+    reversed_digits
+        .chars()
+        .rev()
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
 fn transfer_ids_for_asset_group(
     connection: &Connection,
     project_id: &str,
@@ -1363,6 +2660,21 @@ fn received_assets_for_group(
     )?;
     let rows = statement.query_map(params![project_id, group_id], received_asset_from_row)?;
     collect_rows(rows)
+}
+
+fn received_asset_group_for_group_id(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Option<ReceivedAssetGroup>, rusqlite::Error> {
+    let assets = received_assets_for_group(connection, project_id, group_id)?;
+    let Some(mut group) = group_received_assets(assets).into_iter().next() else {
+        return Ok(None);
+    };
+    group.group_id = Some(group_id.to_string());
+    group.burst = burst_summary_for_asset_group(connection, project_id, group_id)?;
+    group.quality = quality_summary_for_asset_group(connection, group_id)?;
+    Ok(Some(group))
 }
 
 fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlite::Error> {
@@ -1509,14 +2821,130 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             updated_at_ms INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS background_jobs (
+            job_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            job_type TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            dedupe_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 0,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at_ms INTEGER,
+            last_error TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS burst_groups (
+            burst_group_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            source_identity TEXT,
+            started_at_ms INTEGER,
+            ended_at_ms INTEGER,
+            member_count INTEGER NOT NULL,
+            grouping_version INTEGER NOT NULL,
+            recommendation_status TEXT NOT NULL,
+            user_override_state TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS burst_group_members (
+            burst_group_id TEXT NOT NULL REFERENCES burst_groups(burst_group_id) ON DELETE CASCADE,
+            member_group_id TEXT NOT NULL REFERENCES asset_groups(group_id),
+            member_rank INTEGER NOT NULL,
+            PRIMARY KEY(burst_group_id, member_group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS burst_member_overrides (
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            member_group_id TEXT NOT NULL REFERENCES asset_groups(group_id),
+            action TEXT NOT NULL,
+            override_group_id TEXT,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, member_group_id, action)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy_profiles (
+            profile_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            built_in INTEGER NOT NULL DEFAULT 0,
+            strategy_version TEXT NOT NULL,
+            burst_window_ms INTEGER NOT NULL,
+            min_group_size INTEGER NOT NULL,
+            weights_json TEXT NOT NULL,
+            thresholds_json TEXT NOT NULL,
+            actions_json TEXT NOT NULL,
+            llm_json TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS quality_scores (
+            asset_group_id TEXT NOT NULL,
+            scorer_version TEXT NOT NULL,
+            preview_source TEXT,
+            analysis_status TEXT NOT NULL,
+            exif_status TEXT,
+            capture_time_ms INTEGER,
+            sharpness_json TEXT NOT NULL,
+            exposure_json TEXT NOT NULL,
+            highlight_clipping_json TEXT NOT NULL,
+            shadow_clipping_json TEXT NOT NULL,
+            composition_json TEXT NOT NULL,
+            composition_confidence REAL NOT NULL,
+            similarity_cluster_id TEXT,
+            overall REAL NOT NULL,
+            reasons_json TEXT NOT NULL,
+            analyzed_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(asset_group_id, scorer_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS selection_recommendations (
+            recommendation_id TEXT PRIMARY KEY,
+            burst_group_id TEXT NOT NULL,
+            strategy_profile_id TEXT NOT NULL,
+            scorer_version TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            grouping_version INTEGER NOT NULL,
+            best_asset_group_id TEXT,
+            alternate_asset_group_ids_json TEXT NOT NULL,
+            low_score_asset_group_ids_json TEXT NOT NULL,
+            near_duplicate_asset_group_ids_json TEXT NOT NULL,
+            source TEXT NOT NULL,
+            status TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            reasons_json TEXT NOT NULL,
+            llm_review_id TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_assets_project_group ON assets(project_id, group_id);
         CREATE INDEX IF NOT EXISTS idx_asset_groups_project ON asset_groups(project_id, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_connected_devices_username ON connected_devices(username);
         CREATE INDEX IF NOT EXISTS idx_connected_devices_sort ON connected_devices(online, last_seen_at_ms);
         CREATE INDEX IF NOT EXISTS idx_receiver_accounts_enabled ON receiver_accounts(enabled, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_publish_queue_state ON publish_queue(state, created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_background_jobs_claim ON background_jobs(status, priority, next_attempt_at_ms, created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_background_jobs_dedupe ON background_jobs(dedupe_key);
+        CREATE INDEX IF NOT EXISTS idx_burst_groups_project ON burst_groups(project_id, updated_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_burst_members_group ON burst_group_members(member_group_id, burst_group_id);
+        CREATE INDEX IF NOT EXISTS idx_burst_member_overrides_project ON burst_member_overrides(project_id, action, member_group_id);
+        CREATE INDEX IF NOT EXISTS idx_quality_scores_group ON quality_scores(asset_group_id, scorer_version);
+        CREATE INDEX IF NOT EXISTS idx_recommendations_group ON selection_recommendations(burst_group_id, strategy_profile_id, status);
         ",
     )
+}
+
+fn seed_builtin_strategy_profiles(
+    connection: &Connection,
+) -> std::result::Result<(), rusqlite::Error> {
+    for profile in StrategyProfile::built_in_profiles() {
+        save_strategy_profile_for_connection(connection, profile)?;
+    }
+    Ok(())
 }
 
 fn receiver_account_by_username(
@@ -1782,10 +3210,10 @@ fn insert_asset_for_transfer(
     connection: &Connection,
     project_id: &str,
     record: &TransferRecord,
-) -> std::result::Result<(), rusqlite::Error> {
+) -> std::result::Result<Option<String>, rusqlite::Error> {
     let format = ObjectFormat::from_filename(&record.final_filename);
     if !format.is_supported_media() {
-        return Ok(());
+        return Ok(None);
     }
 
     let now = current_time_ms();
@@ -1859,7 +3287,7 @@ fn insert_asset_for_transfer(
         ],
     )?;
     refresh_group_rollup(connection, &group_id)?;
-    Ok(())
+    Ok(Some(group_id))
 }
 
 fn refresh_group_rollup(
@@ -2091,6 +3519,521 @@ fn publish_item_from_row(row: &Row<'_>) -> std::result::Result<PublishQueueItem,
     })
 }
 
+fn save_strategy_profile_for_connection(
+    connection: &Connection,
+    profile: StrategyProfile,
+) -> std::result::Result<StrategyProfile, rusqlite::Error> {
+    let updated_at_ms = if profile.updated_at_ms == 0 {
+        current_time_ms()
+    } else {
+        profile.updated_at_ms
+    };
+    let thresholds_json = serde_json::to_string(&serde_json::json!({
+        "reject_if_sharpness_below": profile.reject_if_sharpness_below,
+        "flag_if_overall_below": profile.flag_if_overall_below,
+        "near_duplicate_similarity_above": profile.near_duplicate_similarity_above,
+        "max_llm_candidates_per_group": profile.max_llm_candidates_per_group,
+    }))
+    .map_err(|error| sqlite_data_error(error.to_string()))?;
+    let actions_json = serde_json::to_string(&serde_json::json!({
+        "auto_delete": profile.auto_delete,
+        "auto_hide_low_score": profile.auto_hide_low_score,
+        "mark_best": profile.mark_best,
+        "keep_raw_pairs": profile.keep_raw_pairs,
+    }))
+    .map_err(|error| sqlite_data_error(error.to_string()))?;
+    let llm_json = serde_json::to_string(&serde_json::json!({
+        "llm_enabled": profile.llm_enabled,
+    }))
+    .map_err(|error| sqlite_data_error(error.to_string()))?;
+    connection.execute(
+        "INSERT INTO strategy_profiles (
+            profile_id, name, built_in, strategy_version, burst_window_ms, min_group_size,
+            weights_json, thresholds_json, actions_json, llm_json, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(profile_id) DO UPDATE SET
+            name = excluded.name,
+            built_in = excluded.built_in,
+            strategy_version = excluded.strategy_version,
+            burst_window_ms = excluded.burst_window_ms,
+            min_group_size = excluded.min_group_size,
+            weights_json = excluded.weights_json,
+            thresholds_json = excluded.thresholds_json,
+            actions_json = excluded.actions_json,
+            llm_json = excluded.llm_json,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            profile.profile_id,
+            profile.name,
+            profile.built_in,
+            profile.strategy_version,
+            profile.burst_window_ms,
+            profile.min_group_size as i64,
+            serde_json::to_string(&profile.weights)
+                .map_err(|error| sqlite_data_error(error.to_string()))?,
+            thresholds_json,
+            actions_json,
+            llm_json,
+            updated_at_ms,
+        ],
+    )?;
+    strategy_profile_by_id(connection, &profile.profile_id)?
+        .ok_or_else(|| sqlite_data_error("strategy profile not found"))
+}
+
+fn strategy_profile_by_id(
+    connection: &Connection,
+    profile_id: &str,
+) -> std::result::Result<Option<StrategyProfile>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT profile_id, name, built_in, strategy_version, burst_window_ms,
+                    min_group_size, weights_json, thresholds_json, actions_json, llm_json,
+                    updated_at_ms
+             FROM strategy_profiles
+             WHERE profile_id = ?1",
+            params![profile_id],
+            strategy_profile_from_row,
+        )
+        .optional()
+}
+
+fn strategy_profile_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<StrategyProfile, rusqlite::Error> {
+    let weights_json: String = row.get(6)?;
+    let thresholds_json: String = row.get(7)?;
+    let actions_json: String = row.get(8)?;
+    let llm_json: String = row.get(9)?;
+    let thresholds: serde_json::Value = serde_json::from_str(&thresholds_json)
+        .map_err(|error| sqlite_data_error(error.to_string()))?;
+    let actions: serde_json::Value = serde_json::from_str(&actions_json)
+        .map_err(|error| sqlite_data_error(error.to_string()))?;
+    let llm: serde_json::Value =
+        serde_json::from_str(&llm_json).map_err(|error| sqlite_data_error(error.to_string()))?;
+    Ok(StrategyProfile {
+        profile_id: row.get(0)?,
+        name: row.get(1)?,
+        built_in: row.get::<_, bool>(2)?,
+        strategy_version: row.get(3)?,
+        burst_window_ms: row.get(4)?,
+        min_group_size: row.get::<_, i64>(5)? as usize,
+        weights: serde_json::from_str(&weights_json)
+            .map_err(|error| sqlite_data_error(error.to_string()))?,
+        reject_if_sharpness_below: thresholds
+            .get("reject_if_sharpness_below")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.25),
+        flag_if_overall_below: thresholds
+            .get("flag_if_overall_below")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.4),
+        near_duplicate_similarity_above: thresholds
+            .get("near_duplicate_similarity_above")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.92),
+        max_llm_candidates_per_group: thresholds
+            .get("max_llm_candidates_per_group")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(5) as usize,
+        auto_delete: actions
+            .get("auto_delete")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        auto_hide_low_score: actions
+            .get("auto_hide_low_score")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        mark_best: actions
+            .get("mark_best")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        keep_raw_pairs: actions
+            .get("keep_raw_pairs")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        llm_enabled: llm
+            .get("llm_enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        updated_at_ms: row.get(10)?,
+    })
+}
+
+fn save_quality_score_for_connection(
+    connection: &Connection,
+    score: QualityScore,
+) -> std::result::Result<QualityScore, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO quality_scores (
+            asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
+            capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
+            shadow_clipping_json, composition_json, composition_confidence,
+            similarity_cluster_id, overall, reasons_json, analyzed_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+         ON CONFLICT(asset_group_id, scorer_version) DO UPDATE SET
+            preview_source = excluded.preview_source,
+            analysis_status = excluded.analysis_status,
+            exif_status = excluded.exif_status,
+            capture_time_ms = excluded.capture_time_ms,
+            sharpness_json = excluded.sharpness_json,
+            exposure_json = excluded.exposure_json,
+            highlight_clipping_json = excluded.highlight_clipping_json,
+            shadow_clipping_json = excluded.shadow_clipping_json,
+            composition_json = excluded.composition_json,
+            composition_confidence = excluded.composition_confidence,
+            similarity_cluster_id = excluded.similarity_cluster_id,
+            overall = excluded.overall,
+            reasons_json = excluded.reasons_json,
+            analyzed_at_ms = excluded.analyzed_at_ms",
+        params![
+            score.asset_group_id,
+            score.scorer_version,
+            score.preview_source,
+            score.analysis_status.as_str(),
+            score.exif_status,
+            score.capture_time_ms,
+            signal_score_json(score.sharpness)?,
+            signal_score_json(score.exposure)?,
+            signal_score_json(score.highlight_clipping_penalty)?,
+            signal_score_json(score.shadow_clipping_penalty)?,
+            signal_score_json(score.composition)?,
+            score.composition_confidence,
+            score.similarity_cluster_id,
+            score.overall,
+            string_vec_json(&score.reasons)?,
+            score.analyzed_at_ms,
+        ],
+    )?;
+    quality_score_by_key(connection, &score.asset_group_id, &score.scorer_version)?
+        .ok_or_else(|| sqlite_data_error("quality score not found"))
+}
+
+fn quality_score_by_key(
+    connection: &Connection,
+    asset_group_id: &str,
+    scorer_version: &str,
+) -> std::result::Result<Option<QualityScore>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
+                    capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
+                    shadow_clipping_json, composition_json, composition_confidence,
+                    similarity_cluster_id, overall, reasons_json, analyzed_at_ms
+             FROM quality_scores
+             WHERE asset_group_id = ?1 AND scorer_version = ?2",
+            params![asset_group_id, scorer_version],
+            quality_score_from_row,
+        )
+        .optional()
+}
+
+fn quality_scores_for_asset_group_ids(
+    connection: &Connection,
+    asset_group_ids: &[String],
+    scorer_version: &str,
+) -> std::result::Result<Vec<QualityScore>, rusqlite::Error> {
+    let mut scores = Vec::new();
+    for asset_group_id in asset_group_ids {
+        if let Some(score) = quality_score_by_key(connection, asset_group_id, scorer_version)? {
+            scores.push(score);
+        }
+    }
+    Ok(scores)
+}
+
+fn quality_score_from_row(row: &Row<'_>) -> std::result::Result<QualityScore, rusqlite::Error> {
+    let analysis_status: String = row.get(3)?;
+    Ok(QualityScore {
+        asset_group_id: row.get(0)?,
+        scorer_version: row.get(1)?,
+        preview_source: row.get(2)?,
+        analysis_status: QualityAnalysisStatus::from_str(&analysis_status),
+        exif_status: row.get(4)?,
+        capture_time_ms: row.get(5)?,
+        sharpness: signal_score_from_json(row.get::<_, String>(6)?)?,
+        exposure: signal_score_from_json(row.get::<_, String>(7)?)?,
+        highlight_clipping_penalty: signal_score_from_json(row.get::<_, String>(8)?)?,
+        shadow_clipping_penalty: signal_score_from_json(row.get::<_, String>(9)?)?,
+        composition: signal_score_from_json(row.get::<_, String>(10)?)?,
+        composition_confidence: row.get(11)?,
+        similarity_cluster_id: row.get(12)?,
+        overall: row.get(13)?,
+        reasons: string_vec_from_json(row.get::<_, String>(14)?)?,
+        analyzed_at_ms: row.get(15)?,
+    })
+}
+
+fn save_selection_recommendation_for_connection(
+    connection: &Connection,
+    recommendation: SelectionRecommendation,
+) -> std::result::Result<SelectionRecommendation, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO selection_recommendations (
+            recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
+            strategy_version, grouping_version, best_asset_group_id,
+            alternate_asset_group_ids_json, low_score_asset_group_ids_json,
+            near_duplicate_asset_group_ids_json, source, status, confidence, reasons_json,
+            llm_review_id, created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+         ON CONFLICT(recommendation_id) DO UPDATE SET
+            burst_group_id = excluded.burst_group_id,
+            strategy_profile_id = excluded.strategy_profile_id,
+            scorer_version = excluded.scorer_version,
+            strategy_version = excluded.strategy_version,
+            grouping_version = excluded.grouping_version,
+            best_asset_group_id = excluded.best_asset_group_id,
+            alternate_asset_group_ids_json = excluded.alternate_asset_group_ids_json,
+            low_score_asset_group_ids_json = excluded.low_score_asset_group_ids_json,
+            near_duplicate_asset_group_ids_json = excluded.near_duplicate_asset_group_ids_json,
+            source = excluded.source,
+            status = excluded.status,
+            confidence = excluded.confidence,
+            reasons_json = excluded.reasons_json,
+            llm_review_id = excluded.llm_review_id,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            recommendation.recommendation_id,
+            recommendation.burst_group_id,
+            recommendation.strategy_profile_id,
+            recommendation.scorer_version,
+            recommendation.strategy_version,
+            recommendation.grouping_version,
+            recommendation.best_asset_group_id,
+            string_vec_json(&recommendation.alternate_asset_group_ids)?,
+            string_vec_json(&recommendation.low_score_asset_group_ids)?,
+            string_vec_json(&recommendation.near_duplicate_asset_group_ids)?,
+            recommendation.source.as_str(),
+            recommendation.status.as_str(),
+            recommendation.confidence,
+            string_vec_json(&recommendation.reasons)?,
+            recommendation.llm_review_id,
+            recommendation.created_at_ms,
+            recommendation.updated_at_ms,
+        ],
+    )?;
+    selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
+        .ok_or_else(|| sqlite_data_error("selection recommendation not found"))
+}
+
+fn latest_selection_recommendation_for_connection(
+    connection: &Connection,
+    burst_group_id: &str,
+    strategy_profile_id: &str,
+) -> std::result::Result<Option<SelectionRecommendation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
+                    strategy_version, grouping_version, best_asset_group_id,
+                    alternate_asset_group_ids_json, low_score_asset_group_ids_json,
+                    near_duplicate_asset_group_ids_json, source, status, confidence,
+                    reasons_json, llm_review_id, created_at_ms, updated_at_ms
+             FROM selection_recommendations
+             WHERE burst_group_id = ?1 AND strategy_profile_id = ?2
+             ORDER BY updated_at_ms DESC, recommendation_id DESC
+             LIMIT 1",
+            params![burst_group_id, strategy_profile_id],
+            selection_recommendation_from_row,
+        )
+        .optional()
+}
+
+fn selection_recommendation_by_id(
+    connection: &Connection,
+    recommendation_id: &str,
+) -> std::result::Result<Option<SelectionRecommendation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
+                    strategy_version, grouping_version, best_asset_group_id,
+                    alternate_asset_group_ids_json, low_score_asset_group_ids_json,
+                    near_duplicate_asset_group_ids_json, source, status, confidence,
+                    reasons_json, llm_review_id, created_at_ms, updated_at_ms
+             FROM selection_recommendations
+             WHERE recommendation_id = ?1",
+            params![recommendation_id],
+            selection_recommendation_from_row,
+        )
+        .optional()
+}
+
+fn selection_recommendation_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<SelectionRecommendation, rusqlite::Error> {
+    let source: String = row.get(10)?;
+    let status: String = row.get(11)?;
+    Ok(SelectionRecommendation {
+        recommendation_id: row.get(0)?,
+        burst_group_id: row.get(1)?,
+        strategy_profile_id: row.get(2)?,
+        scorer_version: row.get(3)?,
+        strategy_version: row.get(4)?,
+        grouping_version: row.get(5)?,
+        best_asset_group_id: row.get(6)?,
+        alternate_asset_group_ids: string_vec_from_json(row.get::<_, String>(7)?)?,
+        low_score_asset_group_ids: string_vec_from_json(row.get::<_, String>(8)?)?,
+        near_duplicate_asset_group_ids: string_vec_from_json(row.get::<_, String>(9)?)?,
+        source: SelectionSource::from_str(&source),
+        status: SelectionRecommendationStatus::from_str(&status),
+        confidence: row.get(12)?,
+        reasons: string_vec_from_json(row.get::<_, String>(13)?)?,
+        llm_review_id: row.get(14)?,
+        created_at_ms: row.get(15)?,
+        updated_at_ms: row.get(16)?,
+    })
+}
+
+fn enqueue_detect_burst_job_for_connection(
+    connection: &Connection,
+    project_id: &str,
+    asset_group_id: &str,
+) -> std::result::Result<AnalysisJob, rusqlite::Error> {
+    enqueue_analysis_job_for_connection(
+        connection,
+        NewAnalysisJob::new(
+            project_id,
+            AnalysisJobType::DetectBurstForAssetGroup,
+            AnalysisEntityType::AssetGroup,
+            asset_group_id,
+            &format!("burst:{project_id}:{asset_group_id}"),
+        ),
+    )
+}
+
+fn enqueue_analysis_job_for_connection(
+    connection: &Connection,
+    job: NewAnalysisJob,
+) -> std::result::Result<AnalysisJob, rusqlite::Error> {
+    if let Some(existing) = connection
+        .query_row(
+            "SELECT job_id, project_id, job_type, entity_type, entity_id, dedupe_key, status,
+                    priority, attempts, next_attempt_at_ms, last_error, created_at_ms, updated_at_ms
+             FROM background_jobs
+             WHERE dedupe_key = ?1 AND status != 'completed'
+             ORDER BY created_at_ms ASC
+             LIMIT 1",
+            params![job.dedupe_key],
+            analysis_job_from_row,
+        )
+        .optional()?
+    {
+        return Ok(existing);
+    }
+    let now = current_time_ms();
+    let job_id = format!("analysis-job-{}-{}", now, stable_key(&job.dedupe_key));
+    connection.execute(
+        "INSERT INTO background_jobs (
+            job_id, project_id, job_type, entity_type, entity_id, dedupe_key, status, priority,
+            attempts, next_attempt_at_ms, last_error, created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, NULL, ?10, ?10)",
+        params![
+            job_id,
+            job.project_id,
+            job.job_type.as_str(),
+            job.entity_type.as_str(),
+            job.entity_id,
+            job.dedupe_key,
+            AnalysisJobStatus::Pending.as_str(),
+            job.priority,
+            job.next_attempt_at_ms,
+            now,
+        ],
+    )?;
+    analysis_job_by_id(connection, &job_id)?
+        .ok_or_else(|| sqlite_data_error("analysis job not found"))
+}
+
+fn claim_analysis_jobs_for_connection(
+    connection: &mut Connection,
+    now_ms: i64,
+    limit: usize,
+) -> std::result::Result<Vec<AnalysisJob>, rusqlite::Error> {
+    let transaction = connection.unchecked_transaction()?;
+    let jobs = {
+        let mut statement = transaction.prepare(
+            "SELECT job_id, project_id, job_type, entity_type, entity_id, dedupe_key, status,
+                    priority, attempts, next_attempt_at_ms, last_error, created_at_ms, updated_at_ms
+             FROM background_jobs
+             WHERE status IN ('pending', 'failed')
+               AND (next_attempt_at_ms IS NULL OR next_attempt_at_ms <= ?1)
+             ORDER BY priority DESC, created_at_ms ASC, job_id ASC
+             LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![now_ms, limit as i64], analysis_job_from_row)?;
+        collect_rows(rows)?
+    };
+    for job in &jobs {
+        transaction.execute(
+            "UPDATE background_jobs
+             SET status = ?1, updated_at_ms = ?2
+             WHERE job_id = ?3",
+            params![AnalysisJobStatus::Running.as_str(), now_ms, job.job_id],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(jobs
+        .into_iter()
+        .map(|job| AnalysisJob {
+            status: AnalysisJobStatus::Running,
+            updated_at_ms: now_ms,
+            ..job
+        })
+        .collect())
+}
+
+fn analysis_job_by_id(
+    connection: &Connection,
+    job_id: &str,
+) -> std::result::Result<Option<AnalysisJob>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT job_id, project_id, job_type, entity_type, entity_id, dedupe_key, status,
+                    priority, attempts, next_attempt_at_ms, last_error, created_at_ms, updated_at_ms
+             FROM background_jobs
+             WHERE job_id = ?1",
+            params![job_id],
+            analysis_job_from_row,
+        )
+        .optional()
+}
+
+fn analysis_job_from_row(row: &Row<'_>) -> std::result::Result<AnalysisJob, rusqlite::Error> {
+    let job_type: String = row.get(2)?;
+    let entity_type: String = row.get(3)?;
+    let status: String = row.get(6)?;
+    Ok(AnalysisJob {
+        job_id: row.get(0)?,
+        project_id: row.get(1)?,
+        job_type: AnalysisJobType::from_str(&job_type),
+        entity_type: AnalysisEntityType::from_str(&entity_type),
+        entity_id: row.get(4)?,
+        dedupe_key: row.get(5)?,
+        status: AnalysisJobStatus::from_str(&status),
+        priority: row.get(7)?,
+        attempts: row.get(8)?,
+        next_attempt_at_ms: row.get(9)?,
+        last_error: row.get(10)?,
+        created_at_ms: row.get(11)?,
+        updated_at_ms: row.get(12)?,
+    })
+}
+
+fn signal_score_json(value: SignalScore) -> std::result::Result<String, rusqlite::Error> {
+    serde_json::to_string(&value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn signal_score_from_json(value: String) -> std::result::Result<SignalScore, rusqlite::Error> {
+    serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn string_vec_json(value: &[String]) -> std::result::Result<String, rusqlite::Error> {
+    serde_json::to_string(value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn string_vec_from_json(value: String) -> std::result::Result<Vec<String>, rusqlite::Error> {
+    serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
 fn collect_rows<T>(
     rows: rusqlite::MappedRows<'_, impl FnMut(&Row<'_>) -> std::result::Result<T, rusqlite::Error>>,
 ) -> std::result::Result<Vec<T>, rusqlite::Error> {
@@ -2157,6 +4100,136 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
                 .map(|expected| asset.format.role() == expected)
                 .unwrap_or(true)
     })
+}
+
+fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> bool {
+    let score = group_best_score(group);
+    let status_matches = query
+        .analysis_status
+        .as_ref()
+        .map(|expected| {
+            group
+                .quality
+                .as_ref()
+                .map(|quality| quality.analysis_status.eq_ignore_ascii_case(expected))
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
+    let recommendation_matches = query
+        .recommendation_state
+        .as_ref()
+        .map(|expected| {
+            group
+                .burst
+                .as_ref()
+                .map(|burst| burst.recommendation_status.eq_ignore_ascii_case(expected))
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
+    let min_matches = query
+        .score_min
+        .map(|minimum| {
+            score
+                .map(|value| normalize_query_score(value) >= normalize_query_score(minimum))
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
+    let max_matches = query
+        .score_max
+        .map(|maximum| {
+            score
+                .map(|value| normalize_query_score(value) <= normalize_query_score(maximum))
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
+
+    status_matches && recommendation_matches && min_matches && max_matches
+}
+
+fn representative_group_id_for_review_unit(
+    burst: &BurstGroup,
+    recommendation: Option<&SelectionRecommendation>,
+    scores: &[QualityScore],
+) -> Option<String> {
+    recommendation
+        .and_then(|value| value.best_asset_group_id.as_ref())
+        .filter(|group_id| {
+            burst
+                .member_group_ids
+                .iter()
+                .any(|member| member == *group_id)
+        })
+        .cloned()
+        .or_else(|| {
+            scores
+                .iter()
+                .filter(|score| score.analysis_status == QualityAnalysisStatus::Ready)
+                .max_by(|left, right| {
+                    score_sort_key(Some(left.overall)).cmp(&score_sort_key(Some(right.overall)))
+                })
+                .map(|score| score.asset_group_id.clone())
+        })
+        .or_else(|| burst.member_group_ids.first().cloned())
+}
+
+fn sort_asset_groups_for_query(groups: &mut [ReceivedAssetGroup], sort: AssetGroupSort) {
+    match sort {
+        AssetGroupSort::LatestReceived => {}
+        AssetGroupSort::Filename => {
+            groups.sort_by(|left, right| {
+                left.group_key
+                    .cmp(&right.group_key)
+                    .then_with(|| left.group_id.cmp(&right.group_id))
+            });
+        }
+        AssetGroupSort::GroupBestScore => {
+            groups.sort_by(|left, right| {
+                let left_score = group_best_score(left);
+                let right_score = group_best_score(right);
+                let left_own_score = left.quality.as_ref().map(|quality| quality.overall);
+                let right_own_score = right.quality.as_ref().map(|quality| quality.overall);
+                score_sort_key(right_score)
+                    .cmp(&score_sort_key(left_score))
+                    .then_with(|| {
+                        score_sort_key(right_own_score).cmp(&score_sort_key(left_own_score))
+                    })
+                    .then_with(|| {
+                        group_received_sort_time(right).cmp(&group_received_sort_time(left))
+                    })
+                    .then_with(|| left.group_key.cmp(&right.group_key))
+            });
+        }
+    }
+}
+
+fn group_best_score(group: &ReceivedAssetGroup) -> Option<f64> {
+    group
+        .burst
+        .as_ref()
+        .and_then(|burst| burst.best_score)
+        .or_else(|| group.quality.as_ref().map(|quality| quality.overall))
+}
+
+fn score_sort_key(score: Option<f64>) -> i64 {
+    score
+        .filter(|value| value.is_finite())
+        .map(|value| (normalize_query_score(value) * 1_000_000.0).round() as i64)
+        .unwrap_or(i64::MIN)
+}
+
+fn normalize_query_score(value: f64) -> f64 {
+    if value > 1.0 {
+        value / 100.0
+    } else {
+        value
+    }
+}
+
+fn group_received_sort_time(group: &ReceivedAssetGroup) -> Option<i64> {
+    group_assets(group)
+        .into_iter()
+        .filter_map(|asset| asset.capture_time_ms.or(asset.received_time_ms))
+        .max()
 }
 
 fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {

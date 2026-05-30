@@ -2,8 +2,6 @@ $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $androidRoot = Join-Path $root "apps\android"
-$buildNativeScript = Join-Path $root "scripts\build_android_native.ps1"
-$inspectApkScript = Join-Path $root "scripts\inspect_android_apk.ps1"
 $bootstrapGradleScript = Join-Path $root "scripts\bootstrap_android_gradle.ps1"
 
 $defaultJavaHome = "C:\Program Files\ojdkbuild\java-17-openjdk-17.0.3.0.6-1"
@@ -46,29 +44,14 @@ if (-not (Test-Path -LiteralPath $gradle)) {
 
 $env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_SDK_ROOT\cmdline-tools\latest\bin;$env:ANDROID_SDK_ROOT\platform-tools;$env:Path"
 
-& $buildNativeScript
-if ($LASTEXITCODE -ne 0) {
-    throw "Android native library build failed"
-}
-
 Push-Location $androidRoot
 try {
-    & $gradle ":app:assembleDebug" "--no-daemon" "-PcameraConnector.useNativeCore=true"
+    & $gradle ":app:testDebugUnitTest" "--no-daemon"
     if ($LASTEXITCODE -ne 0) {
-        throw "Android debug build failed"
+        throw "Android unit tests failed"
     }
 } finally {
     Pop-Location
 }
 
-$apk = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
-if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
-    throw "Android debug APK not found: $apk"
-}
-
-& powershell -NoProfile -ExecutionPolicy Bypass -File $inspectApkScript -ApkPath $apk
-if ($LASTEXITCODE -ne 0) {
-    throw "Android APK inspection failed"
-}
-
-Write-Host "Android debug build passed with Android native core packaged."
+Write-Host "Android unit tests passed."
