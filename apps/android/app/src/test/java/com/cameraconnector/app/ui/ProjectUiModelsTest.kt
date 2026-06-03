@@ -3,12 +3,14 @@ package com.cameraconnector.app.ui
 import com.cameraconnector.app.core.InboxAsset
 import com.cameraconnector.app.core.InboxAssetBurst
 import com.cameraconnector.app.core.InboxAssetQuality
+import com.cameraconnector.app.core.InboxAssetUserMarks
+import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PhotoSortMode
+import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ReceiverState
-import com.cameraconnector.app.core.ReviewQueueCount
-import com.cameraconnector.app.core.ReviewQueueSummary
 import com.cameraconnector.app.core.StrategyProfileUi
 import com.cameraconnector.app.core.StrategyWeightsUi
 import org.junit.Assert.assertEquals
@@ -16,6 +18,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class ProjectUiModelsTest {
     @Test
@@ -270,9 +273,8 @@ class ProjectUiModelsTest {
 
     @Test
     fun projectPhotoContentDoesNotRequireRunningReceiver() {
-        assertTrue(projectPhotoContentVisible(receiverRunning = false, reviewModeActive = false))
-        assertTrue(projectPhotoContentVisible(receiverRunning = true, reviewModeActive = false))
-        assertTrue(projectPhotoContentVisible(receiverRunning = false, reviewModeActive = true))
+        assertTrue(projectPhotoContentVisible(receiverRunning = false))
+        assertTrue(projectPhotoContentVisible(receiverRunning = true))
     }
 
     @Test
@@ -370,136 +372,9 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun reviewQueueEntryIsHiddenWhenProjectHasNoReviewUnits() {
-        assertNull(reviewQueueSummary(totalUnits = 0).reviewQueueEntryUi())
-    }
-
-    @Test
-    fun reviewQueueEntryIsHiddenWhenNoActionableReviewUnitsRemain() {
-        assertNull(reviewQueueSummary(totalUnits = 6).reviewQueueEntryUi())
-    }
-
-    @Test
-    fun reviewQueueEntryPrioritizesUnconfirmedBestForBrushMode() {
-        val entry = reviewQueueSummary(
-            totalUnits = 8,
-            pendingCount = 2,
-            unconfirmedBestCount = 3,
-            needsReviewCount = 1,
-            lowScoreCandidateCount = 4,
-        ).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("待确认优选", entry.primaryLabel)
-        assertEquals(3, entry.primaryCount)
-        assertEquals("3 组待确认", entry.primaryText)
-        assertEquals("连拍/单张 8 组 · 待评分 2 · 需复核 1 · 低分 4", entry.subtitle)
-        assertEquals("ready", entry.recommendationState)
-        assertNull(entry.analysisStatus)
-    }
-
-    @Test
-    fun reviewQueueEntryFallsBackToPendingAnalysis() {
-        val entry = reviewQueueSummary(totalUnits = 5, pendingCount = 4).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("等待分析", entry.primaryLabel)
-        assertEquals(4, entry.primaryCount)
-        assertEquals("pending", entry.analysisStatus)
-        assertNull(entry.recommendationState)
-    }
-
-    @Test
-    fun reviewQueueEntryFallsBackToNearDuplicateQueue() {
-        val entry = reviewQueueSummary(totalUnits = 5, nearDuplicateCount = 2).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("近重复", entry.primaryLabel)
-        assertEquals("2 组近重复", entry.primaryText)
-        assertEquals("near_duplicates", entry.queue)
-        assertNull(entry.recommendationState)
-        assertNull(entry.analysisStatus)
-    }
-
-    @Test
-    fun reviewQueueEntryFallsBackToUnsupportedQueue() {
-        val entry = reviewQueueSummary(totalUnits = 5, unsupportedCount = 1).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("不支持评分", entry.primaryLabel)
-        assertEquals("1 组需复核", entry.primaryText)
-        assertEquals("unsupported", entry.queue)
-    }
-
-    @Test
-    fun reviewQueueEntryPrefersUnsupportedWhenNeedsReviewAlsoIncludesUnsupported() {
-        val entry = reviewQueueSummary(
-            totalUnits = 5,
-            needsReviewCount = 1,
-            unsupportedCount = 1,
-        ).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("不支持评分", entry.primaryLabel)
-        assertEquals("unsupported", entry.queue)
-    }
-
-    @Test
-    fun reviewQueueEntryCanSurfaceUserOverriddenQueue() {
-        val entry = reviewQueueSummary(totalUnits = 5, userOverriddenCount = 2).reviewQueueEntryUi()
-
-        requireNotNull(entry)
-        assertEquals("手动调整", entry.primaryLabel)
-        assertEquals("2 组已调整", entry.primaryText)
-        assertEquals("user_overridden", entry.queue)
-    }
-
-    @Test
-    fun reviewQueueEntriesExposeSwitchableActionQueuesInPriorityOrder() {
-        val entries = reviewQueueSummary(
-            totalUnits = 12,
-            pendingCount = 2,
-            unconfirmedBestCount = 3,
-            needsReviewCount = 1,
-            lowScoreCandidateCount = 4,
-            nearDuplicateCount = 5,
-            unsupportedCount = 6,
-            userOverriddenCount = 7,
-        ).reviewQueueEntriesUi()
-
-        assertEquals(
-            listOf(
-                "unconfirmed_best",
-                "unsupported",
-                "needs_review",
-                "low_score_candidates",
-                "near_duplicates",
-                "user_overridden",
-                "pending",
-            ),
-            entries.map { it.queue },
-        )
-        assertEquals(entries.first(), entries.selectedReviewQueueEntry(selectedQueue = null))
-        assertEquals("near_duplicates", entries.selectedReviewQueueEntry("near_duplicates")?.queue)
-        assertEquals("unconfirmed_best", entries.selectedReviewQueueEntry("missing")?.queue)
-    }
-
-    @Test
-    fun reviewQueueEntryCanApplyQueryForBrushMode() {
-        val entry = reviewQueueSummary(totalUnits = 4, unconfirmedBestCount = 2).reviewQueueEntryUi()
-        val query = entry?.assetQuery(selectedAccount = "camera01", strategyProfileId = "portrait")
-
-        requireNotNull(query)
-        assertEquals("camera01", query.username)
-        assertEquals("ready", query.recommendationState)
-        assertEquals(com.cameraconnector.app.core.PhotoSortMode.GroupBestScore, query.sort)
-        assertEquals("unconfirmed_best", query.reviewQueue)
-        assertEquals("portrait", query.strategyProfileId)
-    }
-
-    @Test
     fun assetListQueryAppliesScoreFilterAndPromotesBestScoreSort() {
         val query = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.Favorites,
             selectedAccount = "camera01",
             selectedFilter = InboxFilter.Raw,
             selectedSort = PhotoSortMode.LatestReceived,
@@ -508,54 +383,62 @@ class ProjectUiModelsTest {
 
         assertEquals("camera01", query.username)
         assertEquals(com.cameraconnector.app.core.InboxAssetRole.Raw, query.role)
+        assertEquals(true, query.favorite)
+        assertEquals(null, query.marked)
         assertEquals(80.0, query.scoreMin ?: 0.0, 0.0001)
         assertEquals(PhotoSortMode.GroupBestScore, query.sort)
     }
 
     @Test
-    fun projectPhotoCollectionFiltersAndSortsSelectsLocally() {
-        val selectedSharp = inboxAsset(id = "selected-sharp").copy(
-            username = "camera01",
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "accepted",
-                bestAssetGroupId = "selected-sharp",
-                bestScore = 0.91,
-            ),
-        )
-        val selectedSoft = inboxAsset(id = "selected-soft").copy(
-            username = "camera01",
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-2",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "accepted",
-                bestAssetGroupId = "selected-soft",
-                bestScore = 0.62,
-            ),
-        )
-        val otherAccount = inboxAsset(id = "selected-other").copy(username = "camera02")
-
-        val filtered = projectPhotoCollectionAssets(
-            assets = listOf(selectedSoft, otherAccount, selectedSharp),
-            selectedAccount = "camera01",
+    fun assetListQueryMapsMarkedCollectionToUserMarkFilter() {
+        val query = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.Marked,
+            selectedAccount = null,
             selectedFilter = InboxFilter.All,
-            selectedSort = PhotoSortMode.GroupBestScore,
-            selectedScoreFilter = ScoreFilter.Usable,
+            selectedSort = PhotoSortMode.Filename,
+            selectedScoreFilter = ScoreFilter.All,
         )
 
-        assertEquals(listOf("selected-sharp", "selected-soft"), filtered.map { it.id })
+        assertEquals(null, query.favorite)
+        assertEquals(true, query.marked)
+        assertEquals(PhotoSortMode.Filename, query.sort)
     }
 
     @Test
-    fun tileSmartMetaIncludesBurstBestScoreWhenItExplainsScoreFilterMatch() {
+    fun assetListQueryMapsModelAndRiskCollectionsToReviewQueues() {
+        val modelSelects = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.ModelSelects,
+            selectedAccount = null,
+            selectedFilter = InboxFilter.All,
+            selectedSort = PhotoSortMode.LatestReceived,
+            selectedScoreFilter = ScoreFilter.All,
+        )
+        val qualityRisk = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.QualityRisk,
+            selectedAccount = null,
+            selectedFilter = InboxFilter.All,
+            selectedSort = PhotoSortMode.LatestReceived,
+            selectedScoreFilter = ScoreFilter.All,
+        )
+        val pending = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.PendingAnalysis,
+            selectedAccount = null,
+            selectedFilter = InboxFilter.All,
+            selectedSort = PhotoSortMode.LatestReceived,
+            selectedScoreFilter = ScoreFilter.All,
+        )
+
+        assertEquals("model_selects", modelSelects.reviewQueue)
+        assertEquals("quality_risk", qualityRisk.reviewQueue)
+        assertEquals("pending_analysis", pending.reviewQueue)
+    }
+
+    @Test
+    fun tileSmartMetaOmitsNumericScoreFromProjectGrid() {
         val asset = inboxAsset(id = "group-soft").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
@@ -570,19 +453,18 @@ class ProjectUiModelsTest {
         )
 
         val meta = asset.tileSmartMeta().orEmpty()
-        assertTrue(meta.contains("55"))
-        assertTrue(meta.contains("93"))
+        assertFalse(meta.contains("55"))
+        assertFalse(meta.contains("93"))
         assertFalse(meta.contains("连拍"))
         assertFalse(meta.contains("2/2"))
     }
 
     @Test
-    fun burstBadgesUseMinimalCountOnGridAndPositionInDetail() {
+    fun burstBadgesUseMinimalCountOutsideDetail() {
         val asset = inboxAsset(id = "group-best").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 5,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
@@ -590,8 +472,7 @@ class ProjectUiModelsTest {
         )
 
         assertEquals("5", asset.burstCountBadgeText())
-        assertEquals("2/5", asset.burstPositionBadgeText())
-        assertEquals("2/5", asset.burstBadgeText())
+        assertEquals("5", asset.burstBadgeText())
     }
 
     @Test
@@ -608,6 +489,7 @@ class ProjectUiModelsTest {
     @Test
     fun tileSmartMetaIncludesLocalizedQualityReason() {
         val asset = inboxAsset(id = "group-scored").copy(
+            technicalGateStatus = "warn",
             quality = InboxAssetQuality(
                 overall = 0.82,
                 analysisStatus = "ready",
@@ -619,16 +501,16 @@ class ProjectUiModelsTest {
 
         val meta = asset.tileSmartMeta().orEmpty()
 
-        assertTrue(meta.contains("82"))
         assertTrue(meta.contains("锐度偏低"))
+        assertFalse(meta.contains("82"))
         assertFalse(meta.contains("low sharpness"))
     }
 
     @Test
     fun recommendationStatusLabelsUseReviewVocabulary() {
-        assertEquals("已精选", recommendationStatusLabel("accepted"))
+        assertEquals("已推荐", recommendationStatusLabel("accepted"))
         assertEquals("需要复核", recommendationStatusLabel("needs_review"))
-        assertEquals("手动调整", recommendationStatusLabel("user_overridden"))
+        assertEquals("人工变更", recommendationStatusLabel("user_overridden"))
         assertEquals("更新中", recommendationStatusLabel("stale"))
     }
 
@@ -660,345 +542,11 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun reviewModeSignalRowsKeepCardSummaryFocusedOnPrimarySignals() {
-        val asset = inboxAsset(id = "group-scored").copy(
-            quality = InboxAssetQuality(
-                overall = 0.82,
-                analysisStatus = "ready",
-                scorerVersion = "local-v1",
-                primaryReason = "balanced",
-                analyzedAtMs = 10_000,
-                sharpness = 0.73,
-                exposure = 0.66,
-                highlightClippingPenalty = 0.08,
-                shadowClippingPenalty = 0.12,
-                composition = 0.58,
-                compositionConfidence = 0.71,
-            ),
-        )
-
-        val rows = asset.reviewModeSignalRows()
-
-        assertEquals(listOf("锐度", "曝光", "构图"), rows.map { it.label })
-        assertEquals(listOf("73", "66", "58"), rows.map { it.value })
-    }
-
-    @Test
-    fun reviewModeProgressCoercesIndexAndFormatsPosition() {
-        assertEquals(
-            ReviewModeProgressUi(currentIndex = 0, totalCount = 0, text = "0/0"),
-            reviewModeProgress(currentIndex = 4, totalCount = 0),
-        )
-        assertEquals(
-            ReviewModeProgressUi(currentIndex = 2, totalCount = 3, text = "3/3"),
-            reviewModeProgress(currentIndex = 8, totalCount = 3),
-        )
-    }
-
-    @Test
-    fun reviewModeNavigationStaysWithinVisibleAssets() {
-        assertEquals(0, previousReviewIndex(currentIndex = 0))
-        assertEquals(1, previousReviewIndex(currentIndex = 2))
-        assertEquals(1, nextReviewIndex(currentIndex = 0, totalCount = 2))
-        assertEquals(1, nextReviewIndex(currentIndex = 1, totalCount = 2))
-        assertEquals(0, nextReviewIndex(currentIndex = 0, totalCount = 0))
-    }
-
-    @Test
-    fun reviewModeSummaryOpensAfterActingOnLastVisibleCard() {
-        assertFalse(reviewModeShouldSummarizeAfterAction(currentIndex = 0, totalCount = 2))
-        assertTrue(reviewModeShouldSummarizeAfterAction(currentIndex = 1, totalCount = 2))
-        assertTrue(reviewModeShouldSummarizeAfterAction(currentIndex = 0, totalCount = 1))
-        assertTrue(reviewModeShouldSummarizeAfterAction(currentIndex = 0, totalCount = 0))
-    }
-
-    @Test
-    fun reviewModeDragActionClassifiesCardLikeGestures() {
-        assertEquals(ReviewModeDragAction.Next, reviewModeDragAction(deltaX = -140f, deltaY = 18f))
-        assertEquals(ReviewModeDragAction.Previous, reviewModeDragAction(deltaX = 140f, deltaY = 18f))
-        assertEquals(
-            ReviewModeDragAction.AcceptRecommendedBest,
-            reviewModeDragAction(deltaX = 12f, deltaY = -140f),
-        )
-        assertEquals(ReviewModeDragAction.MarkNeedsReview, reviewModeDragAction(deltaX = 12f, deltaY = 140f))
-        assertNull(reviewModeDragAction(deltaX = 40f, deltaY = 30f))
-        assertNull(reviewModeDragAction(deltaX = 96f, deltaY = 96f, threshold = 120f))
-    }
-
-    @Test
-    fun reviewModeShortcutHintsExposeOnlyUsableCardGestures() {
-        val best = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-
-        val enabledHints = reviewModeShortcutHints(
-            asset = best,
-            currentIndex = 1,
-            totalCount = 3,
-            actionsEnabled = true,
-        )
-
-        assertEquals(
-            listOf(
-                "右滑: 上一张",
-                "左滑: 下一张",
-                "上滑: 接受推荐",
-                "下滑: 标记复核",
-            ),
-            enabledHints.map { "${it.gestureLabel}: ${it.actionLabel}" },
-        )
-        assertTrue(enabledHints.all { it.enabled })
-
-        val alternate = best.copy(
-            id = "group-alt",
-            burst = best.burst?.copy(
-                memberRank = 2,
-                bestAssetGroupId = "group-best",
-            ),
-        )
-        val disabledHints = reviewModeShortcutHints(
-            asset = alternate,
-            currentIndex = 0,
-            totalCount = 1,
-            actionsEnabled = false,
-        )
-
-        assertEquals(
-            listOf("右滑", "左滑", "上滑", "下滑"),
-            disabledHints.map { it.gestureLabel },
-        )
-        assertEquals(
-            listOf(false, false, false, false),
-            disabledHints.map { it.enabled },
-        )
-    }
-
-    @Test
-    fun reviewModeSessionCountsAcceptedAndNeedsReviewDecisions() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.AcceptRecommendedBest)
-            .record(ReviewSessionDecision.MarkNeedsReview)
-            .record(ReviewSessionDecision.AcceptRecommendedBest)
-
-        assertEquals(3, session.processedGroupCount)
-        assertEquals(2, session.acceptedRecommendationCount)
-        assertEquals(1, session.markedNeedsReviewCount)
-        assertTrue(session.hasActivity)
-        assertEquals("本轮 3 组 · 接受 2 · 复核 1", session.compactText)
-    }
-
-    @Test
-    fun reviewModeSessionTracksLatestUndoableDecision() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.AcceptRecommendedBest, burstGroupId = "burst-1")
-
-        assertEquals("burst-1", session.undoBurstGroupId)
-        assertEquals("撤销接受推荐", session.undoLabel)
-    }
-
-    @Test
-    fun reviewModeSessionCountsManualBestOverridesAndCanUndo() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.OverrideRecommendedBest, burstGroupId = "burst-1")
-
-        assertEquals(1, session.processedGroupCount)
-        assertEquals(1, session.manualOverrideCount)
-        assertEquals("burst-1", session.undoBurstGroupId)
-        assertEquals("\u64a4\u9500\u624b\u52a8\u4f18\u9009", session.undoLabel)
-        assertEquals("\u672c\u8f6e 1 \u7ec4 \u00b7 \u624b\u52a8 1", session.compactText)
-
-        val undone = session.undoLatestDecision()
-
-        assertEquals(0, undone.processedGroupCount)
-        assertEquals(0, undone.manualOverrideCount)
-        assertNull(undone.undoBurstGroupId)
-        assertNull(undone.undoLabel)
-    }
-
-    @Test
-    fun reviewModeSessionCountsRestoreAutomaticWithoutUndo() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.RestoreAutomaticRecommendation, burstGroupId = "burst-1")
-
-        assertEquals(1, session.processedGroupCount)
-        assertEquals(1, session.restoredAutomaticCount)
-        assertNull(session.undoBurstGroupId)
-        assertNull(session.undoLabel)
-        assertEquals("本轮 1 组 · 恢复 1", session.compactText)
-    }
-
-    @Test
-    fun reviewModeSessionCountsSkippedCardsWithoutUndo() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.SkipCurrent)
-
-        assertEquals(1, session.processedGroupCount)
-        assertEquals(1, session.skippedCount)
-        assertNull(session.undoBurstGroupId)
-        assertNull(session.undoLabel)
-        assertEquals("本轮 1 组 · 跳过 1", session.compactText)
-        assertEquals(
-            "已处理 1 组 · 接受推荐 0 · 标记复核 0 · 跳过 1 · 当前队列剩余 3 · 低分候选 2",
-            reviewModeSessionExitSummaryText(
-                session = session,
-                remainingReviewGroupCount = 3,
-                lowScoreCandidateCount = 2,
-            ),
-        )
-    }
-
-    @Test
-    fun reviewModeSessionCountsExtendedReviewDecisionsWithoutUndo() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.ClearRecommendation, burstGroupId = "burst-1")
-            .record(ReviewSessionDecision.KeepAllCandidates, burstGroupId = "burst-2")
-            .record(ReviewSessionDecision.HideLowScoreCandidates, burstGroupId = "burst-3")
-
-        assertEquals(3, session.processedGroupCount)
-        assertEquals(1, session.clearedRecommendationCount)
-        assertEquals(1, session.keptAllCandidatesCount)
-        assertEquals(1, session.hiddenLowScoreCount)
-        assertNull(session.undoBurstGroupId)
-        assertEquals("本轮 3 组 · 清除 1 · 保留 1 · 隐藏低分 1", session.compactText)
-    }
-
-    @Test
-    fun reviewModeSessionUndoLatestDecisionRevertsCountsAndClearsUndo() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.AcceptRecommendedBest, burstGroupId = "burst-1")
-            .record(ReviewSessionDecision.MarkNeedsReview, burstGroupId = "burst-2")
-            .undoLatestDecision()
-
-        assertEquals(1, session.processedGroupCount)
-        assertEquals(1, session.acceptedRecommendationCount)
-        assertEquals(0, session.markedNeedsReviewCount)
-        assertNull(session.undoBurstGroupId)
-        assertNull(session.undoLabel)
-    }
-
-    @Test
-    fun reviewModeSessionHidesCompactTextBeforeAnyDecision() {
-        val session = ReviewModeSessionUi()
-
-        assertFalse(session.hasActivity)
-        assertNull(session.compactText)
-    }
-
-    @Test
-    fun reviewModeSessionExitSummaryIncludesRemainingAndLowScoreContext() {
-        val session = ReviewModeSessionUi()
-            .record(ReviewSessionDecision.AcceptRecommendedBest)
-            .record(ReviewSessionDecision.MarkNeedsReview)
-
-        assertEquals(
-            "已处理 2 组 · 接受推荐 1 · 标记复核 1 · 当前队列剩余 4 · 低分候选 2",
-            reviewModeSessionExitSummaryText(
-                session = session,
-                remainingReviewGroupCount = 4,
-                lowScoreCandidateCount = 2,
-            ),
-        )
-    }
-
-    @Test
-    fun reviewDecisionTargetsOnlyValidBurstActions() {
-        val best = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-        val alternate = inboxAsset(id = "group-alt").copy(
-            burst = best.burst?.copy(bestAssetGroupId = "group-best"),
-        )
-        val single = inboxAsset(id = "single")
-
-        assertEquals(
-            "burst-1",
-            reviewDecisionBurstGroupId(best, ReviewDecisionAction.AcceptRecommendedBest),
-        )
-        assertNull(reviewDecisionBurstGroupId(alternate, ReviewDecisionAction.AcceptRecommendedBest))
-        assertEquals(
-            "burst-1",
-            reviewDecisionBurstGroupId(alternate, ReviewDecisionAction.MarkNeedsReview),
-        )
-        assertNull(reviewDecisionBurstGroupId(single, ReviewDecisionAction.MarkNeedsReview))
-    }
-
-    @Test
-    fun restoreAutomaticTargetsOnlyUserOverriddenBurstGroups() {
-        val overridden = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "user_overridden",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-        val ready = overridden.copy(
-            burst = overridden.burst?.copy(recommendationStatus = "ready"),
-        )
-
-        assertEquals(
-            "burst-1",
-            reviewDecisionBurstGroupId(overridden, ReviewDecisionAction.RestoreAutomaticRecommendation),
-        )
-        assertNull(reviewDecisionBurstGroupId(ready, ReviewDecisionAction.RestoreAutomaticRecommendation))
-        assertNull(
-            reviewDecisionBurstGroupId(
-                inboxAsset(id = "single"),
-                ReviewDecisionAction.RestoreAutomaticRecommendation,
-            ),
-        )
-    }
-
-    @Test
-    fun manualBestOverrideTargetOnlyUsesNonBestBurstMembers() {
-        val best = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-        val alternate = inboxAsset(id = "group-alt").copy(
-            burst = best.burst?.copy(memberRank = 2),
-        )
-
-        assertEquals(
-            ManualBestOverrideTarget(
-                burstGroupId = "burst-1",
-                bestAssetGroupId = "group-alt",
-            ),
-            manualBestOverrideTarget(alternate),
-        )
-        assertNull(manualBestOverrideTarget(best))
-        assertNull(manualBestOverrideTarget(inboxAsset(id = "single")))
-    }
-
-    @Test
     fun manualBurstSplitTargetRequiresBurstMemberGroupId() {
         val burstMember = inboxAsset(id = "group-member").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 3,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
@@ -1017,67 +565,30 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun reviewModeManualSplitTargetRequiresEnabledBurstMember() {
-        val burstMember = inboxAsset(id = "group-member").copy(
+    fun photoDetailBurstPositionFallsBackToMemberOrderWhenRankIsMissing() {
+        val first = inboxAsset(id = "group-a").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 3,
-                memberRank = 2,
                 recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
+                bestAssetGroupId = "group-a",
                 bestScore = 0.93,
             ),
         )
-
-        assertEquals(
-            ManualBurstSplitTarget(
-                burstGroupId = "burst-1",
-                memberGroupId = "group-member",
-            ),
-            reviewModeManualSplitTarget(burstMember, actionsEnabled = true),
+        val second = inboxAsset(id = "group-b").copy(
+            burst = first.burst?.copy(bestAssetGroupId = "group-a"),
         )
-        assertNull(reviewModeManualSplitTarget(burstMember, actionsEnabled = false))
-        assertNull(reviewModeManualSplitTarget(inboxAsset(id = "single"), actionsEnabled = true))
-        assertNull(reviewModeManualSplitTarget(null, actionsEnabled = true))
-    }
-
-    @Test
-    fun reviewModePrimaryActionKeepsDefaultDecisionToOneObviousChoice() {
-        val recommended = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 3,
-                memberRank = 1,
-                recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-        val alternate = inboxAsset(id = "group-alt").copy(
-            burst = recommended.burst?.copy(
-                memberRank = 2,
-                bestAssetGroupId = "group-best",
-            ),
+        val third = inboxAsset(id = "group-c").copy(
+            burst = first.burst?.copy(bestAssetGroupId = "group-a"),
         )
 
         assertEquals(
-            ReviewModePrimaryActionUi(
-                action = ReviewModePrimaryAction.AcceptRecommendedBest,
-                label = "接受推荐",
-                enabled = true,
+            "2/3",
+            photoDetailBurstPositionText(
+                asset = second,
+                burstMembers = listOf(first, second, third),
             ),
-            reviewModePrimaryAction(recommended, actionsEnabled = true),
         )
-        assertEquals(
-            ReviewModePrimaryActionUi(
-                action = ReviewModePrimaryAction.OverrideRecommendedBest,
-                label = "设为优选",
-                enabled = true,
-            ),
-            reviewModePrimaryAction(alternate, actionsEnabled = true),
-        )
-        assertNull(reviewModePrimaryAction(inboxAsset(id = "single"), actionsEnabled = true))
-        assertEquals(false, reviewModePrimaryAction(recommended, actionsEnabled = false)?.enabled)
     }
 
     @Test
@@ -1086,7 +597,6 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.91,
@@ -1094,7 +604,7 @@ class ProjectUiModelsTest {
             quality = qualityScore(0.67),
         )
         val best = inboxAsset(id = "group-best").copy(
-            burst = alternate.burst?.copy(memberRank = 1),
+            burst = alternate.burst,
             quality = qualityScore(0.91),
         )
         val single = inboxAsset(id = "single")
@@ -1104,7 +614,7 @@ class ProjectUiModelsTest {
         assertEquals(listOf("burst:burst-1", "asset:single"), items.map { it.key })
         assertTrue(items.first().isBurstGroup)
         assertEquals("group-best", items.first().coverAsset.id)
-        assertEquals(listOf("group-best", "group-alt"), items.first().members.map { it.id })
+        assertEquals(listOf("group-alt", "group-best"), items.first().members.map { it.id })
         assertFalse(items.last().isBurstGroup)
         assertEquals("single", items.last().coverAsset.id)
     }
@@ -1115,20 +625,18 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-target",
                 memberCount = 2,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-target",
                 bestScore = 0.93,
             ),
         )
         val sameBurstMember = inboxAsset(id = "group-same").copy(
-            burst = target.burst?.copy(memberRank = 2, bestAssetGroupId = "group-target"),
+            burst = target.burst?.copy(bestAssetGroupId = "group-target"),
         )
         val source = inboxAsset(id = "group-source").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-source",
                 memberCount = 2,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-source",
                 bestScore = 0.82,
@@ -1147,12 +655,11 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun burstMemberFilmstripOrdersMembersByRankAndHighlightsCurrentAndBest() {
+    fun burstMemberFilmstripOrdersMembersByDerivedOrderAndHighlightsCurrentAndBest() {
         val best = inboxAsset(id = "group-best").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 3,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.91,
@@ -1160,11 +667,11 @@ class ProjectUiModelsTest {
             quality = qualityScore(0.91),
         )
         val alternate = inboxAsset(id = "group-alt").copy(
-            burst = best.burst?.copy(memberRank = 2),
+            burst = best.burst,
             quality = qualityScore(0.76),
         )
         val low = inboxAsset(id = "group-low").copy(
-            burst = best.burst?.copy(memberRank = 3),
+            burst = best.burst,
             quality = qualityScore(0.31),
         )
 
@@ -1173,9 +680,9 @@ class ProjectUiModelsTest {
             allProjectAssets = listOf(low, alternate, best, inboxAsset(id = "single")),
         )
 
-        assertEquals(listOf("group-best", "group-alt", "group-low"), filmstrip.map { it.asset.id })
-        assertEquals(listOf("最佳", "当前", "低分"), filmstrip.map { it.badgeText })
-        assertEquals(listOf(91, 76, 31), filmstrip.map { it.scoreText?.toInt() })
+        assertEquals(listOf("group-alt", "group-best", "group-low"), filmstrip.map { it.asset.id })
+        assertEquals(listOf("当前", "最佳", "低分"), filmstrip.map { it.badgeText })
+        assertEquals(listOf(76, 91, 31), filmstrip.map { it.scoreText?.toInt() })
     }
 
     @Test
@@ -1194,7 +701,6 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 3,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-first",
                 bestScore = 0.91,
@@ -1202,11 +708,11 @@ class ProjectUiModelsTest {
             quality = qualityScore(0.91),
         )
         val second = inboxAsset(id = "group-second").copy(
-            burst = first.burst?.copy(memberRank = 2),
+            burst = first.burst,
             quality = qualityScore(0.76),
         )
         val third = inboxAsset(id = "group-third").copy(
-            burst = first.burst?.copy(memberRank = 3),
+            burst = first.burst,
             quality = qualityScore(0.55),
         )
 
@@ -1230,7 +736,6 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "burst-best",
                 bestScore = 0.91,
@@ -1238,7 +743,7 @@ class ProjectUiModelsTest {
             quality = qualityScore(0.91),
         )
         val burstOther = inboxAsset(id = "burst-other").copy(
-            burst = burstBest.burst?.copy(memberRank = 2),
+            burst = burstBest.burst,
             quality = qualityScore(0.66),
         )
         val single = inboxAsset(id = "single")
@@ -1246,7 +751,6 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-2",
                 memberCount = 2,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "next-best",
                 bestScore = 0.82,
@@ -1276,7 +780,6 @@ class ProjectUiModelsTest {
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 4,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.91,
@@ -1284,15 +787,15 @@ class ProjectUiModelsTest {
             quality = qualityScore(0.91),
         )
         val current = inboxAsset(id = "group-current").copy(
-            burst = best.burst?.copy(memberRank = 3),
+            burst = best.burst,
             quality = qualityScore(0.55),
         )
         val highAlternative = inboxAsset(id = "group-alt").copy(
-            burst = best.burst?.copy(memberRank = 2),
+            burst = best.burst,
             quality = qualityScore(0.84),
         )
         val low = inboxAsset(id = "group-low").copy(
-            burst = best.burst?.copy(memberRank = 4),
+            burst = best.burst,
             quality = qualityScore(0.31),
         )
 
@@ -1309,117 +812,236 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun photoDetailDecisionUiEnablesActionsForRecommendedBest() {
-        val best = inboxAsset(id = "group-best").copy(
+    fun photoDetailActionBarVisibleForUnsupportedBurstMember() {
+        val raw = inboxAsset(id = "group-raw", displayPath = "group-raw.NEF").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 1,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
             ),
+            quality = null,
         )
+        val decision = photoDetailDecisionUi(raw, actionsEnabled = true)
 
-        val decision = photoDetailDecisionUi(best, actionsEnabled = true)
-
-        assertEquals("burst-1", decision.acceptRecommendedBestBurstGroupId)
-        assertEquals("burst-1", decision.markNeedsReviewBurstGroupId)
-        assertTrue(decision.acceptRecommendedBestEnabled)
-        assertTrue(decision.markNeedsReviewEnabled)
-        assertTrue(decision.hasAnyAction)
-        assertNull(decision.disabledReason)
+        assertTrue(photoDetailActionBarVisible(decision, hasActionCallbacks = true))
+        assertFalse(photoDetailActionBarVisible(decision, hasActionCallbacks = false))
+        assertTrue(decision.splitBurstEnabled)
     }
 
     @Test
-    fun photoDetailDecisionUiKeepsReviewActionForNonBestBurstMember() {
-        val alternate = inboxAsset(id = "group-alt").copy(
+    fun photoDetailFavoriteSelectedUsesPersistedUserMarksOnly() {
+        val recommended = inboxAsset(id = "group-best").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
             ),
         )
+        val favorite = recommended.copy(userMarks = InboxAssetUserMarks(favorite = true))
 
-        val decision = photoDetailDecisionUi(alternate, actionsEnabled = true)
-
-        assertNull(decision.acceptRecommendedBestBurstGroupId)
-        assertEquals("burst-1", decision.markNeedsReviewBurstGroupId)
-        assertFalse(decision.acceptRecommendedBestEnabled)
-        assertTrue(decision.markNeedsReviewEnabled)
-        assertEquals("当前照片不是推荐优选", decision.disabledReason)
+        assertFalse(photoDetailFavoriteSelected(recommended))
+        assertTrue(photoDetailFavoriteSelected(favorite))
     }
 
     @Test
-    fun photoDetailDecisionUiOffersManualBestOverrideForNonBestBurstMember() {
-        val alternate = inboxAsset(id = "group-alt").copy(
+    fun photoDetailMarkedSelectedUsesPersistedUserMarksOnly() {
+        val recommended = inboxAsset(id = "group-best").copy(
             burst = InboxAssetBurst(
                 burstGroupId = "burst-1",
                 memberCount = 2,
-                memberRank = 2,
                 recommendationStatus = "ready",
                 bestAssetGroupId = "group-best",
                 bestScore = 0.93,
             ),
         )
+        val marked = recommended.copy(userMarks = InboxAssetUserMarks(marked = true))
 
-        val decision = photoDetailDecisionUi(alternate, actionsEnabled = true)
+        assertFalse(photoDetailMarkedSelected(recommended))
+        assertTrue(photoDetailMarkedSelected(marked))
+    }
+
+    @Test
+    fun photoDetailActionBarVisibleForSingleAssetFavoriteOnly() {
+        val decision = photoDetailDecisionUi(inboxAsset(id = "single"), actionsEnabled = true)
+
+        assertTrue(photoDetailActionBarVisible(decision, hasActionCallbacks = true))
+        assertFalse(decision.hasAnyAction)
+        assertFalse(decision.splitBurstEnabled)
+    }
+
+    @Test
+    fun detailPageSlideOffsetUsesFullPageDirection() {
+        assertEquals(320, detailPageSlideOffset(320, DetailNavigationDirection.Next, entering = true))
+        assertEquals(-320, detailPageSlideOffset(320, DetailNavigationDirection.Next, entering = false))
+        assertEquals(-320, detailPageSlideOffset(320, DetailNavigationDirection.Previous, entering = true))
+        assertEquals(320, detailPageSlideOffset(320, DetailNavigationDirection.Previous, entering = false))
+    }
+
+    @Test
+    fun projectEvaluationSettingsDefaultsModelEvaluationOff() {
+        val settings = ProjectEvaluationSettingsUi(projectId = "project-client")
+        val ui = projectIntelligenceSettingsUi(settings = settings, providerConfigured = true)
+
+        assertFalse(settings.modelEvaluationEnabled)
+        assertFalse(ui.modelEvaluationEnabled)
+    }
+
+    @Test
+    fun promptProfileStyleTagsRenderAsCompactText() {
+        val profile = PromptProfileUi(
+            promptProfileId = "portrait-conservative",
+            scope = "global",
+            projectId = null,
+            name = "Portrait Conservative",
+            styleTags = listOf("portrait", "conservative"),
+            sceneProfile = "portrait",
+            activeVersionId = "version-1",
+            builtIn = true,
+            enabled = true,
+        )
+
+        assertEquals("人像 / 稳健", promptStyleTagsText(profile))
+    }
+
+    @Test
+    fun noKeyStateDisablesManualProjectRecommendation() {
+        val ui = manualProjectRecommendationActionUi(
+            provider = ModelProviderSettingsUi(configured = false),
+            settings = ProjectEvaluationSettingsUi(projectId = "project-client"),
+            actionInFlight = false,
+        )
+
+        assertFalse(ui.enabled)
+        assertEquals("生成项目优选", ui.ctaLabel)
+        assertEquals("模型服务未配置", ui.disabledReason)
+    }
+
+    @Test
+    fun noActiveProjectDisablesManualProjectRecommendation() {
+        val ui = manualProjectRecommendationActionUi(
+            provider = ModelProviderSettingsUi(configured = true),
+            settings = ProjectEvaluationSettingsUi(projectId = ""),
+            actionInFlight = false,
+        )
+
+        assertFalse(ui.enabled)
+        assertEquals("请先进入项目", ui.disabledReason)
+    }
+
+    @Test
+    fun automaticProjectRecommendationModeDisablesManualActionUi() {
+        val ui = manualProjectRecommendationActionUi(
+            provider = ModelProviderSettingsUi(configured = true),
+            settings = ProjectEvaluationSettingsUi(
+                projectId = "project-client",
+                projectRecommendationMode = "automatic",
+            ),
+            actionInFlight = false,
+        )
+
+        assertFalse(ui.enabled)
+        assertEquals("生成项目优选", ui.ctaLabel)
+    }
+
+    @Test
+    fun localStubSourceIsNotLabelledAsRealModelOutput() {
+        assertEquals("本地占位结果", modelEvaluationSourceLabel("local_stub"))
+        assertEquals("导入结果", modelEvaluationSourceLabel("imported"))
+        assertEquals("模型评价", modelEvaluationSourceLabel("llm_vlm"))
+    }
+
+    @Test
+    fun projectIntelligenceUiPreservesManualRecommendationMode() {
+        val ui = projectIntelligenceSettingsUi(
+            settings = ProjectEvaluationSettingsUi(
+                projectId = "project-client",
+                projectRecommendationMode = "automatic",
+            ),
+            providerConfigured = true,
+        )
+
+        assertEquals("manual", ui.projectRecommendationMode)
+    }
+
+    @Test
+    fun providerBatchSizeControlPreservesSingleItemBatch() {
+        assertEquals(1, providerBatchSizeValue(1))
+        assertEquals(1, providerBatchSizeValue(0))
+        assertEquals(8, providerBatchSizeValue(99))
+    }
+
+    @Test
+    fun manualProjectRecommendationActionCallsGatewayOnceAndReportsStatus() = runBlocking {
+        val gateway = RecordingProjectRecommendationGateway()
+        var feedback: String? = null
+
+        runManualProjectRecommendationAction(
+            projectId = "project-client",
+            provider = ModelProviderSettingsUi(providerKind = "openai", configured = true),
+            gateway = gateway,
+            onFeedback = { feedback = it },
+        )
+
+        assertEquals(listOf("project-client"), gateway.calls)
+        assertEquals("项目优选：已更新", feedback)
+    }
+
+    @Test
+    fun manualProjectRecommendationActionShowsSetupFeedbackWithoutGatewayCall() = runBlocking {
+        val gateway = RecordingProjectRecommendationGateway()
+        var feedback: String? = null
+
+        runManualProjectRecommendationAction(
+            projectId = "project-client",
+            provider = ModelProviderSettingsUi(providerKind = "none", configured = false),
+            gateway = gateway,
+            onFeedback = { feedback = it },
+        )
+
+        assertEquals(emptyList<String>(), gateway.calls)
+        assertEquals("请先配置模型服务", feedback)
+    }
+
+    @Test
+    fun projectRecommendationFeedbackRequiresSameActiveProject() {
+        val run = com.cameraconnector.app.core.EvaluationRunUi(
+            runId = "run-1",
+            projectId = "project-client",
+            runType = "project_recommendation",
+            trigger = "manual",
+            status = "ready",
+            providerKind = "openai",
+            providerModel = "gpt-5.5",
+        )
 
         assertEquals(
-            ManualBestOverrideTarget(
-                burstGroupId = "burst-1",
-                bestAssetGroupId = "group-alt",
-            ),
-            decision.overrideRecommendedBestTarget,
+            "项目优选：已更新",
+            projectRecommendationFeedbackForActiveProject(run, "project-client"),
         )
-        assertTrue(decision.overrideRecommendedBestEnabled)
-        assertTrue(decision.hasAnyAction)
+        assertNull(projectRecommendationFeedbackForActiveProject(run, "project-other"))
+        assertNull(projectRecommendationFeedbackForActiveProject(run, null))
     }
 
     @Test
-    fun photoDetailDecisionUiEnablesRestoreAutomaticForUserOverriddenBurst() {
-        val overridden = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "user_overridden",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
+    fun projectRecommendationRunIsScopedToActiveProjectForDisplay() {
+        val run = com.cameraconnector.app.core.EvaluationRunUi(
+            runId = "run-1",
+            projectId = "project-client",
+            runType = "project_recommendation",
+            trigger = "manual",
+            status = "ready",
+            providerKind = "openai",
+            providerModel = "gpt-5.5",
         )
 
-        val decision = photoDetailDecisionUi(overridden, actionsEnabled = true)
-
-        assertEquals("burst-1", decision.restoreAutomaticBurstGroupId)
-        assertTrue(decision.restoreAutomaticEnabled)
-        assertTrue(decision.hasAnyAction)
-        assertNull(decision.disabledReason)
-    }
-
-    @Test
-    fun photoDetailDecisionUiDisablesActionsWhileAnotherActionRuns() {
-        val best = inboxAsset(id = "group-best").copy(
-            burst = InboxAssetBurst(
-                burstGroupId = "burst-1",
-                memberCount = 2,
-                memberRank = 1,
-                recommendationStatus = "ready",
-                bestAssetGroupId = "group-best",
-                bestScore = 0.93,
-            ),
-        )
-
-        val decision = photoDetailDecisionUi(best, actionsEnabled = false)
-
-        assertEquals("burst-1", decision.acceptRecommendedBestBurstGroupId)
-        assertEquals("burst-1", decision.markNeedsReviewBurstGroupId)
-        assertFalse(decision.acceptRecommendedBestEnabled)
-        assertFalse(decision.markNeedsReviewEnabled)
-        assertEquals("正在处理上一项操作", decision.disabledReason)
+        assertEquals(run, scopedProjectRecommendationRun(run, "project-client"))
+        assertNull(scopedProjectRecommendationRun(run, "project-other"))
+        assertNull(scopedProjectRecommendationRun(run, null))
+        assertNull(scopedProjectRecommendationRun(null, "project-client"))
     }
 
     @Test
@@ -1427,8 +1049,6 @@ class ProjectUiModelsTest {
         val decision = photoDetailDecisionUi(inboxAsset(id = "single"), actionsEnabled = true)
 
         assertFalse(decision.hasAnyAction)
-        assertNull(decision.acceptRecommendedBestBurstGroupId)
-        assertNull(decision.markNeedsReviewBurstGroupId)
     }
 
     private fun project(
@@ -1498,35 +1118,20 @@ class ProjectUiModelsTest {
             llmEnabled = false,
         )
 
-    private fun reviewQueueSummary(
-        totalUnits: Int,
-        pendingCount: Int = 0,
-        unconfirmedBestCount: Int = 0,
-        needsReviewCount: Int = 0,
-        lowScoreCandidateCount: Int = 0,
-        nearDuplicateCount: Int = 0,
-        unsupportedCount: Int = 0,
-        userOverriddenCount: Int = 0,
-    ): ReviewQueueSummary =
-        ReviewQueueSummary(
-            projectId = "project-1",
-            strategyProfileId = "general",
-            totalUnits = totalUnits,
-            pendingCount = pendingCount,
-            unconfirmedBestCount = unconfirmedBestCount,
-            needsReviewCount = needsReviewCount,
-            lowScoreCandidateCount = lowScoreCandidateCount,
-            nearDuplicateCount = nearDuplicateCount,
-            unsupportedCount = unsupportedCount,
-            userOverriddenCount = userOverriddenCount,
-            queues = listOf(
-                ReviewQueueCount("pending", pendingCount),
-                ReviewQueueCount("unconfirmed_best", unconfirmedBestCount),
-                ReviewQueueCount("needs_review", needsReviewCount),
-                ReviewQueueCount("low_score_candidates", lowScoreCandidateCount),
-                ReviewQueueCount("near_duplicates", nearDuplicateCount),
-                ReviewQueueCount("unsupported", unsupportedCount),
-                ReviewQueueCount("user_overridden", userOverriddenCount),
-            ),
-        )
+    private class RecordingProjectRecommendationGateway : ProjectRecommendationGateway {
+        val calls = mutableListOf<String>()
+
+        override suspend fun generateProjectRecommendation(projectId: String) =
+            com.cameraconnector.app.core.EvaluationRunUi(
+                runId = "run-1",
+                projectId = projectId,
+                runType = "project_recommendation",
+                trigger = "manual",
+                status = "ready",
+                providerKind = "openai",
+                providerModel = "gpt-5.5",
+            ).also {
+                calls += projectId
+            }
+    }
 }

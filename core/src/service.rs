@@ -1,19 +1,28 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    append_transfer_record, group_received_assets, read_connected_devices,
-    read_receiver_runtime_status, read_transfer_log, recommend_from_scores, scan_inbox_groups,
-    score_preview_sample, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
-    BurstGroup, CameraConnectorConfig, ConnectedDevice, ImportSource, NewAnalysisJob, ObjectFormat,
-    PreviewSample, PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig,
-    QualityScore, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus,
-    ReceiverSettingsConfig, Result, ReviewQueueSummary, SelectionRecommendation,
-    SelectionRecommendationStatus, SelectionSource, SqliteStore, StoredAsset, StoredObjectLocation,
-    StrategyProfile, TransferRecord, TransferStatus,
+    append_transfer_record, assess_preview_sample, evaluate_asset_group_with_stub,
+    group_received_assets, normalized_review_queue_key, read_connected_devices,
+    read_receiver_runtime_status, read_transfer_log, recommend_burst_group_from_model_evaluations,
+    recommend_from_scores, recommend_project_selects, scan_inbox_groups, score_preview_sample,
+    AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole, AssetUserMarks, BurstGroup,
+    CameraConnectorConfig, ConnectedDevice, EvaluationRun, EvaluationRunStatus,
+    EvaluationRunTrigger, EvaluationRunType, ImportSource, ModelProviderKind,
+    ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob,
+    ObjectFormat, PreviewSample, ProjectEvaluationSettings, ProjectRecommendationMode,
+    ProjectStatus, PromptProfile, PromptProfileVersion, PromptScope, PublishQueueItem,
+    PublishQueueSummary, PushProtocol, PushReceiverConfig, QualityScore, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig,
+    Result, ReviewQueueSummary, SceneProfile, ScopedSelectionRecommendation,
+    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SelectionSource, SqliteStore, StoredAsset, StoredObjectLocation, StrategyProfile,
+    SubjectAssessment, TransferRecord, TransferStatus,
 };
+
+const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
 
 #[derive(Debug, Clone)]
 pub struct CameraConnectorService {
@@ -73,6 +82,8 @@ pub struct AssetGroupQuery {
     pub analysis_status: Option<String>,
     pub review_queue: Option<String>,
     pub strategy_profile_id: Option<String>,
+    pub favorite: Option<bool>,
+    pub marked: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,15 +267,14 @@ impl CameraConnectorService {
             .state_dir
             .clone()
             .unwrap_or_else(|| self.state_dir());
+        let active_project_id = app_config.active_project_id.clone();
         app_config.accounts = receiver_account_configs_from_state_dir(account_state_dir)?;
         config.accounts = app_config.effective_accounts(
             request.username.as_deref(),
             request.password.as_deref(),
             config.source_name.as_deref(),
         )?;
-        config.active_project_id = SqliteStore::open_state_dir(&config.state_dir)?
-            .active_project()?
-            .map(|project| project.project_id);
+        config.active_project_id = active_project_id;
         Ok(config)
     }
 
@@ -297,7 +307,13 @@ impl CameraConnectorService {
     }
 
     pub fn archive_project(&self, project_id: &str) -> Result<crate::Project> {
-        self.storage_store()?.archive_project(project_id)
+        let archived = self.storage_store()?.archive_project(project_id)?;
+        let mut config = self.load_config()?;
+        if config.active_project_id.as_deref() == Some(project_id) {
+            config.active_project_id = None;
+            self.save_config(&config)?;
+        }
+        Ok(archived)
     }
 
     pub fn restore_project(&self, project_id: &str) -> Result<crate::Project> {
@@ -305,15 +321,360 @@ impl CameraConnectorService {
     }
 
     pub fn set_active_project(&self, project_id: &str) -> Result<()> {
-        self.storage_store()?.set_active_project(project_id)
+        let project = self
+            .storage_store()?
+            .list_projects()?
+            .into_iter()
+            .find(|project| project.project_id == project_id)
+            .ok_or_else(|| crate::ImporterError::internal("project not found"))?;
+        if project.status != ProjectStatus::Active {
+            return Err(crate::ImporterError::internal("project archived"));
+        }
+        let mut config = self.load_config()?;
+        config.active_project_id = Some(project.project_id);
+        self.save_config(&config)?;
+        Ok(())
     }
 
     pub fn active_project(&self) -> Result<Option<crate::Project>> {
-        self.storage_store()?.active_project()
+        let Some(project_id) = self.load_config()?.active_project_id else {
+            return Ok(None);
+        };
+        Ok(self
+            .storage_store()?
+            .list_projects()?
+            .into_iter()
+            .find(|project| {
+                project.project_id == project_id && project.status == ProjectStatus::Active
+            }))
     }
 
     pub fn list_projects(&self) -> Result<Vec<crate::Project>> {
         self.storage_store()?.list_projects()
+    }
+
+    pub fn model_provider_settings(&self) -> Result<Option<crate::ModelProviderSettings>> {
+        let config = self.load_config()?.model_provider;
+        let provider_kind = config.provider_kind.trim();
+        if (provider_kind.is_empty() || provider_kind == "none")
+            && config.default_model.trim().is_empty()
+            && config.base_url.trim().is_empty()
+            && !config.configured
+        {
+            return Ok(None);
+        }
+        Ok(Some(model_provider_settings_from_config(config)))
+    }
+
+    pub fn save_model_provider_settings(
+        &self,
+        settings: crate::ModelProviderSettings,
+    ) -> Result<crate::ModelProviderSettings> {
+        self.save_model_provider_settings_with_api_key(settings, None)
+    }
+
+    pub fn save_model_provider_settings_with_api_key(
+        &self,
+        settings: ModelProviderSettings,
+        api_key: Option<String>,
+    ) -> Result<ModelProviderSettings> {
+        let mut config = self.load_config()?;
+        let existing_api_key = config.model_provider.api_key.take();
+        config.model_provider =
+            model_provider_settings_to_config(settings, api_key.or(existing_api_key));
+        self.save_config(&config)?;
+        Ok(model_provider_settings_from_config(config.model_provider))
+    }
+
+    pub fn project_evaluation_settings(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<ProjectEvaluationSettings>> {
+        self.storage_store()?
+            .project_evaluation_settings(project_id)
+    }
+
+    pub fn save_project_evaluation_settings(
+        &self,
+        mut settings: ProjectEvaluationSettings,
+    ) -> Result<ProjectEvaluationSettings> {
+        settings.project_recommendation_mode = ProjectRecommendationMode::Manual;
+        self.storage_store()?
+            .save_project_evaluation_settings(settings)
+    }
+
+    pub fn should_schedule_subject_assessment(&self, project_id: &str) -> Result<bool> {
+        let settings = self
+            .project_evaluation_settings(project_id)?
+            .unwrap_or_else(|| {
+                ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
+            });
+        Ok(should_schedule_subject_assessment_for_settings(&settings))
+    }
+
+    pub fn save_subject_assessment(
+        &self,
+        assessment: SubjectAssessment,
+    ) -> Result<SubjectAssessment> {
+        self.storage_store()?.save_subject_assessment(assessment)
+    }
+
+    pub fn subject_assessments_for_asset_groups(
+        &self,
+        project_id: &str,
+        group_ids: &[String],
+    ) -> Result<Vec<SubjectAssessment>> {
+        self.storage_store()?
+            .subject_assessments_for_asset_groups(project_id, group_ids)
+    }
+
+    pub fn prompt_profiles_for_project(&self, project_id: &str) -> Result<Vec<PromptProfile>> {
+        self.storage_store()?
+            .prompt_profiles_for_project(project_id)
+    }
+
+    pub fn global_prompt_profiles(&self) -> Result<Vec<PromptProfile>> {
+        Ok(self
+            .storage_store()?
+            .prompt_profiles_for_project("")?
+            .into_iter()
+            .filter(|profile| profile.scope == PromptScope::Global)
+            .collect())
+    }
+
+    pub fn active_prompt_text_for_profile(
+        &self,
+        prompt_profile_id: &str,
+    ) -> Result<Option<String>> {
+        let store = self.storage_store()?;
+        let Some(profile) = store.prompt_profile(prompt_profile_id)? else {
+            return Ok(None);
+        };
+        let Some(version_id) = profile.active_version_id.as_deref() else {
+            return Ok(None);
+        };
+        Ok(store
+            .prompt_profile_version(version_id)?
+            .map(|version| version.prompt_text))
+    }
+
+    pub fn fork_global_prompt_profile(
+        &self,
+        source_profile_id: &str,
+        name: impl AsRef<str>,
+        now_ms: i64,
+    ) -> Result<PromptProfile> {
+        let store = self.storage_store()?;
+        let source = store
+            .prompt_profile(source_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
+        if source.scope != PromptScope::Global || !source.enabled {
+            return Err(crate::ImporterError::internal(
+                "prompt profile is not available globally",
+            ));
+        }
+        let source_version_id = source.active_version_id.as_deref().ok_or_else(|| {
+            crate::ImporterError::internal("prompt profile has no active version")
+        })?;
+        let source_version = store
+            .prompt_profile_version(source_version_id)?
+            .ok_or_else(|| crate::ImporterError::internal("active prompt version not found"))?;
+        let profile_id = format!(
+            "global-prompt-{}-{}",
+            stable_id_fragment(source_profile_id),
+            now_ms
+        );
+        if store.prompt_profile(&profile_id)?.is_some() {
+            return Err(crate::ImporterError::internal(
+                "prompt profile fork already exists",
+            ));
+        }
+        let version_id = format!("{profile_id}-v1");
+        let profile = store.save_prompt_profile(PromptProfile {
+            prompt_profile_id: profile_id.clone(),
+            scope: PromptScope::Global,
+            project_id: None,
+            name: name.as_ref().trim().to_string(),
+            style_tags: source.style_tags,
+            scene_profile: source.scene_profile,
+            active_version_id: None,
+            built_in: false,
+            enabled: true,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+        })?;
+        let source_prompt_text = source_version.prompt_text;
+        store.save_prompt_profile_version(PromptProfileVersion {
+            prompt_version_id: version_id,
+            prompt_profile_id: profile.prompt_profile_id.clone(),
+            prompt_text: source_prompt_text.clone(),
+            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            prompt_hash: stable_prompt_hash(
+                MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION,
+                &source_prompt_text,
+            ),
+            created_at_ms: now_ms,
+        })?;
+        store
+            .prompt_profile(&profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+    }
+
+    pub fn save_global_prompt_profile_version(
+        &self,
+        prompt_profile_id: &str,
+        prompt_text: impl AsRef<str>,
+        now_ms: i64,
+    ) -> Result<PromptProfile> {
+        let store = self.storage_store()?;
+        let profile = store
+            .prompt_profile(prompt_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
+        if profile.scope != PromptScope::Global || profile.built_in || !profile.enabled {
+            return Err(crate::ImporterError::internal(
+                "prompt profile is not editable globally",
+            ));
+        }
+        let prompt_text = prompt_text.as_ref().to_string();
+        let prompt_hash =
+            stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, prompt_text.as_str());
+        let version_id = format!(
+            "{}-v{}-{}",
+            stable_id_fragment(prompt_profile_id),
+            now_ms,
+            &prompt_hash["fnv1a64-".len()..]
+        );
+        if store.prompt_profile_version(&version_id)?.is_some() {
+            return Err(crate::ImporterError::internal(
+                "prompt profile version already exists",
+            ));
+        }
+        store.save_prompt_profile_version(PromptProfileVersion {
+            prompt_version_id: version_id,
+            prompt_profile_id: prompt_profile_id.to_string(),
+            prompt_text,
+            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            prompt_hash,
+            created_at_ms: now_ms,
+        })?;
+        store
+            .prompt_profile(prompt_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+    }
+
+    pub fn fork_prompt_profile_for_project(
+        &self,
+        project_id: &str,
+        source_profile_id: &str,
+        name: impl AsRef<str>,
+        now_ms: i64,
+    ) -> Result<PromptProfile> {
+        let store = self.storage_store()?;
+        ensure_service_project_is_active(&store, project_id)?;
+        let source = store
+            .prompt_profile(source_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
+        if !prompt_profile_available_to_project(&source, project_id) {
+            return Err(crate::ImporterError::internal(
+                "prompt profile is not available to this project",
+            ));
+        }
+        let source_version_id = source.active_version_id.as_deref().ok_or_else(|| {
+            crate::ImporterError::internal("prompt profile has no active version")
+        })?;
+        let source_version = store
+            .prompt_profile_version(source_version_id)?
+            .ok_or_else(|| crate::ImporterError::internal("active prompt version not found"))?;
+        let profile_id = format!(
+            "project-prompt-{}-{}-{}",
+            stable_id_fragment(project_id),
+            stable_id_fragment(source_profile_id),
+            now_ms
+        );
+        if store.prompt_profile(&profile_id)?.is_some() {
+            return Err(crate::ImporterError::internal(
+                "prompt profile fork already exists",
+            ));
+        }
+        let version_id = format!("{profile_id}-v1");
+        let profile = store.save_prompt_profile(PromptProfile {
+            prompt_profile_id: profile_id.clone(),
+            scope: PromptScope::Project,
+            project_id: Some(project_id.to_string()),
+            name: name.as_ref().trim().to_string(),
+            style_tags: source.style_tags,
+            scene_profile: source.scene_profile,
+            active_version_id: None,
+            built_in: false,
+            enabled: true,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+        })?;
+        let source_prompt_text = source_version.prompt_text;
+        store.save_prompt_profile_version(PromptProfileVersion {
+            prompt_version_id: version_id,
+            prompt_profile_id: profile.prompt_profile_id.clone(),
+            prompt_text: source_prompt_text.clone(),
+            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            prompt_hash: stable_prompt_hash(
+                MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION,
+                &source_prompt_text,
+            ),
+            created_at_ms: now_ms,
+        })?;
+        store
+            .prompt_profile(&profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+    }
+
+    pub fn save_prompt_profile_version(
+        &self,
+        project_id: &str,
+        prompt_profile_id: &str,
+        prompt_text: impl AsRef<str>,
+        now_ms: i64,
+    ) -> Result<PromptProfileVersion> {
+        let store = self.storage_store()?;
+        ensure_service_project_is_active(&store, project_id)?;
+        let profile = store
+            .prompt_profile(prompt_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
+        if profile.scope == PromptScope::Global && profile.built_in {
+            return Err(crate::ImporterError::internal(
+                "built-in prompt profiles must be forked before editing",
+            ));
+        }
+        if profile.scope != PromptScope::Project
+            || profile.project_id.as_deref() != Some(project_id)
+            || !profile.enabled
+        {
+            return Err(crate::ImporterError::internal(
+                "prompt profile is not editable for this project",
+            ));
+        }
+
+        let prompt_text = prompt_text.as_ref().to_string();
+        let prompt_hash =
+            stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, prompt_text.as_str());
+        let version_id = format!(
+            "{}-v{}-{}",
+            stable_id_fragment(prompt_profile_id),
+            now_ms,
+            &prompt_hash["fnv1a64-".len()..]
+        );
+        if store.prompt_profile_version(&version_id)?.is_some() {
+            return Err(crate::ImporterError::internal(
+                "prompt profile version already exists",
+            ));
+        }
+        store.save_prompt_profile_version(PromptProfileVersion {
+            prompt_version_id: version_id,
+            prompt_profile_id: prompt_profile_id.to_string(),
+            prompt_text,
+            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            prompt_hash,
+            created_at_ms: now_ms,
+        })
     }
 
     pub fn record_project_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
@@ -352,7 +713,17 @@ impl CameraConnectorService {
     }
 
     pub fn drain_analysis_jobs(&self, limit: usize) -> Result<AnalysisDrainSummary> {
+        let provider_configured = self.provider_configured_for_model_work()?;
+        self.drain_analysis_jobs_with_provider_configured(limit, provider_configured)
+    }
+
+    pub fn drain_analysis_jobs_with_provider_configured(
+        &self,
+        limit: usize,
+        provider_configured: bool,
+    ) -> Result<AnalysisDrainSummary> {
         let store = self.storage_store()?;
+        let provider = self.model_provider_settings()?;
         let now = current_time_ms();
         let jobs = store.claim_analysis_jobs(now, limit)?;
         let claimed_count = jobs.len();
@@ -360,7 +731,7 @@ impl CameraConnectorService {
         let mut failed_count = 0;
 
         for job in jobs {
-            match run_analysis_job(&store, &job) {
+            match run_analysis_job(&store, &job, provider_configured, provider.clone()) {
                 Ok(()) => {
                     store.complete_analysis_job(&job.job_id)?;
                     completed_count += 1;
@@ -386,21 +757,74 @@ impl CameraConnectorService {
         sample: PreviewSample,
         scorer_version: &str,
     ) -> Result<QualityScore> {
-        let score = score_preview_sample(asset_group_id, sample, scorer_version, current_time_ms());
+        let provider_configured = self.provider_configured_for_model_work()?;
+        self.score_asset_group_preview_with_provider_configured(
+            asset_group_id,
+            sample,
+            scorer_version,
+            provider_configured,
+        )
+    }
+
+    pub fn score_asset_group_preview_with_provider_configured(
+        &self,
+        asset_group_id: &str,
+        sample: PreviewSample,
+        scorer_version: &str,
+        provider_configured: bool,
+    ) -> Result<QualityScore> {
+        let now = current_time_ms();
+        let score = score_preview_sample(asset_group_id, sample.clone(), scorer_version, now);
+        let assessment = assess_preview_sample(asset_group_id, sample, "technical-v1", now);
         let store = self.storage_store()?;
+        let project_id = store
+            .project_id_for_asset_group(asset_group_id)?
+            .ok_or_else(|| crate::ImporterError::internal("asset group not found"))?;
         let saved = store.save_quality_score(score)?;
+        let saved_assessment = store.save_technical_assessment(assessment)?;
+        if self.should_run_upload_model_evaluation(&store, &project_id, provider_configured)? {
+            let provider = self.model_provider_settings()?;
+            let evaluation = model_evaluation_for_upload(
+                &store,
+                &project_id,
+                asset_group_id,
+                &saved_assessment,
+                provider,
+                now,
+            )?;
+            store.save_model_evaluation(evaluation)?;
+        }
         if let Some(burst) = store.burst_group_for_asset_group(&saved.asset_group_id)? {
             let profile = default_strategy_profile(&store)?;
-            let dedupe_key = recommend_job_dedupe_key(&burst.burst_group_id, &profile);
-            let mut job = NewAnalysisJob::new(
-                &burst.project_id,
-                AnalysisJobType::RecommendBurstGroup,
-                AnalysisEntityType::BurstGroup,
+            let refined_bursts = store.refine_burst_group_by_visual_similarity(
                 &burst.burst_group_id,
-                &dedupe_key,
-            );
-            job.priority = 25;
-            store.enqueue_analysis_job(job)?;
+                &profile,
+                scorer_version,
+            )?;
+            let bursts = if refined_bursts.is_empty() {
+                Vec::new()
+            } else {
+                refined_bursts
+            };
+            let settings = store
+                .project_evaluation_settings(&project_id)?
+                .unwrap_or_else(|| {
+                    ProjectEvaluationSettings::default_for_project(&project_id, now)
+                });
+            if settings.auto_burst_recommendation_enabled {
+                for burst in bursts {
+                    let dedupe_key = recommend_job_dedupe_key(&burst.burst_group_id, &profile);
+                    let mut job = NewAnalysisJob::new(
+                        &burst.project_id,
+                        AnalysisJobType::RecommendBurstGroup,
+                        AnalysisEntityType::BurstGroup,
+                        &burst.burst_group_id,
+                        &dedupe_key,
+                    );
+                    job.priority = 25;
+                    store.enqueue_analysis_job(job)?;
+                }
+            }
         }
         Ok(saved)
     }
@@ -432,6 +856,114 @@ impl CameraConnectorService {
             current_time_ms(),
         );
         store.save_selection_recommendation(recommendation)
+    }
+
+    pub fn recommend_burst_group_from_model(
+        &self,
+        burst_group_id: &str,
+    ) -> Result<ScopedSelectionRecommendation> {
+        let store = self.storage_store()?;
+        let now_ms = current_time_ms();
+        let burst = store
+            .burst_group(burst_group_id)?
+            .ok_or_else(|| crate::ImporterError::internal("burst group not found"))?;
+        let evaluations =
+            store.model_evaluations_for_asset_groups(&burst.member_group_ids, "model-stub-v1")?;
+        let assessments = store
+            .technical_assessments_for_asset_groups(&burst.member_group_ids, "technical-v1")?;
+        let run = burst_recommendation_run(
+            &store,
+            &burst.project_id,
+            burst_group_id,
+            EvaluationRunTrigger::Manual,
+            self.model_provider_settings()?,
+            now_ms,
+        )?;
+        let mut recommendation = recommend_burst_group_from_model_evaluations(
+            &burst.project_id,
+            burst_group_id,
+            &evaluations,
+            &assessments,
+            now_ms,
+        );
+        recommendation.run_id = Some(run.run_id.clone());
+        store.save_evaluation_run(run)?;
+        store.save_scoped_selection_recommendation(recommendation)
+    }
+
+    pub fn generate_project_recommendation(
+        &self,
+        project_id: &str,
+        now_ms: i64,
+    ) -> Result<ScopedSelectionRecommendation> {
+        let store = self.storage_store()?;
+        if !self.provider_configured_for_model_work()? {
+            return Err(crate::ImporterError::internal(
+                "model provider is not configured",
+            ));
+        }
+        let project = store
+            .list_projects()?
+            .into_iter()
+            .find(|project| project.project_id == project_id)
+            .ok_or_else(|| crate::ImporterError::internal("project not found"))?;
+        if project.status == ProjectStatus::Archived {
+            return Err(crate::ImporterError::internal("project is archived"));
+        }
+        let provider = self.model_provider_settings()?.ok_or_else(|| {
+            crate::ImporterError::internal("model provider settings not configured")
+        })?;
+        let settings = store
+            .project_evaluation_settings(project_id)?
+            .unwrap_or_else(|| ProjectEvaluationSettings::default_for_project(project_id, now_ms));
+        let prompt_snapshot = prompt_snapshot_for_settings(&store, &settings)?;
+        let run_id = evaluation_run_id(
+            project_id,
+            EvaluationRunType::ProjectRecommendation,
+            project_id,
+            now_ms,
+        );
+        let run = EvaluationRun {
+            run_id: run_id.clone(),
+            project_id: project_id.to_string(),
+            run_type: EvaluationRunType::ProjectRecommendation,
+            trigger: EvaluationRunTrigger::Manual,
+            status: EvaluationRunStatus::Ready,
+            provider_kind: provider.provider_kind,
+            provider_model: provider.default_model,
+            prompt_profile_id: prompt_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.prompt_profile_id.clone()),
+            prompt_version_id: prompt_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.prompt_version_id.clone()),
+            prompt_hash: prompt_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.prompt_hash.clone()),
+            settings_snapshot_json: serde_json::to_string(&settings)
+                .map_err(|error| crate::ImporterError::internal(error.to_string()))?,
+            error_message: None,
+            started_at_ms: Some(now_ms),
+            completed_at_ms: Some(now_ms),
+            created_at_ms: now_ms,
+        };
+        store.save_evaluation_run(run)?;
+        let group_ids = project_recommendation_candidate_group_ids(&store, project_id)?;
+        let evaluations = store.model_evaluations_for_asset_groups(&group_ids, "model-stub-v1")?;
+        let burst_recommendations =
+            project_burst_recommendations_for_candidates(&store, project_id, &group_ids)?;
+        let mut recommendation =
+            recommend_project_selects(project_id, &evaluations, &burst_recommendations, now_ms);
+        recommendation.run_id = Some(run_id);
+        store.save_scoped_selection_recommendation(recommendation)
+    }
+
+    pub fn latest_project_recommendation_run_status(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<EvaluationRun>> {
+        self.storage_store()?
+            .latest_evaluation_run(project_id, EvaluationRunType::ProjectRecommendation)
     }
 
     pub fn accept_recommended_best(
@@ -690,6 +1222,32 @@ impl CameraConnectorService {
         store.save_selection_recommendation(recommendation)
     }
 
+    fn provider_configured_for_model_work(&self) -> Result<bool> {
+        Ok(self
+            .model_provider_settings()?
+            .map(|settings| {
+                settings.configured && !matches!(settings.provider_kind, ModelProviderKind::None)
+            })
+            .unwrap_or(false))
+    }
+
+    fn should_run_upload_model_evaluation(
+        &self,
+        store: &SqliteStore,
+        project_id: &str,
+        provider_configured: bool,
+    ) -> Result<bool> {
+        if !provider_configured {
+            return Ok(false);
+        }
+        let settings = store
+            .project_evaluation_settings(project_id)?
+            .unwrap_or_else(|| {
+                ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
+            });
+        Ok(settings.model_evaluation_enabled && settings.auto_evaluate_on_upload)
+    }
+
     pub fn set_account(
         &self,
         username: impl Into<String>,
@@ -774,7 +1332,8 @@ impl CameraConnectorService {
         state_dir: impl AsRef<Path>,
         query: AssetGroupQuery,
     ) -> Result<Vec<ReceivedAssetGroup>> {
-        let accounts = self.receiver_account_configs()?;
+        let state_dir = state_dir.as_ref();
+        let accounts = receiver_account_configs_from_state_dir(state_dir)?;
         let records = read_transfer_log(state_dir)?
             .into_iter()
             .filter(|record| record.status == TransferStatus::Completed)
@@ -837,6 +1396,7 @@ impl CameraConnectorService {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .filter(|value| !is_direct_asset_group_queue(value))
             .is_some()
         {
             return self
@@ -853,6 +1413,17 @@ impl CameraConnectorService {
         group_id: &str,
     ) -> Result<Vec<StoredAsset>> {
         self.storage_store()?.assets_for_group(project_id, group_id)
+    }
+
+    pub fn set_asset_group_user_marks(
+        &self,
+        project_id: &str,
+        group_id: &str,
+        favorite: Option<bool>,
+        marked: Option<bool>,
+    ) -> Result<AssetUserMarks> {
+        self.storage_store()?
+            .set_asset_group_user_marks(project_id, group_id, favorite, marked)
     }
 
     pub fn move_project_asset_group(
@@ -877,7 +1448,8 @@ impl CameraConnectorService {
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
     ) -> Result<Vec<TransferRecordView>> {
-        let accounts = self.receiver_account_configs()?;
+        let output_dir = output_dir.as_ref();
+        let accounts = receiver_account_configs_from_state_dir(output_dir)?;
         let views = read_transfer_log(output_dir)?
             .into_iter()
             .filter(|record| transfer_matches(record, &query, &accounts))
@@ -927,7 +1499,8 @@ impl CameraConnectorService {
         output_dir: impl AsRef<Path>,
         query: TransferQuery,
     ) -> Result<TransferSummary> {
-        let accounts = self.receiver_account_configs()?;
+        let output_dir = output_dir.as_ref();
+        let accounts = receiver_account_configs_from_state_dir(output_dir)?;
         let records = read_transfer_log(output_dir)?
             .into_iter()
             .filter(|record| transfer_matches(record, &query, &accounts))
@@ -1092,6 +1665,13 @@ impl CameraConnectorService {
     }
 }
 
+fn is_direct_asset_group_queue(queue: &str) -> bool {
+    matches!(
+        normalized_review_queue_key(queue).as_str(),
+        "model_selects" | "favorites" | "flagged" | "quality_risk" | "pending_analysis"
+    )
+}
+
 fn receiver_account_configs_from_state_dir(
     state_dir: impl AsRef<Path>,
 ) -> Result<BTreeMap<String, ReceiverAccountConfig>> {
@@ -1190,7 +1770,12 @@ fn accounts_with_devices(
         .collect()
 }
 
-fn run_analysis_job(store: &SqliteStore, job: &AnalysisJob) -> Result<()> {
+fn run_analysis_job(
+    store: &SqliteStore,
+    job: &AnalysisJob,
+    provider_configured: bool,
+    provider: Option<ModelProviderSettings>,
+) -> Result<()> {
     match (job.job_type, job.entity_type) {
         (AnalysisJobType::DetectBurstForAssetGroup, AnalysisEntityType::AssetGroup) => {
             let profile = default_strategy_profile(store)?;
@@ -1199,7 +1784,59 @@ fn run_analysis_job(store: &SqliteStore, job: &AnalysisJob) -> Result<()> {
             Ok(())
         }
         (AnalysisJobType::ScoreAssetGroup, AnalysisEntityType::AssetGroup) => Ok(()),
+        (AnalysisJobType::AssessAssetGroupTechnicalQuality, AnalysisEntityType::AssetGroup) => {
+            Ok(())
+        }
+        (AnalysisJobType::AssessPortraitSubject, AnalysisEntityType::AssetGroup) => {
+            // Core owns the scheduling and storage contract. Android/imported clients provide
+            // detector output through save_subject_assessment; no detector is bundled here.
+            Ok(())
+        }
+        (AnalysisJobType::EvaluateAssetGroupWithModel, AnalysisEntityType::AssetGroup) => {
+            let settings = store
+                .project_evaluation_settings(&job.project_id)?
+                .unwrap_or_else(|| {
+                    ProjectEvaluationSettings::default_for_project(
+                        &job.project_id,
+                        current_time_ms(),
+                    )
+                });
+            if !provider_configured
+                || !settings.model_evaluation_enabled
+                || !settings.auto_evaluate_on_upload
+            {
+                return Ok(());
+            }
+            let assessments = store.technical_assessments_for_asset_groups(
+                std::slice::from_ref(&job.entity_id),
+                "technical-v1",
+            )?;
+            let assessment = assessments
+                .first()
+                .ok_or_else(|| crate::ImporterError::internal("technical assessment not found"))?;
+            let evaluation = model_evaluation_for_upload(
+                store,
+                &job.project_id,
+                &job.entity_id,
+                assessment,
+                provider.clone(),
+                current_time_ms(),
+            )?;
+            store.save_model_evaluation(evaluation)?;
+            Ok(())
+        }
         (AnalysisJobType::RecommendBurstGroup, AnalysisEntityType::BurstGroup) => {
+            let settings = store
+                .project_evaluation_settings(&job.project_id)?
+                .unwrap_or_else(|| {
+                    ProjectEvaluationSettings::default_for_project(
+                        &job.project_id,
+                        current_time_ms(),
+                    )
+                });
+            if !settings.auto_burst_recommendation_enabled {
+                return Ok(());
+            }
             let profile = default_strategy_profile(store)?;
             let burst = store
                 .burst_group(&job.entity_id)?
@@ -1214,10 +1851,241 @@ fn run_analysis_job(store: &SqliteStore, job: &AnalysisJob) -> Result<()> {
                 current_time_ms(),
             );
             store.save_selection_recommendation(recommendation)?;
+            let evaluations = store
+                .model_evaluations_for_asset_groups(&burst.member_group_ids, "model-stub-v1")?;
+            if !evaluations.is_empty() {
+                let now_ms = current_time_ms();
+                let run = burst_recommendation_run(
+                    store,
+                    &burst.project_id,
+                    &burst.burst_group_id,
+                    EvaluationRunTrigger::BurstStable,
+                    provider.clone(),
+                    now_ms,
+                )?;
+                let assessments = store.technical_assessments_for_asset_groups(
+                    &burst.member_group_ids,
+                    "technical-v1",
+                )?;
+                let mut scoped_recommendation = recommend_burst_group_from_model_evaluations(
+                    &burst.project_id,
+                    &burst.burst_group_id,
+                    &evaluations,
+                    &assessments,
+                    now_ms,
+                );
+                scoped_recommendation.run_id = Some(run.run_id.clone());
+                store.save_evaluation_run(run)?;
+                store.save_scoped_selection_recommendation(scoped_recommendation)?;
+            }
+            Ok(())
+        }
+        (AnalysisJobType::RecommendProjectSelects, AnalysisEntityType::Project) => {
+            // Manual-only: stale/background project-select jobs are completed as ignored work so
+            // upload drains cannot create project recommendations or retry them forever.
             Ok(())
         }
         _ => Ok(()),
     }
+}
+
+fn project_recommendation_candidate_group_ids(
+    store: &SqliteStore,
+    project_id: &str,
+) -> Result<Vec<String>> {
+    let group_ids = store
+        .stored_asset_groups(project_id)?
+        .into_iter()
+        .map(|group| group.group_id)
+        .collect::<Vec<_>>();
+    let mut candidate_ids = Vec::new();
+    let mut burst_group_ids = BTreeSet::new();
+    for group_id in &group_ids {
+        if let Some(burst) = store.burst_group_for_asset_group(group_id)? {
+            burst_group_ids.insert(burst.burst_group_id);
+        } else {
+            candidate_ids.push(group_id.clone());
+        }
+    }
+    for burst_group_id in burst_group_ids {
+        let Some(recommendation) = store.latest_scoped_selection_recommendation(
+            project_id,
+            SelectionRecommendationScope::BurstGroup,
+            &burst_group_id,
+        )?
+        else {
+            continue;
+        };
+        if recommendation.status == SelectionRecommendationStatus::Ready {
+            candidate_ids.extend(recommendation.selected_asset_group_ids);
+        }
+    }
+    candidate_ids.sort();
+    candidate_ids.dedup();
+    Ok(candidate_ids)
+}
+
+fn project_burst_recommendations_for_candidates(
+    store: &SqliteStore,
+    project_id: &str,
+    group_ids: &[String],
+) -> Result<Vec<ScopedSelectionRecommendation>> {
+    let mut burst_group_ids = BTreeSet::new();
+    for group_id in group_ids {
+        if let Some(burst) = store.burst_group_for_asset_group(group_id)? {
+            burst_group_ids.insert(burst.burst_group_id);
+        }
+    }
+    let mut burst_recommendations = Vec::new();
+    for burst_group_id in burst_group_ids {
+        if let Some(recommendation) = store.latest_scoped_selection_recommendation(
+            project_id,
+            SelectionRecommendationScope::BurstGroup,
+            &burst_group_id,
+        )? {
+            burst_recommendations.push(recommendation);
+        }
+    }
+    Ok(burst_recommendations)
+}
+
+fn model_evaluation_for_upload(
+    store: &SqliteStore,
+    project_id: &str,
+    asset_group_id: &str,
+    assessment: &crate::TechnicalAssessment,
+    provider: Option<ModelProviderSettings>,
+    now_ms: i64,
+) -> Result<crate::ModelEvaluation> {
+    let mut evaluation =
+        evaluate_asset_group_with_stub(project_id, asset_group_id, assessment, now_ms);
+    let settings = store
+        .project_evaluation_settings(project_id)?
+        .unwrap_or_else(|| ProjectEvaluationSettings::default_for_project(project_id, now_ms));
+    let prompt_snapshot = prompt_snapshot_for_settings(store, &settings)?;
+    let run_id = evaluation_run_id(
+        project_id,
+        EvaluationRunType::AssetEvaluation,
+        asset_group_id,
+        now_ms,
+    );
+    let run = EvaluationRun {
+        run_id: run_id.clone(),
+        project_id: project_id.to_string(),
+        run_type: EvaluationRunType::AssetEvaluation,
+        trigger: EvaluationRunTrigger::Upload,
+        status: EvaluationRunStatus::Ready,
+        provider_kind: provider
+            .as_ref()
+            .map(|settings| settings.provider_kind)
+            .unwrap_or(ModelProviderKind::None),
+        provider_model: provider
+            .map(|settings| settings.default_model)
+            .unwrap_or_else(|| "model-stub-v1".to_string()),
+        prompt_profile_id: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_profile_id.clone()),
+        prompt_version_id: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_version_id.clone()),
+        prompt_hash: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_hash.clone()),
+        settings_snapshot_json: serde_json::to_string(&settings)
+            .map_err(|error| crate::ImporterError::internal(error.to_string()))?,
+        error_message: None,
+        started_at_ms: Some(now_ms),
+        completed_at_ms: Some(now_ms),
+        created_at_ms: now_ms,
+    };
+    store.save_evaluation_run(run)?;
+    evaluation.run_id = run_id;
+    if let Some(snapshot) = prompt_snapshot {
+        evaluation.prompt_profile_id = Some(snapshot.prompt_profile_id);
+        evaluation.prompt_version_id = Some(snapshot.prompt_version_id);
+        evaluation.prompt_hash = Some(snapshot.prompt_hash);
+    }
+    Ok(evaluation)
+}
+
+fn burst_recommendation_run(
+    store: &SqliteStore,
+    project_id: &str,
+    burst_group_id: &str,
+    trigger: EvaluationRunTrigger,
+    provider: Option<ModelProviderSettings>,
+    now_ms: i64,
+) -> Result<EvaluationRun> {
+    let settings = store
+        .project_evaluation_settings(project_id)?
+        .unwrap_or_else(|| ProjectEvaluationSettings::default_for_project(project_id, now_ms));
+    let prompt_snapshot = prompt_snapshot_for_settings(store, &settings)?;
+    Ok(EvaluationRun {
+        run_id: evaluation_run_id(
+            project_id,
+            EvaluationRunType::BurstRecommendation,
+            burst_group_id,
+            now_ms,
+        ),
+        project_id: project_id.to_string(),
+        run_type: EvaluationRunType::BurstRecommendation,
+        trigger,
+        status: EvaluationRunStatus::Ready,
+        provider_kind: provider
+            .as_ref()
+            .map(|settings| settings.provider_kind)
+            .unwrap_or(ModelProviderKind::None),
+        provider_model: provider
+            .map(|settings| settings.default_model)
+            .unwrap_or_else(|| "model-stub-v1".to_string()),
+        prompt_profile_id: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_profile_id.clone()),
+        prompt_version_id: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_version_id.clone()),
+        prompt_hash: prompt_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.prompt_hash.clone()),
+        settings_snapshot_json: serde_json::to_string(&settings)
+            .map_err(|error| crate::ImporterError::internal(error.to_string()))?,
+        error_message: None,
+        started_at_ms: Some(now_ms),
+        completed_at_ms: Some(now_ms),
+        created_at_ms: now_ms,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct PromptSnapshot {
+    prompt_profile_id: String,
+    prompt_version_id: String,
+    prompt_hash: String,
+}
+
+fn prompt_snapshot_for_settings(
+    store: &SqliteStore,
+    settings: &ProjectEvaluationSettings,
+) -> Result<Option<PromptSnapshot>> {
+    let Some(prompt_profile_id) = settings.prompt_profile_id.as_deref() else {
+        return Ok(None);
+    };
+    let profile = store
+        .prompt_profiles_for_project(&settings.project_id)?
+        .into_iter()
+        .find(|profile| profile.prompt_profile_id == prompt_profile_id)
+        .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
+    let Some(version_id) = profile.active_version_id else {
+        return Ok(None);
+    };
+    let version = store
+        .prompt_profile_version(&version_id)?
+        .ok_or_else(|| crate::ImporterError::internal("prompt version not found"))?;
+    Ok(Some(PromptSnapshot {
+        prompt_profile_id: profile.prompt_profile_id,
+        prompt_version_id: version.prompt_version_id,
+        prompt_hash: version.prompt_hash,
+    }))
 }
 
 fn default_strategy_profile(store: &SqliteStore) -> Result<StrategyProfile> {
@@ -1243,11 +2111,144 @@ fn recommend_job_dedupe_key(burst_group_id: &str, profile: &StrategyProfile) -> 
     )
 }
 
+fn evaluation_run_id(
+    project_id: &str,
+    run_type: EvaluationRunType,
+    subject_id: &str,
+    now_ms: i64,
+) -> String {
+    let key = format!("{}:{project_id}:{subject_id}:{now_ms}", run_type.as_str());
+    let mut hash = 1469598103934665603_u64;
+    for byte in key.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("evaluation-run-{hash:016x}")
+}
+
+fn model_provider_settings_from_config(
+    config: ModelProviderSettingsConfig,
+) -> ModelProviderSettings {
+    let api_key_configured = config
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+        || config
+            .key_alias
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some();
+    ModelProviderSettings {
+        settings_id: "global".to_string(),
+        provider_kind: ModelProviderKind::from_str(config.provider_kind.trim()),
+        provider_label: config.provider_label,
+        base_url: config.base_url,
+        default_model: config.default_model,
+        default_max_image_side: if config.default_max_image_side > 0 {
+            config.default_max_image_side
+        } else {
+            1024
+        },
+        default_send_mode: ModelSendMode::from_str(config.default_send_mode.trim()),
+        default_batch_size: config.default_batch_size.max(1),
+        configured: config.configured,
+        api_key_configured,
+        key_alias: config.key_alias,
+        updated_at_ms: config.updated_at_ms,
+    }
+}
+
+fn model_provider_settings_to_config(
+    settings: ModelProviderSettings,
+    api_key: Option<String>,
+) -> ModelProviderSettingsConfig {
+    let api_key = api_key.and_then(|value| {
+        let value = value.trim().to_string();
+        (!value.is_empty()).then_some(value)
+    });
+    ModelProviderSettingsConfig {
+        provider_kind: settings.provider_kind.as_str().to_string(),
+        provider_label: settings.provider_label,
+        base_url: settings.base_url,
+        default_model: settings.default_model,
+        default_max_image_side: settings.default_max_image_side.max(1),
+        default_send_mode: settings.default_send_mode.as_str().to_string(),
+        default_batch_size: settings.default_batch_size.max(1),
+        configured: settings.configured,
+        api_key,
+        key_alias: settings.key_alias,
+        updated_at_ms: if settings.updated_at_ms == 0 {
+            current_time_ms()
+        } else {
+            settings.updated_at_ms
+        },
+    }
+}
+
 fn current_time_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
+}
+
+fn ensure_service_project_is_active(store: &SqliteStore, project_id: &str) -> Result<()> {
+    let project = store
+        .list_projects()?
+        .into_iter()
+        .find(|project| project.project_id == project_id)
+        .ok_or_else(|| crate::ImporterError::internal("project not found"))?;
+    if project.status != ProjectStatus::Active {
+        return Err(crate::ImporterError::internal("project archived"));
+    }
+    Ok(())
+}
+
+fn prompt_profile_available_to_project(profile: &PromptProfile, project_id: &str) -> bool {
+    profile.enabled
+        && match profile.scope {
+            PromptScope::Global => true,
+            PromptScope::Project => profile.project_id.as_deref() == Some(project_id),
+        }
+}
+
+fn should_schedule_subject_assessment_for_settings(settings: &ProjectEvaluationSettings) -> bool {
+    settings.scene_profile == SceneProfile::Portrait
+}
+
+fn stable_prompt_hash(output_schema_version: &str, prompt_text: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in output_schema_version
+        .as_bytes()
+        .iter()
+        .copied()
+        .chain([0])
+        .chain(prompt_text.as_bytes().iter().copied())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64-{hash:016x}")
+}
+
+fn stable_id_fragment(value: &str) -> String {
+    let mut output = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            output.push(character.to_ascii_lowercase());
+        } else if !output.ends_with('-') {
+            output.push('-');
+        }
+    }
+    let output = output.trim_matches('-');
+    if output.is_empty() {
+        "id".to_string()
+    } else {
+        output.to_string()
+    }
 }
 
 fn summarize_asset_groups(groups: &[ReceivedAssetGroup]) -> AssetGroupSummary {
@@ -1282,9 +2283,18 @@ fn facet_counts(counts: BTreeMap<String, usize>) -> Vec<AssetFacetCount> {
 }
 
 fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> bool {
-    group_assets(group)
+    let asset_matches = group_assets(group)
         .into_iter()
-        .any(|asset| asset_matches(asset, query))
+        .any(|asset| asset_matches(asset, query));
+    let favorite_matches = query
+        .favorite
+        .map(|expected| group.user_marks.favorite == expected)
+        .unwrap_or(true);
+    let marked_matches = query
+        .marked
+        .map(|expected| group.user_marks.marked == expected)
+        .unwrap_or(true);
+    asset_matches && favorite_matches && marked_matches
 }
 
 fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {

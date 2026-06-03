@@ -139,6 +139,8 @@ pub fn score_preview_sample(
             + (1.0 - shadow_clipping) * 0.08,
     );
 
+    let similarity_cluster_id = average_hash_signature(&sample);
+
     QualityScore {
         asset_group_id: asset_group_id.to_string(),
         preview_source: sample.preview_source,
@@ -152,7 +154,7 @@ pub fn score_preview_sample(
         shadow_clipping_penalty: SignalScore::ready(shadow_clipping),
         composition: SignalScore::ready(composition),
         composition_confidence,
-        similarity_cluster_id: None,
+        similarity_cluster_id,
         overall,
         reasons,
         analyzed_at_ms,
@@ -211,6 +213,45 @@ fn exposure_score(sample: &PreviewSample) -> f64 {
     let mean =
         sample.luma.iter().map(|value| *value as f64).sum::<f64>() / sample.luma.len() as f64;
     clamp01(1.0 - ((mean / 255.0) - 0.50).abs() * 2.0)
+}
+
+fn average_hash_signature(sample: &PreviewSample) -> Option<String> {
+    if sample.width == 0
+        || sample.height == 0
+        || sample.luma.len() != sample.width.saturating_mul(sample.height)
+    {
+        return None;
+    }
+    let mut cells = [0_u32; 64];
+    let mut counts = [0_u32; 64];
+    for y in 0..sample.height {
+        let cell_y = y * 8 / sample.height;
+        for x in 0..sample.width {
+            let cell_x = x * 8 / sample.width;
+            let index = cell_y * 8 + cell_x;
+            cells[index] += sample.luma[y * sample.width + x] as u32;
+            counts[index] += 1;
+        }
+    }
+    let averages = cells
+        .into_iter()
+        .zip(counts)
+        .map(|(sum, count)| {
+            if count == 0 {
+                0.0
+            } else {
+                sum as f64 / count as f64
+            }
+        })
+        .collect::<Vec<_>>();
+    let mean = averages.iter().sum::<f64>() / averages.len() as f64;
+    let mut hash = 0_u64;
+    for (index, value) in averages.into_iter().enumerate() {
+        if value > mean {
+            hash |= 1_u64 << index;
+        }
+    }
+    Some(format!("ahash-v1:{hash:016x}"))
 }
 
 fn clipping_fraction(sample: &PreviewSample, threshold: u8, high: bool) -> f64 {

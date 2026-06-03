@@ -77,7 +77,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -124,7 +123,6 @@ import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
-import com.cameraconnector.app.core.ReviewQueueSummary
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
@@ -135,6 +133,7 @@ import com.cameraconnector.app.media.loadPhotoMetadata
 import com.cameraconnector.app.media.loadPreviewBitmap
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -157,124 +156,37 @@ internal fun ProjectAssetsScreen(
     cameraConnectHost: String,
     onRetryFailedPublishes: () -> Unit,
     onMoveProjectGroup: (String, String, String) -> Unit,
-    onAcceptRecommendedBest: (String) -> Unit,
-    onOverrideRecommendedBest: (String, String) -> Unit,
-    onMarkBurstNeedsReview: (String) -> Unit,
-    onRestoreAutomaticRecommendation: (String) -> Unit,
-    onClearRecommendation: (String) -> Unit,
-    onKeepAllCandidates: (String) -> Unit,
-    onHideLowScoreCandidates: (String) -> Unit,
     onSplitBurstMember: (String, String) -> Unit,
     onMergeBurstMember: (String, String) -> Unit,
+    onSetAssetGroupUserMarks: (String, String, Boolean?, Boolean?) -> Unit,
     gridColumnCount: Int,
-    selectedStrategyProfileId: String,
-    onImmersiveModeChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var selectedAccount by remember { mutableStateOf<String?>(null) }
     var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
     var selectedSort by remember { mutableStateOf(PhotoSortMode.LatestReceived) }
-    var selectedScoreFilter by remember { mutableStateOf(ScoreFilter.All) }
     var selectedPhotoCollection by rememberSaveable { mutableStateOf(ProjectPhotoCollection.All) }
     var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
-    var selectedBurstGridItem by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
+    var selectedBurstPreview by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
+    var detailNavigationDirection by remember { mutableStateOf<DetailNavigationDirection?>(null) }
     var selectedAssetIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var movePickerOpen by remember { mutableStateOf(false) }
     var filterExpanded by remember { mutableStateOf(false) }
-    var reviewModeActive by rememberSaveable { mutableStateOf(false) }
-    var reviewModeIndex by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionAcceptedCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionManualOverrideCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionNeedsReviewCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionRestoredAutomaticCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionClearedRecommendationCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionKeptAllCandidatesCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionHiddenLowScoreCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionSkippedCount by rememberSaveable { mutableStateOf(0) }
-    var reviewSessionUndoBurstGroupId by rememberSaveable { mutableStateOf<String?>(null) }
-    var reviewSessionUndoDecisionName by rememberSaveable { mutableStateOf<String?>(null) }
-    var reviewExitSummaryOpen by rememberSaveable { mutableStateOf(false) }
-    var selectedReviewQueue by rememberSaveable { mutableStateOf<String?>(null) }
-    val reviewSessionUndoDecision = remember(reviewSessionUndoDecisionName) {
-        reviewSessionUndoDecisionName?.let { name ->
-            runCatching { ReviewSessionDecision.valueOf(name) }.getOrNull()
-        }
-    }
-    val reviewSession = remember(
-        reviewSessionAcceptedCount,
-        reviewSessionManualOverrideCount,
-        reviewSessionNeedsReviewCount,
-        reviewSessionRestoredAutomaticCount,
-        reviewSessionClearedRecommendationCount,
-        reviewSessionKeptAllCandidatesCount,
-        reviewSessionHiddenLowScoreCount,
-        reviewSessionSkippedCount,
-        reviewSessionUndoBurstGroupId,
-        reviewSessionUndoDecision,
-    ) {
-        ReviewModeSessionUi(
-            processedGroupCount = reviewSessionAcceptedCount +
-                reviewSessionManualOverrideCount +
-                reviewSessionNeedsReviewCount +
-                reviewSessionRestoredAutomaticCount +
-                reviewSessionClearedRecommendationCount +
-                reviewSessionKeptAllCandidatesCount +
-                reviewSessionHiddenLowScoreCount +
-                reviewSessionSkippedCount,
-            acceptedRecommendationCount = reviewSessionAcceptedCount,
-            manualOverrideCount = reviewSessionManualOverrideCount,
-            markedNeedsReviewCount = reviewSessionNeedsReviewCount,
-            restoredAutomaticCount = reviewSessionRestoredAutomaticCount,
-            clearedRecommendationCount = reviewSessionClearedRecommendationCount,
-            keptAllCandidatesCount = reviewSessionKeptAllCandidatesCount,
-            hiddenLowScoreCount = reviewSessionHiddenLowScoreCount,
-            skippedCount = reviewSessionSkippedCount,
-            undoBurstGroupId = reviewSessionUndoBurstGroupId,
-            undoDecision = reviewSessionUndoDecision,
-        )
-    }
-    val reviewQueueSummary by produceState<ReviewQueueSummary?>(
-        initialValue = null,
-        projectState.activeProjectId,
-        selectedStrategyProfileId,
-        dashboard.inbox,
-    ) {
-        val projectId = projectState.activeProjectId
-        value = if (projectId == null) {
-            null
-        } else {
-            withContext(Dispatchers.IO) {
-                coreGateway.loadReviewQueueSummary(projectId, selectedStrategyProfileId)
-            }
-        }
-    }
-    val reviewQueueEntries = remember(reviewQueueSummary) {
-        reviewQueueSummary?.reviewQueueEntriesUi().orEmpty()
-    }
-    val reviewQueueEntry = remember(reviewQueueEntries, selectedReviewQueue) {
-        reviewQueueEntries.selectedReviewQueueEntry(selectedReviewQueue)
-    }
+    var projectFeedbackMessage by remember { mutableStateOf<String?>(null) }
+    var projectFeedbackToken by remember { mutableStateOf(0) }
     val inboxQuery = remember(
+        selectedPhotoCollection,
         selectedAccount,
         selectedFilter,
         selectedSort,
-        selectedScoreFilter,
-        reviewModeActive,
-        reviewQueueEntry,
-        selectedStrategyProfileId,
     ) {
-        val reviewQuery = reviewQueueEntry?.assetQuery(selectedAccount, selectedStrategyProfileId)
-            ?.takeIf { reviewModeActive }
-        if (reviewQuery != null) {
-            reviewQuery.copy(role = selectedFilter.assetRole())
-        } else {
-            assetListQuery(
-                selectedAccount = selectedAccount,
-                selectedFilter = selectedFilter,
-                selectedSort = selectedSort,
-                selectedScoreFilter = selectedScoreFilter,
-            )
-        }
+        assetListQuery(
+            selectedCollection = selectedPhotoCollection,
+            selectedAccount = selectedAccount,
+            selectedFilter = selectedFilter,
+            selectedSort = selectedSort,
+            selectedScoreFilter = ScoreFilter.All,
+        )
     }
     val filteredAssets by produceState<List<InboxAsset>>(
         initialValue = dashboard.inbox,
@@ -284,32 +196,10 @@ internal fun ProjectAssetsScreen(
         selectedAccount,
         selectedFilter,
         selectedSort,
-        selectedScoreFilter,
-        selectedStrategyProfileId,
         dashboard.inbox,
     ) {
         value = withContext(Dispatchers.IO) {
-            if (reviewModeActive) {
-                coreGateway.loadInbox(inboxQuery)
-            } else if (selectedPhotoCollection == ProjectPhotoCollection.Selects) {
-                val projectId = projectState.activeProjectId
-                if (projectId == null) {
-                    emptyList()
-                } else {
-                    projectPhotoCollectionAssets(
-                        assets = coreGateway.loadSelects(
-                            projectId = projectId,
-                            strategyProfileId = selectedStrategyProfileId,
-                        ),
-                        selectedAccount = selectedAccount,
-                        selectedFilter = selectedFilter,
-                        selectedSort = selectedSort,
-                        selectedScoreFilter = selectedScoreFilter,
-                    )
-                }
-            } else {
-                coreGateway.loadInbox(inboxQuery)
-            }
+            coreGateway.loadInbox(inboxQuery)
         }
     }
     val selectionMode = isAssetSelectionMode(selectedAssetIds)
@@ -325,63 +215,15 @@ internal fun ProjectAssetsScreen(
     }
     var receiverPanelExpanded by remember { mutableStateOf(!dashboard.receiver.running) }
     val receiverConnectHost = normalizeCameraConnectHost(cameraConnectHost)
-    LaunchedEffect(reviewModeActive) {
-        onImmersiveModeChange(reviewModeActive)
-    }
-    DisposableEffect(Unit) {
-        onDispose { onImmersiveModeChange(false) }
-    }
-    fun resetReviewSession() {
-        reviewSessionAcceptedCount = 0
-        reviewSessionManualOverrideCount = 0
-        reviewSessionNeedsReviewCount = 0
-        reviewSessionRestoredAutomaticCount = 0
-        reviewSessionClearedRecommendationCount = 0
-        reviewSessionKeptAllCandidatesCount = 0
-        reviewSessionHiddenLowScoreCount = 0
-        reviewSessionSkippedCount = 0
-        reviewSessionUndoBurstGroupId = null
-        reviewSessionUndoDecisionName = null
-        reviewExitSummaryOpen = false
-    }
-    fun applyReviewSession(nextSession: ReviewModeSessionUi) {
-        reviewSessionAcceptedCount = nextSession.acceptedRecommendationCount
-        reviewSessionManualOverrideCount = nextSession.manualOverrideCount
-        reviewSessionNeedsReviewCount = nextSession.markedNeedsReviewCount
-        reviewSessionRestoredAutomaticCount = nextSession.restoredAutomaticCount
-        reviewSessionClearedRecommendationCount = nextSession.clearedRecommendationCount
-        reviewSessionKeptAllCandidatesCount = nextSession.keptAllCandidatesCount
-        reviewSessionHiddenLowScoreCount = nextSession.hiddenLowScoreCount
-        reviewSessionSkippedCount = nextSession.skippedCount
-        reviewSessionUndoBurstGroupId = nextSession.undoBurstGroupId
-        reviewSessionUndoDecisionName = nextSession.undoDecision?.name
-    }
-    fun recordReviewDecision(decision: ReviewSessionDecision, burstGroupId: String) {
-        applyReviewSession(reviewSession.record(decision, burstGroupId))
-    }
-    fun advanceReviewModeAfterAction() {
-        if (reviewModeShouldSummarizeAfterAction(reviewModeIndex, filteredAssets.size)) {
-            reviewExitSummaryOpen = true
-        } else {
-            reviewModeIndex = nextReviewIndex(reviewModeIndex, filteredAssets.size)
+    LaunchedEffect(projectFeedbackToken) {
+        if (projectFeedbackMessage != null) {
+            delay(1_400)
+            projectFeedbackMessage = null
         }
     }
-    fun undoLatestReviewDecision() {
-        val burstGroupId = reviewSession.undoBurstGroupId ?: return
-        onRestoreAutomaticRecommendation(burstGroupId)
-        applyReviewSession(reviewSession.undoLatestDecision())
-    }
-    fun leaveReviewMode() {
-        reviewModeActive = false
-        reviewModeIndex = 0
-        resetReviewSession()
-    }
-    fun requestReviewModeExit() {
-        if (reviewSession.hasActivity) {
-            reviewExitSummaryOpen = true
-        } else {
-            leaveReviewMode()
-        }
+    fun showProjectFeedback(message: String) {
+        projectFeedbackMessage = message
+        projectFeedbackToken += 1
     }
 
     LaunchedEffect(dashboard.receiver.running) {
@@ -390,124 +232,115 @@ internal fun ProjectAssetsScreen(
 
     LaunchedEffect(projectState.activeProjectId, inboxQuery, selectedPhotoCollection) {
         selectedAssetIds = emptyList()
+        selectedBurstPreview = null
         movePickerOpen = false
-        selectedBurstGridItem = null
-    }
-    LaunchedEffect(reviewQueueEntries, selectedReviewQueue) {
-        if (selectedReviewQueue != null && reviewQueueEntries.none { it.queue == selectedReviewQueue }) {
-            selectedReviewQueue = reviewQueueEntries.firstOrNull()?.queue
-            reviewModeIndex = 0
-        }
-    }
-    LaunchedEffect(
-        projectState.activeProjectId,
-        reviewQueueEntry,
-        reviewModeActive,
-        reviewSession.processedGroupCount,
-    ) {
-        if (reviewQueueEntry == null) {
-            if (reviewModeActive && reviewSession.hasActivity) {
-                reviewExitSummaryOpen = true
-            }
-            reviewModeActive = false
-            reviewModeIndex = 0
-        }
-    }
-    LaunchedEffect(reviewModeActive, filteredAssets.size) {
-        if (!reviewModeActive) {
-            reviewModeIndex = 0
-        } else {
-            reviewModeIndex = reviewModeProgress(reviewModeIndex, filteredAssets.size).currentIndex
-        }
-    }
-    LaunchedEffect(reviewModeActive, filteredAssets.size, reviewSession.processedGroupCount) {
-        if (reviewModeActive && filteredAssets.isEmpty() && reviewSession.hasActivity) {
-            reviewExitSummaryOpen = true
-        }
+        detailNavigationDirection = null
     }
     LaunchedEffect(filteredAssets, selectedPhoto?.assetSelectionId()) {
         val currentPhoto = selectedPhoto
         val refreshedPhoto = refreshedSelectedPhoto(currentPhoto, filteredAssets)
         if (refreshedPhoto != currentPhoto) {
+            detailNavigationDirection = null
             selectedPhoto = refreshedPhoto
         }
     }
 
-    if (reviewExitSummaryOpen) {
-        ReviewSessionSummaryDialog(
-            session = reviewSession,
-            remainingReviewGroupCount = filteredAssets.size,
-            lowScoreCandidateCount = reviewQueueSummary?.lowScoreCandidateCount ?: 0,
-            onContinue = { reviewExitSummaryOpen = false },
-            onExit = { leaveReviewMode() },
-            canContinue = reviewModeActive && filteredAssets.isNotEmpty(),
-        )
-    }
-    selectedBurstGridItem?.let { item ->
-        BurstGroupPreviewDialog(
-            item = item,
-            allProjectAssets = dashboard.inbox,
-            onDismiss = { selectedBurstGridItem = null },
-            onOpenAsset = { asset ->
-                selectedBurstGridItem = null
-                selectedPhoto = asset
-            },
-        )
-    }
     selectedPhoto?.let { photo ->
+        val detailBurstMembers = burstMemberFilmstrip(photo, dashboard.inbox)
         BackHandler {
+            detailNavigationDirection = null
             selectedPhoto = null
         }
-        PhotoDetailScreen(
-            asset = photo,
-            onBack = { selectedPhoto = null },
-            actionsEnabled = actionsEnabled,
-            onAcceptRecommendedBest = { burstGroupId ->
-                onAcceptRecommendedBest(burstGroupId)
-                if (reviewModeActive) {
-                    recordReviewDecision(ReviewSessionDecision.AcceptRecommendedBest, burstGroupId)
-                }
-            },
-            onOverrideRecommendedBest = { burstGroupId, bestAssetGroupId ->
-                onOverrideRecommendedBest(burstGroupId, bestAssetGroupId)
-                if (reviewModeActive) {
-                    recordReviewDecision(
-                        ReviewSessionDecision.OverrideRecommendedBest,
-                        burstGroupId,
-                    )
-                }
-            },
-            onMarkBurstNeedsReview = { burstGroupId ->
-                onMarkBurstNeedsReview(burstGroupId)
-                if (reviewModeActive) {
-                    recordReviewDecision(ReviewSessionDecision.MarkNeedsReview, burstGroupId)
-                }
-            },
-            onRestoreAutomaticRecommendation = { burstGroupId ->
-                onRestoreAutomaticRecommendation(burstGroupId)
-                if (reviewModeActive) {
-                    recordReviewDecision(
-                        ReviewSessionDecision.RestoreAutomaticRecommendation,
-                        burstGroupId,
-                    )
-                }
-            },
-            onSplitBurstMember = { burstGroupId, memberGroupId ->
-                onSplitBurstMember(burstGroupId, memberGroupId)
-            },
-            burstMembers = burstMemberFilmstrip(photo, dashboard.inbox),
-            comparisonItems = burstComparisonItems(photo, dashboard.inbox),
-            onOpenBurstMember = { asset -> selectedPhoto = asset },
-            modifier = modifier,
-        )
+        Box(modifier = modifier.fillMaxSize()) {
+            PhotoDetailScreen(
+                asset = photo,
+                onBack = {
+                    detailNavigationDirection = null
+                    selectedPhoto = null
+                },
+                actionsEnabled = actionsEnabled,
+                onSplitBurstMember = { burstGroupId, memberGroupId ->
+                    val nextMember = detailBurstMembers
+                        .map { it.asset }
+                        .firstOrNull { it.assetSelectionId() != photo.assetSelectionId() }
+                    onSplitBurstMember(burstGroupId, memberGroupId)
+                    if (nextMember != null) {
+                        detailNavigationDirection = if (
+                            detailBurstMemberIndex(nextMember, detailBurstMembers) <
+                            detailBurstMemberIndex(photo, detailBurstMembers)
+                        ) {
+                            DetailNavigationDirection.Previous
+                        } else {
+                            DetailNavigationDirection.Next
+                        }
+                        selectedPhoto = nextMember
+                    } else {
+                        detailNavigationDirection = null
+                        selectedPhoto = null
+                    }
+                },
+                burstMembers = detailBurstMembers,
+                onOpenBurstMember = { asset ->
+                    detailNavigationDirection = if (
+                        detailBurstMemberIndex(asset, detailBurstMembers) <
+                        detailBurstMemberIndex(photo, detailBurstMembers)
+                    ) {
+                        DetailNavigationDirection.Previous
+                    } else {
+                        DetailNavigationDirection.Next
+                    }
+                    selectedPhoto = asset
+                },
+                onNavigatePreviousGroup = {
+                    adjacentProjectGridAsset(
+                        currentAsset = photo,
+                        visibleAssets = filteredAssets,
+                        direction = DetailNavigationDirection.Previous,
+                    )?.let {
+                        detailNavigationDirection = DetailNavigationDirection.Previous
+                        selectedPhoto = it
+                    }
+                },
+                onNavigateNextGroup = {
+                    adjacentProjectGridAsset(
+                        currentAsset = photo,
+                        visibleAssets = filteredAssets,
+                        direction = DetailNavigationDirection.Next,
+                    )?.let {
+                        detailNavigationDirection = DetailNavigationDirection.Next
+                        selectedPhoto = it
+                    }
+                },
+                onToggleMarked = { groupId ->
+                    val projectId = projectState.activeProjectId ?: return@PhotoDetailScreen
+                    val nextMarked = !photo.userMarks.marked
+                    selectedPhoto = photo.copy(userMarks = photo.userMarks.copy(marked = nextMarked))
+                    showProjectFeedback(if (nextMarked) "已标记" else "已取消标记")
+                    onSetAssetGroupUserMarks(projectId, groupId, null, nextMarked)
+                },
+                onToggleFavorite = { assetId ->
+                    val projectId = projectState.activeProjectId ?: return@PhotoDetailScreen
+                    val nextFavorite = !photo.userMarks.favorite
+                    selectedPhoto = photo.copy(userMarks = photo.userMarks.copy(favorite = nextFavorite))
+                    showProjectFeedback(if (nextFavorite) "已收藏" else "已取消收藏")
+                    onSetAssetGroupUserMarks(projectId, assetId, nextFavorite, null)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            projectFeedbackMessage?.let { message ->
+                ProjectFeedbackToast(
+                    message = message,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 18.dp),
+                )
+            }
+        }
         return
     }
     BackHandler(enabled = selectionMode) {
         selectedAssetIds = emptyList()
         movePickerOpen = false
-    }
-    BackHandler(enabled = reviewModeActive) {
-        requestReviewModeExit()
     }
     if (movePickerOpen) {
         MoveSelectedGroupsDialog(
@@ -536,7 +369,7 @@ internal fun ProjectAssetsScreen(
             modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
-            .then(if (receiverPanelExpanded && !reviewModeActive) Modifier.blur(6.dp) else Modifier)
+            .then(if (receiverPanelExpanded) Modifier.blur(6.dp) else Modifier)
             .animateContentSize(),
         ) {
         actionError?.let { message ->
@@ -544,178 +377,56 @@ internal fun ProjectAssetsScreen(
             Spacer(Modifier.height(10.dp))
         }
 
-        if (!reviewModeActive) {
-            if (!receiverPanelExpanded) {
-                ProjectReceiverStatusStrip(
-                    dashboard = dashboard,
-                    projectState = projectState,
-                    onExpand = { receiverPanelExpanded = true },
-                    connectHost = receiverConnectHost,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-            }
+        if (!receiverPanelExpanded) {
+            ProjectReceiverStatusStrip(
+                dashboard = dashboard,
+                projectState = projectState,
+                onExpand = { receiverPanelExpanded = true },
+                connectHost = receiverConnectHost,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(10.dp))
         }
 
-        if (projectPhotoContentVisible(dashboard.receiver.running, reviewModeActive)) {
-            if (!reviewModeActive) {
-                PhotoListControlRow(
-                    selectedCollection = selectedPhotoCollection,
-                    onCollectionChange = { collection ->
-                        selectedPhotoCollection = collection
-                        reviewModeActive = false
-                    },
+        if (projectPhotoContentVisible(dashboard.receiver.running)) {
+            PhotoListControlRow(
+                selectedCollection = selectedPhotoCollection,
+                onCollectionChange = { collection ->
+                    selectedPhotoCollection = collection
+                },
+                selectedAccount = selectedAccount,
+                selectedFilter = selectedFilter,
+                selectedSort = selectedSort,
+                expanded = filterExpanded,
+                onToggle = { filterExpanded = !filterExpanded },
+            )
+            Spacer(Modifier.height(8.dp))
+            if (filterExpanded) {
+                Spacer(Modifier.height(8.dp))
+                AccountFilterBar(
                     selectedAccount = selectedAccount,
+                    onAccountChange = { selectedAccount = it },
+                    assets = dashboard.inbox,
+                )
+                Spacer(Modifier.height(8.dp))
+                InboxFilterBar(
                     selectedFilter = selectedFilter,
+                    onFilterChange = { selectedFilter = it },
+                    assets = dashboard.inbox.filter { selectedAccount == null || it.username == selectedAccount },
+                )
+                Spacer(Modifier.height(8.dp))
+                PhotoSortBar(
                     selectedSort = selectedSort,
-                    selectedScoreFilter = selectedScoreFilter,
-                    expanded = filterExpanded,
-                    onToggle = { filterExpanded = !filterExpanded },
+                    onSortChange = { selectedSort = it },
                 )
-                if (reviewQueueEntries.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    ReviewQueueSwitchBar(
-                        entries = reviewQueueEntries,
-                        selectedQueue = reviewQueueEntry?.queue.orEmpty(),
-                        onQueueChange = { queue ->
-                            selectedReviewQueue = queue
-                            reviewModeIndex = 0
-                        },
-                        onOpenBrushMode = { entry ->
-                            selectedPhotoCollection = ProjectPhotoCollection.All
-                            selectedReviewQueue = entry.queue
-                            reviewModeActive = true
-                            reviewModeIndex = 0
-                            resetReviewSession()
-                            selectedSort = PhotoSortMode.GroupBestScore
-                            filterExpanded = false
-                        },
-                    )
-                }
-                if (filterExpanded) {
-                    Spacer(Modifier.height(8.dp))
-                    AccountFilterBar(
-                        selectedAccount = selectedAccount,
-                        onAccountChange = { selectedAccount = it },
-                        assets = dashboard.inbox,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    InboxFilterBar(
-                        selectedFilter = selectedFilter,
-                        onFilterChange = { selectedFilter = it },
-                        assets = dashboard.inbox.filter { selectedAccount == null || it.username == selectedAccount },
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    ScoreFilterBar(
-                        selectedScoreFilter = selectedScoreFilter,
-                        onScoreFilterChange = { selectedScoreFilter = it },
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    PhotoSortBar(
-                        selectedSort = selectedSort,
-                        onSortChange = { selectedSort = it },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
             }
-            if (reviewModeActive && reviewQueueEntry != null) {
-                val reviewAsset = filteredAssets.getOrNull(
-                    reviewModeProgress(reviewModeIndex, filteredAssets.size).currentIndex,
-                )
-                ReviewModeScreen(
-                    assets = filteredAssets,
-                    currentIndex = reviewModeIndex,
-                    queueEntry = reviewQueueEntry,
-                    onCurrentIndexChange = { reviewModeIndex = it },
-                    onOpenAsset = { selectedPhoto = it },
-                    onAcceptRecommendedBest = { asset ->
-                        reviewDecisionBurstGroupId(
-                            asset,
-                            ReviewDecisionAction.AcceptRecommendedBest,
-                        )?.let { burstGroupId ->
-                            onAcceptRecommendedBest(burstGroupId)
-                            recordReviewDecision(ReviewSessionDecision.AcceptRecommendedBest, burstGroupId)
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onOverrideRecommendedBest = { asset ->
-                        manualBestOverrideTarget(asset)?.let { target ->
-                            onOverrideRecommendedBest(target.burstGroupId, target.bestAssetGroupId)
-                            recordReviewDecision(
-                                ReviewSessionDecision.OverrideRecommendedBest,
-                                target.burstGroupId,
-                            )
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onMarkNeedsReview = { asset ->
-                        reviewDecisionBurstGroupId(
-                            asset,
-                            ReviewDecisionAction.MarkNeedsReview,
-                        )?.let { burstGroupId ->
-                            onMarkBurstNeedsReview(burstGroupId)
-                            recordReviewDecision(ReviewSessionDecision.MarkNeedsReview, burstGroupId)
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onRestoreAutomaticRecommendation = { asset ->
-                        reviewDecisionBurstGroupId(
-                            asset,
-                            ReviewDecisionAction.RestoreAutomaticRecommendation,
-                        )?.let { burstGroupId ->
-                            onRestoreAutomaticRecommendation(burstGroupId)
-                            recordReviewDecision(
-                                ReviewSessionDecision.RestoreAutomaticRecommendation,
-                                burstGroupId,
-                            )
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onClearRecommendation = { asset ->
-                        asset.burst?.burstGroupId?.takeIf { it.isNotBlank() }?.let { burstGroupId ->
-                            onClearRecommendation(burstGroupId)
-                            recordReviewDecision(ReviewSessionDecision.ClearRecommendation, burstGroupId)
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onKeepAllCandidates = { asset ->
-                        asset.burst?.burstGroupId?.takeIf { it.isNotBlank() }?.let { burstGroupId ->
-                            onKeepAllCandidates(burstGroupId)
-                            recordReviewDecision(ReviewSessionDecision.KeepAllCandidates, burstGroupId)
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onHideLowScoreCandidates = { asset ->
-                        asset.burst?.burstGroupId?.takeIf { it.isNotBlank() }?.let { burstGroupId ->
-                            onHideLowScoreCandidates(burstGroupId)
-                            recordReviewDecision(ReviewSessionDecision.HideLowScoreCandidates, burstGroupId)
-                            advanceReviewModeAfterAction()
-                        }
-                    },
-                    onSplitBurstMember = { target ->
-                        onSplitBurstMember(target.burstGroupId, target.memberGroupId)
-                    },
-                    onSkipCurrent = {
-                        recordReviewDecision(ReviewSessionDecision.SkipCurrent, "")
-                        advanceReviewModeAfterAction()
-                    },
-                    onUndoLatestDecision = { undoLatestReviewDecision() },
-                    onExit = { requestReviewModeExit() },
-                    actionsEnabled = actionsEnabled,
-                    session = reviewSession,
-                    burstMembers = reviewAsset
-                        ?.let { burstMemberFilmstrip(it, dashboard.inbox) }
-                        .orEmpty(),
-                    comparisonItems = reviewAsset
-                        ?.let { burstComparisonItems(it, dashboard.inbox) }
-                        .orEmpty(),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else if (filteredAssets.isEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            if (filteredAssets.isEmpty()) {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         when {
-                            selectedPhotoCollection == ProjectPhotoCollection.Selects -> "还没有精选照片。"
+                            selectedPhotoCollection == ProjectPhotoCollection.Favorites -> "还没有收藏照片。"
+                            selectedPhotoCollection == ProjectPhotoCollection.Marked -> "还没有标记照片。"
                             dashboard.inbox.isEmpty() -> "还没有导入文件。"
                             else -> "当前筛选下没有文件。"
                         },
@@ -726,6 +437,18 @@ internal fun ProjectAssetsScreen(
             } else {
                 val gridItems = remember(filteredAssets) {
                     projectPhotoGridItems(filteredAssets)
+                }
+                selectedBurstPreview?.let { previewItem ->
+                    BurstGroupPreviewDialog(
+                        item = previewItem,
+                        allProjectAssets = dashboard.inbox,
+                        onDismiss = { selectedBurstPreview = null },
+                        onOpenAsset = { memberAsset ->
+                            selectedBurstPreview = null
+                            detailNavigationDirection = null
+                            selectedPhoto = memberAsset
+                        },
+                    )
                 }
                 Box(modifier = Modifier.fillMaxSize()) {
                     LazyVerticalGrid(
@@ -750,8 +473,9 @@ internal fun ProjectAssetsScreen(
                                     if (selectionMode) {
                                         selectedAssetIds = toggleAssetSelection(selectedAssetIds, asset)
                                     } else if (item.isBurstGroup) {
-                                        selectedBurstGridItem = item
+                                        selectedBurstPreview = item
                                     } else {
+                                        detailNavigationDirection = null
                                         selectedPhoto = asset
                                     }
                                 },
@@ -773,6 +497,7 @@ internal fun ProjectAssetsScreen(
                             onOpen = {
                                 selectedAssets.firstOrNull()?.let { asset ->
                                     selectedAssetIds = emptyList()
+                                    detailNavigationDirection = null
                                     selectedPhoto = asset
                                 }
                             },
@@ -793,7 +518,7 @@ internal fun ProjectAssetsScreen(
             }
         }
         }
-        if (receiverPanelExpanded && !reviewModeActive) {
+        if (receiverPanelExpanded) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -824,48 +549,39 @@ internal fun ProjectAssetsScreen(
         actionInFlight?.let { action ->
             ActionLoadingOverlay(action = action)
         }
+        projectFeedbackMessage?.let { message ->
+            ProjectFeedbackToast(
+                message = message,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 18.dp),
+            )
+        }
     }
 }
 
 
 @Composable
-internal fun ReviewSessionSummaryDialog(
-    session: ReviewModeSessionUi,
-    remainingReviewGroupCount: Int,
-    lowScoreCandidateCount: Int,
-    onContinue: () -> Unit,
-    onExit: () -> Unit,
-    canContinue: Boolean,
+private fun ProjectFeedbackToast(
+    message: String,
+    modifier: Modifier = Modifier,
 ) {
-    AlertDialog(
-        onDismissRequest = onContinue,
-        title = { Text("本轮刷图小结") },
-        text = {
-            Text(
-                reviewModeSessionExitSummaryText(
-                    session = session,
-                    remainingReviewGroupCount = remainingReviewGroupCount,
-                    lowScoreCandidateCount = lowScoreCandidateCount,
-                ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onExit) {
-                Text("退出刷图")
-            }
-        },
-        dismissButton = if (canContinue) {
-            {
-                TextButton(onClick = onContinue) {
-                    Text("继续刷图")
-                }
-            }
-        } else {
-            null
-        },
-    )
+    Surface(
+        modifier = modifier,
+        color = ElementSurface.copy(alpha = 0.96f),
+        contentColor = ElementText,
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, ElementCardBorder),
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
+
 
 @Composable
 internal fun BurstGroupPreviewDialog(
@@ -883,7 +599,7 @@ internal fun BurstGroupPreviewDialog(
                 BurstMemberFilmstripItemUi(
                     asset = asset,
                     badgeText = if (asset.assetSelectionId() == item.coverAsset.assetSelectionId()) "优选" else "备选",
-                    scoreText = asset.qualityScoreText(),
+                    scoreText = null,
                 )
             }
         }
@@ -1003,16 +719,6 @@ private fun BurstGroupPreviewTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        item.scoreText?.let { score ->
-            Text(
-                "评分 $score",
-                style = MaterialTheme.typography.labelSmall,
-                color = smartBadgeColor(item.asset),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
@@ -1524,7 +1230,6 @@ internal fun PhotoListControlRow(
     selectedAccount: String?,
     selectedFilter: InboxFilter,
     selectedSort: PhotoSortMode,
-    selectedScoreFilter: ScoreFilter,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -1569,7 +1274,6 @@ internal fun PhotoListControlRow(
             listOf(
                 selectedAccount?.let { "账号：$it" } ?: "全部账号",
                 selectedFilter.label,
-                selectedScoreFilter.label,
                 selectedSort.label,
             ).joinToString(" / "),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1585,7 +1289,6 @@ internal fun FilterToggleRow(
     selectedAccount: String?,
     selectedFilter: InboxFilter,
     selectedSort: PhotoSortMode,
-    selectedScoreFilter: ScoreFilter,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -1604,7 +1307,6 @@ internal fun FilterToggleRow(
                 listOf(
                     selectedAccount?.let { "账号：$it" } ?: "全部账号",
                     selectedFilter.label,
-                    selectedScoreFilter.label,
                     selectedSort.label,
                 ).joinToString(" / "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1614,22 +1316,6 @@ internal fun FilterToggleRow(
             )
         }
         Text(if (expanded) "收起 ▲" else "展开 ▼", color = ElementBlue, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-internal fun ScoreFilterBar(
-    selectedScoreFilter: ScoreFilter,
-    onScoreFilterChange: (ScoreFilter) -> Unit,
-) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(ScoreFilter.entries) { filter ->
-            FilterChipButton(
-                label = filter.label,
-                selected = selectedScoreFilter == filter,
-                onClick = { onScoreFilterChange(filter) },
-            )
-        }
     }
 }
 
@@ -1713,93 +1399,6 @@ internal fun InboxFilterBar(
     }
 }
 
-@Composable
-internal fun ReviewQueueEntryStrip(
-    entry: ReviewQueueEntryUi,
-    active: Boolean,
-    onOpenBrushMode: () -> Unit,
-    onClearBrushMode: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = if (active) onClearBrushMode else onOpenBrushMode),
-        color = if (active) ElementBlueSoft else ElementControlSurface.copy(alpha = 0.9f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, if (active) ElementBlue.copy(alpha = 0.5f) else ElementBorder),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (active) "刷图模式" else entry.primaryLabel,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    ElementTag(
-                        text = entry.primaryText,
-                        color = if (active) ElementBlue else ElementSuccess,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    entry.subtitle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                if (active) "退出" else "开始",
-                color = ElementBlue,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ReviewQueueSwitchBar(
-    entries: List<ReviewQueueEntryUi>,
-    selectedQueue: String,
-    onQueueChange: (String) -> Unit,
-    onOpenBrushMode: (ReviewQueueEntryUi) -> Unit,
-) {
-    val targetEntry = entries.firstOrNull { it.queue == selectedQueue } ?: entries.firstOrNull()
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-        items(entries, key = { it.queue }) { entry ->
-            FilterChipButton(
-                label = "${entry.primaryLabel} ${entry.primaryCount}",
-                selected = entry.queue == selectedQueue,
-                onClick = { onQueueChange(entry.queue) },
-            )
-        }
-        }
-        targetEntry?.let { entry ->
-                FilterChipButton(
-                    label = "筛图",
-                    selected = false,
-                    onClick = { onOpenBrushMode(entry) },
-                )
-            }
-        }
-    }
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CompactPhotoTile(
@@ -1810,7 +1409,7 @@ internal fun CompactPhotoTile(
     onLongClick: () -> Unit,
 ) {
     val burstBadge = asset.burstCountBadgeText()
-    val qualityBadge = asset.qualityBadgeText()
+    val qualityBadge = asset.tileQualityBadgeText()
     val recommendationBadge = asset.recommendationBadgeText()
     val smartMeta = asset.tileSmartMeta()
     Column(

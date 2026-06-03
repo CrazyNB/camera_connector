@@ -177,11 +177,24 @@ internal fun InboxAsset.previewAccentColor(): Color = when {
 }
 
 internal fun InboxAsset.qualityScoreText(): String? =
-    normalizedScoreText(quality?.overall)
+    normalizedScoreText(modelScore?.toDouble() ?: quality?.overall)
 
 internal fun InboxAsset.qualityBadgeText(): String? =
-    qualityScoreText()?.let { "评分 $it" }
+    qualityScoreText()?.let { "模型分 $it" }
         ?: quality?.analysisStatus?.let { qualityStatusLabel(it) }
+
+internal fun InboxAsset.tileQualityBadgeText(): String? =
+    when {
+        technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") -> "风险"
+        modelStatus.equals("running", ignoreCase = true) ||
+            quality?.analysisStatus.equals("running", ignoreCase = true) -> "分析中"
+        quality?.analysisStatus.equals("pending", ignoreCase = true) ||
+            quality?.analysisStatus.equals("queued", ignoreCase = true) -> "待分析"
+        quality?.analysisStatus.equals("failed", ignoreCase = true) ||
+            quality?.analysisStatus.equals("error", ignoreCase = true) -> "分析失败"
+        quality?.analysisStatus.equals("unsupported", ignoreCase = true) -> "需复核"
+        else -> null
+    }
 
 internal fun InboxAsset.groupBestScoreText(): String? =
     normalizedScoreText(burst?.bestScore)
@@ -195,21 +208,13 @@ internal fun InboxAsset.groupBestBadgeText(): String? {
 }
 
 internal fun InboxAsset.burstBadgeText(): String? {
-    return burstPositionBadgeText()
+    return burstCountBadgeText()
 }
 
 internal fun InboxAsset.burstCountBadgeText(): String? {
     val burst = burst ?: return null
     if (burst.memberCount <= 1) return null
     return burst.memberCount.toString()
-}
-
-internal fun InboxAsset.burstPositionBadgeText(): String? {
-    val burst = burst ?: return null
-    if (burst.memberCount <= 1) return null
-    return burst.memberRank?.takeIf { it > 0 }
-        ?.let { "$it/${burst.memberCount}" }
-        ?: burst.memberCount.toString()
 }
 
 internal fun InboxAsset.recommendationBadgeText(): String? =
@@ -221,14 +226,29 @@ internal fun InboxAsset.recommendationBadgeText(): String? =
 
 internal fun InboxAsset.tileSmartMeta(): String? =
     listOfNotNull(
-        qualityBadgeText(),
-        qualityReasonText(),
-        groupBestBadgeText(),
-        recommendationBadgeText(),
+        tileQualityReasonText(),
+        recommendationBadgeText()?.takeUnless { isBestRecommendedAsset() },
     ).distinct().takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
+private fun InboxAsset.tileQualityReasonText(): String? {
+    val status = quality?.analysisStatus?.lowercase()
+    if (status in setOf("pending", "queued", "running", "processing", "analyzing")) {
+        return qualityStatusLabel(status)
+    }
+    val hasRisk = technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") ||
+        status in setOf("failed", "error", "unsupported")
+    return if (hasRisk) {
+        qualityReasonText() ?: qualityStatusLabel(quality?.analysisStatus)
+    } else {
+        null
+    }
+}
+
 internal fun InboxAsset.qualityReasonText(): String? =
-    quality?.primaryReason
+    modelSummary
+        ?.takeIf { it.isNotBlank() }
+        ?.let(::smartReasonText)
+        ?: quality?.primaryReason
         ?.takeIf { it.isNotBlank() }
         ?.let(::smartReasonText)
 
@@ -241,7 +261,7 @@ internal fun smartReasonText(reason: String): String {
         "shadow clipping" -> "阴影过暗"
         "weak exposure" -> "曝光偏弱"
         "unsupported preview sample" -> "需要复核预览"
-        "no supported scores" -> "缺少可评分预览"
+        "no supported scores" -> "缺少可评价预览"
         "some frames need review" -> "部分照片需要复核"
         "edge weighted detail" -> "主体靠近边缘"
         "low information area" -> "画面信息偏少"
@@ -271,28 +291,31 @@ internal fun InboxAsset.qualitySignalRows(): List<QualitySignalRow> {
 }
 
 internal fun InboxAsset.isBestRecommendedAsset(): Boolean {
+    if (isModelSelect) {
+        return true
+    }
     val bestId = burst?.bestAssetGroupId?.takeIf { it.isNotBlank() } ?: return false
     return bestId == id || bestId == groupKey
 }
 
 internal fun qualityStatusLabel(value: String?): String =
     when (value?.lowercase()) {
-        "completed", "ready", "done" -> "已评分"
-        "pending", "queued" -> "待评分"
+        "completed", "ready", "done" -> "已评价"
+        "pending", "queued" -> "待分析"
         "running", "processing", "analyzing" -> "分析中"
         "stale" -> "更新中"
-        "unsupported" -> "不支持评分"
-        "failed", "error" -> "评分失败"
-        null, "" -> "待评分"
+        "unsupported" -> "不支持评价"
+        "failed", "error" -> "评价失败"
+        null, "" -> "待分析"
         else -> value
     }
 
 internal fun recommendationStatusLabel(value: String?): String =
     when (value?.lowercase()) {
         "recommended", "completed", "ready", "done" -> "已推荐"
-        "accepted" -> "已精选"
+        "accepted" -> "已推荐"
         "needs_review" -> "需要复核"
-        "user_overridden" -> "手动调整"
+        "user_overridden" -> "人工变更"
         "pending", "queued" -> "待推荐"
         "running", "processing", "analyzing" -> "推荐中"
         "stale" -> "更新中"
@@ -303,9 +326,11 @@ internal fun recommendationStatusLabel(value: String?): String =
     }
 
 internal fun smartBadgeColor(asset: InboxAsset): Color = when {
-    asset.isBestRecommendedAsset() -> ElementSuccess
+    asset.isModelSelect -> ElementSuccess
+    asset.technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") -> ElementDanger
     asset.quality?.analysisStatus?.equals("failed", ignoreCase = true) == true -> ElementDanger
-    asset.quality?.analysisStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
+    asset.modelStatus?.equals("running", ignoreCase = true) == true ||
+        asset.quality?.analysisStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
     asset.qualityScoreText() != null -> ElementWarning
     asset.burst != null -> ElementPurple
     else -> ElementInfo

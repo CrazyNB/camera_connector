@@ -12,12 +12,12 @@ interface CoreGateway {
         offset: Int = 0,
         limit: Int = 2_000,
     ): List<InboxAsset>
-    suspend fun loadSelects(
-        projectId: String? = null,
-        strategyProfileId: String? = null,
-        offset: Int = 0,
-        limit: Int = 2_000,
-    ): List<InboxAsset>
+    suspend fun setAssetGroupUserMarks(
+        projectId: String,
+        groupId: String,
+        favorite: Boolean? = null,
+        marked: Boolean? = null,
+    ): InboxAssetUserMarks
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
     suspend fun renameProject(projectId: String, name: String)
@@ -36,21 +36,25 @@ interface CoreGateway {
     suspend fun retryFailedPublishes()
     suspend fun loadStrategyProfiles(): List<StrategyProfileUi>
     suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi
-    suspend fun loadReviewQueueSummary(
-        projectId: String? = null,
-        strategyProfileId: String? = null,
-    ): ReviewQueueSummary
-    suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun restoreAutomaticRecommendation(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String? = null)
-    suspend fun overrideRecommendedBest(
-        burstGroupId: String,
-        bestAssetGroupId: String,
-        strategyProfileId: String? = null,
-    )
+    suspend fun loadModelProviderSettings(): ModelProviderSettingsUi
+    suspend fun saveModelProviderSettings(settings: ModelProviderSettingsUi): ModelProviderSettingsUi
+    suspend fun loadProjectEvaluationSettings(projectId: String): ProjectEvaluationSettingsUi
+    suspend fun saveProjectEvaluationSettings(settings: ProjectEvaluationSettingsUi): ProjectEvaluationSettingsUi
+    suspend fun loadGlobalPromptProfiles(): List<PromptProfileUi>
+    suspend fun forkGlobalPromptProfile(sourceProfileId: String, name: String): PromptProfileUi
+    suspend fun saveGlobalPromptProfileVersion(promptProfileId: String, promptText: String): PromptProfileUi
+    suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi>
+    suspend fun forkPromptProfile(projectId: String, sourceProfileId: String, name: String): PromptProfileUi
+    suspend fun savePromptProfileVersion(
+        projectId: String,
+        promptProfileId: String,
+        promptText: String,
+    ): PromptProfileUi
+    suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi
+    suspend fun latestProjectRecommendationRunStatus(projectId: String): EvaluationRunUi?
+    suspend fun shouldScheduleSubjectAssessment(projectId: String): Boolean
+    suspend fun saveSubjectAssessment(assessment: SubjectAssessmentUi): SubjectAssessmentUi
+    suspend fun loadSubjectAssessments(projectId: String, groupIds: List<String>): List<SubjectAssessmentUi>
     suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String)
     suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String)
 }
@@ -142,12 +146,25 @@ data class InboxAsset(
     val hasVideo: Boolean = videoPath != null,
     val burst: InboxAssetBurst? = null,
     val quality: InboxAssetQuality? = null,
+    val technicalGateStatus: String? = null,
+    val technicalDefects: List<InboxAssetTechnicalDefect> = emptyList(),
+    val modelStatus: String? = null,
+    val modelScore: Int? = null,
+    val modelTier: String? = null,
+    val modelEvaluatorKind: String? = null,
+    val modelSummary: String? = null,
+    val isModelSelect: Boolean = false,
+    val userMarks: InboxAssetUserMarks = InboxAssetUserMarks(),
+)
+
+data class InboxAssetUserMarks(
+    val favorite: Boolean = false,
+    val marked: Boolean = false,
 )
 
 data class InboxAssetBurst(
     val burstGroupId: String,
     val memberCount: Int,
-    val memberRank: Int?,
     val recommendationStatus: String?,
     val bestAssetGroupId: String?,
     val bestScore: Double? = null,
@@ -165,6 +182,13 @@ data class InboxAssetQuality(
     val shadowClippingPenalty: Double? = null,
     val composition: Double? = null,
     val compositionConfidence: Double? = null,
+)
+
+data class InboxAssetTechnicalDefect(
+    val defectType: String,
+    val severity: String,
+    val confidence: Double,
+    val reason: String?,
 )
 
 data class StrategyWeightsUi(
@@ -196,27 +220,81 @@ data class StrategyProfileUi(
     val updatedAtMs: Long = 0,
 )
 
-data class ReviewQueueCount(
-    val queue: String,
-    val count: Int,
+data class ModelProviderSettingsUi(
+    val providerKind: String = "none",
+    val providerLabel: String = "Model provider",
+    val baseUrl: String = "",
+    val defaultModel: String = "",
+    val defaultMaxImageSide: Int = 1536,
+    val defaultSendMode: String = "preview_only",
+    val defaultBatchSize: Int = 1,
+    val configured: Boolean = false,
+    val apiKey: String? = null,
+    val apiKeyConfigured: Boolean = false,
+    val keyAlias: String? = null,
+    val updatedAtMs: Long = 0,
 )
 
-data class ReviewQueueSummary(
+data class PromptProfileUi(
+    val promptProfileId: String,
+    val scope: String,
+    val projectId: String?,
+    val name: String,
+    val styleTags: List<String>,
+    val sceneProfile: String,
+    val activeVersionId: String?,
+    val builtIn: Boolean,
+    val enabled: Boolean,
+    val activePromptText: String? = null,
+)
+
+data class ProjectEvaluationSettingsUi(
     val projectId: String,
-    val strategyProfileId: String,
-    val totalUnits: Int,
-    val pendingCount: Int,
-    val unconfirmedBestCount: Int,
-    val needsReviewCount: Int,
-    val lowScoreCandidateCount: Int,
-    val nearDuplicateCount: Int,
-    val unsupportedCount: Int,
-    val userOverriddenCount: Int,
-    val queues: List<ReviewQueueCount>,
-) {
-    fun queueCount(queue: String): Int =
-        queues.firstOrNull { it.queue == queue }?.count ?: 0
-}
+    val modelEvaluationEnabled: Boolean = false,
+    val autoEvaluateOnUpload: Boolean = false,
+    val autoBurstRecommendationEnabled: Boolean = true,
+    val projectRecommendationMode: String = "manual",
+    val promptProfileId: String? = null,
+    val sceneProfile: String = "general",
+    val cvPolicy: String = "standard",
+    val allowRiskyModelSelects: Boolean = false,
+    val maxImageSide: Int? = null,
+    val batchSize: Int? = null,
+    val updatedAtMs: Long = 0,
+)
+
+data class EvaluationRunUi(
+    val runId: String,
+    val projectId: String,
+    val runType: String,
+    val trigger: String,
+    val status: String,
+    val providerKind: String,
+    val providerModel: String,
+    val promptProfileId: String? = null,
+    val promptVersionId: String? = null,
+    val promptHash: String? = null,
+    val errorMessage: String? = null,
+    val startedAtMs: Long? = null,
+    val completedAtMs: Long? = null,
+    val createdAtMs: Long = 0,
+)
+
+data class SubjectAssessmentUi(
+    val assessmentId: String,
+    val projectId: String,
+    val assetGroupId: String,
+    val subjectType: String,
+    val detectorKind: String,
+    val detectorVersion: String,
+    val status: String,
+    val gateStatus: String,
+    val regionsJson: String,
+    val signalsJson: String,
+    val summary: String,
+    val createdAtMs: Long = 0,
+    val updatedAtMs: Long = 0,
+)
 
 data class InboxAssetQuery(
     val username: String? = null,
@@ -232,12 +310,14 @@ data class InboxAssetQuery(
     val analysisStatus: String? = null,
     val reviewQueue: String? = null,
     val strategyProfileId: String? = null,
+    val favorite: Boolean? = null,
+    val marked: Boolean? = null,
 )
 
 enum class PhotoSortMode(val wireName: String, val label: String) {
     LatestReceived("latest_received", "最新接收"),
     Filename("filename", "文件名"),
-    GroupBestScore("group_best_score", "组内最高评分"),
+    GroupBestScore("group_best_score", "优选优先"),
 }
 
 enum class InboxAssetRole(val wireName: String) {
@@ -317,6 +397,7 @@ class PreviewCoreGateway : CoreGateway {
             .filter { asset -> query.role == null || asset.matchesRole(query.role) }
             .filter { asset ->
                 query.analysisStatus == null ||
+                    asset.modelStatus.equals(query.analysisStatus, ignoreCase = true) ||
                     asset.quality?.analysisStatus.equals(query.analysisStatus, ignoreCase = true)
             }
             .filter { asset ->
@@ -331,6 +412,8 @@ class PreviewCoreGateway : CoreGateway {
                 query.scoreMax == null ||
                     (asset.groupBestScore()?.let(::normalizedQueryScore) ?: Double.POSITIVE_INFINITY) <= normalizedQueryScore(query.scoreMax)
             }
+            .filter { asset -> query.favorite == null || asset.userMarks.favorite == query.favorite }
+            .filter { asset -> query.marked == null || asset.userMarks.marked == query.marked }
             .sortedWith(query.sort.previewComparator())
             .let { assets ->
                 if (query.reviewQueue.isNullOrBlank()) {
@@ -343,22 +426,32 @@ class PreviewCoreGateway : CoreGateway {
             .take(limit.coerceAtLeast(0))
             .toList()
 
-    override suspend fun loadSelects(
-        projectId: String?,
-        strategyProfileId: String?,
-        offset: Int,
-        limit: Int,
-    ): List<InboxAsset> =
-        dashboard.value.inbox
-            .asSequence()
-            .filter { asset ->
-                asset.burst?.recommendationStatus?.equals("accepted", ignoreCase = true) == true &&
-                    asset.isBestPreviewRepresentative()
+    override suspend fun setAssetGroupUserMarks(
+        projectId: String,
+        groupId: String,
+        favorite: Boolean?,
+        marked: Boolean?,
+    ): InboxAssetUserMarks {
+        val nextMarks = dashboard.value.inbox
+            .firstOrNull { it.id == groupId }
+            ?.userMarks
+            ?.let {
+                InboxAssetUserMarks(
+                    favorite = favorite ?: it.favorite,
+                    marked = marked ?: it.marked,
+                )
             }
-            .sortedWith(PhotoSortMode.GroupBestScore.previewComparator())
-            .drop(offset.coerceAtLeast(0))
-            .take(limit.coerceAtLeast(0))
-            .toList()
+            ?: InboxAssetUserMarks(
+                favorite = favorite ?: false,
+                marked = marked ?: false,
+            )
+        dashboard.value = dashboard.value.copy(
+            inbox = dashboard.value.inbox.map { asset ->
+                if (asset.id == groupId) asset.copy(userMarks = nextMarks) else asset
+            },
+        )
+        return nextMarks
+    }
 
     override suspend fun createProject(name: String): ProjectSummary {
         val project = ProjectSummary(
@@ -488,35 +581,130 @@ class PreviewCoreGateway : CoreGateway {
     override suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi =
         profile.copy(builtIn = false)
 
-    override suspend fun loadReviewQueueSummary(
-        projectId: String?,
-        strategyProfileId: String?,
-    ): ReviewQueueSummary =
-        emptyReviewQueueSummary(
-            projectId = projectId ?: projects.value.activeProjectId.orEmpty(),
-            strategyProfileId = strategyProfileId ?: "general",
+    override suspend fun loadModelProviderSettings(): ModelProviderSettingsUi =
+        ModelProviderSettingsUi(providerKind = "none", configured = false)
+
+    override suspend fun saveModelProviderSettings(settings: ModelProviderSettingsUi): ModelProviderSettingsUi =
+        settings.copy(configured = settings.configured && settings.providerKind != "none")
+
+    override suspend fun loadProjectEvaluationSettings(projectId: String): ProjectEvaluationSettingsUi =
+        ProjectEvaluationSettingsUi(projectId = projectId)
+
+    override suspend fun saveProjectEvaluationSettings(
+        settings: ProjectEvaluationSettingsUi,
+    ): ProjectEvaluationSettingsUi =
+        settings.copy(projectRecommendationMode = "manual")
+
+    override suspend fun loadGlobalPromptProfiles(): List<PromptProfileUi> =
+        previewPromptProfiles("")
+
+    override suspend fun forkGlobalPromptProfile(sourceProfileId: String, name: String): PromptProfileUi =
+        previewPromptProfiles("")
+            .firstOrNull { it.promptProfileId == sourceProfileId }
+            ?.let { source ->
+                source.copy(
+                    promptProfileId = "global-$sourceProfileId",
+                    scope = "global",
+                    projectId = null,
+                    name = name.ifBlank { "自定义 ${source.name}" },
+                    builtIn = false,
+                )
+            }
+            ?: PromptProfileUi(
+                promptProfileId = "global-custom",
+                scope = "global",
+                projectId = null,
+                name = name.ifBlank { "自定义提示词" },
+                styleTags = emptyList(),
+                sceneProfile = "general",
+                activeVersionId = null,
+                builtIn = false,
+                enabled = true,
+                activePromptText = "",
+            )
+
+    override suspend fun saveGlobalPromptProfileVersion(
+        promptProfileId: String,
+        promptText: String,
+    ): PromptProfileUi =
+        previewPromptProfiles("")
+            .firstOrNull { it.promptProfileId == promptProfileId }
+            ?.copy(builtIn = false, activeVersionId = "preview-version", activePromptText = promptText)
+            ?: PromptProfileUi(
+                promptProfileId = promptProfileId,
+                scope = "global",
+                projectId = null,
+                name = "自定义提示词",
+                styleTags = emptyList(),
+                sceneProfile = "general",
+                activeVersionId = "preview-version",
+                builtIn = false,
+                enabled = true,
+                activePromptText = promptText,
+            )
+
+    override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
+        previewPromptProfiles(projectId)
+
+    override suspend fun forkPromptProfile(
+        projectId: String,
+        sourceProfileId: String,
+        name: String,
+    ): PromptProfileUi =
+        previewPromptProfiles(projectId)
+            .firstOrNull { it.promptProfileId == sourceProfileId }
+            ?.copy(
+                promptProfileId = "project-$sourceProfileId",
+                scope = "project",
+                projectId = projectId,
+                name = name.ifBlank { "Custom prompt" },
+                builtIn = false,
+            )
+            ?: PromptProfileUi(
+                promptProfileId = "project-custom",
+                scope = "project",
+                projectId = projectId,
+                name = name.ifBlank { "Custom prompt" },
+                styleTags = emptyList(),
+                sceneProfile = "general",
+                activeVersionId = null,
+                builtIn = false,
+                enabled = true,
+            )
+
+    override suspend fun savePromptProfileVersion(
+        projectId: String,
+        promptProfileId: String,
+        promptText: String,
+    ): PromptProfileUi =
+        previewPromptProfiles(projectId)
+            .firstOrNull { it.promptProfileId == promptProfileId }
+            ?.copy(builtIn = false, activeVersionId = "preview-version")
+            ?: forkPromptProfile(projectId, promptProfileId, "Custom prompt")
+
+    override suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi =
+        EvaluationRunUi(
+            runId = "preview-run",
+            projectId = projectId,
+            runType = "project_recommendation",
+            trigger = "manual",
+            status = "skipped",
+            providerKind = "none",
+            providerModel = "",
         )
 
-    override suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String?) = Unit
+    override suspend fun latestProjectRecommendationRunStatus(projectId: String): EvaluationRunUi? = null
 
-    override suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String?) = Unit
+    override suspend fun shouldScheduleSubjectAssessment(projectId: String): Boolean =
+        loadProjectEvaluationSettings(projectId).sceneProfile == "portrait"
 
-    override suspend fun restoreAutomaticRecommendation(
-        burstGroupId: String,
-        strategyProfileId: String?,
-    ) = Unit
+    override suspend fun saveSubjectAssessment(assessment: SubjectAssessmentUi): SubjectAssessmentUi =
+        assessment
 
-    override suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String?) = Unit
-
-    override suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String?) = Unit
-
-    override suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String?) = Unit
-
-    override suspend fun overrideRecommendedBest(
-        burstGroupId: String,
-        bestAssetGroupId: String,
-        strategyProfileId: String?,
-    ) = Unit
+    override suspend fun loadSubjectAssessments(
+        projectId: String,
+        groupIds: List<String>,
+    ): List<SubjectAssessmentUi> = emptyList()
 
     override suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String) = Unit
     override suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String) = Unit
@@ -537,7 +725,7 @@ private fun PhotoSortMode.previewComparator(): Comparator<InboxAsset> = when (th
 }
 
 private fun InboxAsset.groupBestScore(): Double? =
-    burst?.bestScore ?: quality?.overall
+    burst?.bestScore ?: modelScore?.toDouble() ?: quality?.overall
 
 private fun Sequence<InboxAsset>.collapsePreviewReviewUnits(): List<InboxAsset> =
     toList()
@@ -556,32 +744,6 @@ private fun InboxAsset.isBestPreviewRepresentative(): Boolean {
 
 private fun normalizedQueryScore(value: Double): Double =
     if (value > 1.0) value / 100.0 else value
-
-internal fun emptyReviewQueueSummary(
-    projectId: String = "",
-    strategyProfileId: String = "general",
-): ReviewQueueSummary =
-    ReviewQueueSummary(
-        projectId = projectId,
-        strategyProfileId = strategyProfileId,
-        totalUnits = 0,
-        pendingCount = 0,
-        unconfirmedBestCount = 0,
-        needsReviewCount = 0,
-        lowScoreCandidateCount = 0,
-        nearDuplicateCount = 0,
-        unsupportedCount = 0,
-        userOverriddenCount = 0,
-        queues = listOf(
-            ReviewQueueCount("pending", 0),
-            ReviewQueueCount("unconfirmed_best", 0),
-            ReviewQueueCount("needs_review", 0),
-            ReviewQueueCount("low_score_candidates", 0),
-            ReviewQueueCount("near_duplicates", 0),
-            ReviewQueueCount("unsupported", 0),
-            ReviewQueueCount("user_overridden", 0),
-        ),
-    )
 
 private fun previewStrategyProfiles(): List<StrategyProfileUi> =
     listOf(
@@ -605,5 +767,33 @@ private fun previewStrategyProfiles(): List<StrategyProfileUi> =
             nearDuplicateSimilarityAbove = 0.92,
             autoHideLowScore = false,
             llmEnabled = false,
+        ),
+    )
+
+private fun previewPromptProfiles(projectId: String): List<PromptProfileUi> =
+    listOf(
+        PromptProfileUi(
+            promptProfileId = "general-default",
+            scope = "global",
+            projectId = null,
+            name = "General Default",
+            styleTags = listOf("general", "balanced"),
+            sceneProfile = "general",
+            activeVersionId = "general-default-v1",
+            builtIn = true,
+            enabled = true,
+            activePromptText = "Evaluate photographic quality with balanced, concise reasoning.",
+        ),
+        PromptProfileUi(
+            promptProfileId = "portrait-conservative",
+            scope = "global",
+            projectId = null,
+            name = "Portrait Conservative",
+            styleTags = listOf("portrait", "conservative"),
+            sceneProfile = "portrait",
+            activeVersionId = "portrait-conservative-v1",
+            builtIn = true,
+            enabled = true,
+            activePromptText = "Evaluate portrait photos conservatively, prioritizing expression, focus, and skin tone.",
         ),
     )

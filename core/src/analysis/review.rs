@@ -66,6 +66,13 @@ pub fn normalized_review_queue_key(queue: &str) -> String {
         "unsupported" => "unsupported".to_string(),
         "user_overridden" | "overridden" => "user_overridden".to_string(),
         "pending" | "queued" => "pending".to_string(),
+        "model_select" | "model_selects" | "algorithm_select" | "algorithm_selects" => {
+            "model_selects".to_string()
+        }
+        "favorite" | "favorites" => "favorites".to_string(),
+        "flag" | "flagged" | "marked" => "flagged".to_string(),
+        "quality_risk" | "technical_risk" | "risk" => "quality_risk".to_string(),
+        "pending_analysis" | "analysis_pending" => "pending_analysis".to_string(),
         _ => value,
     }
 }
@@ -75,8 +82,18 @@ pub fn review_unit_flags(
     scores: &[QualityScore],
     profile: &StrategyProfile,
     user_override_state: Option<&str>,
+    recommendation_pending: bool,
 ) -> ReviewUnitFlags {
     let status = recommendation.map(|value| value.status);
+    let quality_pending = scores.is_empty()
+        || scores.iter().any(|score| {
+            matches!(
+                score.analysis_status,
+                QualityAnalysisStatus::Pending
+                    | QualityAnalysisStatus::Analyzing
+                    | QualityAnalysisStatus::Stale
+            )
+        });
     let user_overridden = user_override_state
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false)
@@ -104,8 +121,9 @@ pub fn review_unit_flags(
     let near_duplicate = recommendation
         .map(|value| !value.near_duplicate_asset_group_ids.is_empty())
         .unwrap_or(false);
-    let pending =
-        recommendation.is_none() || status == Some(SelectionRecommendationStatus::Pending);
+    let pending = status == Some(SelectionRecommendationStatus::Pending)
+        || recommendation_pending
+        || (recommendation.is_none() && quality_pending);
     let unconfirmed_best = status == Some(SelectionRecommendationStatus::Ready)
         && recommendation
             .and_then(|value| value.best_asset_group_id.as_ref())
@@ -159,9 +177,16 @@ impl ReviewQueueSummary {
         scores: &[QualityScore],
         profile: &StrategyProfile,
         user_override_state: Option<&str>,
+        recommendation_pending: bool,
     ) {
         self.total_units = self.total_units.saturating_add(1);
-        let flags = review_unit_flags(recommendation, scores, profile, user_override_state);
+        let flags = review_unit_flags(
+            recommendation,
+            scores,
+            profile,
+            user_override_state,
+            recommendation_pending,
+        );
 
         if flags.pending {
             self.pending_count = self.pending_count.saturating_add(1);

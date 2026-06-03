@@ -18,6 +18,7 @@ import com.cameraconnector.app.storage.AndroidStorageGateway
 import com.cameraconnector.app.storage.FilePublishTarget
 import com.cameraconnector.app.storage.ResolvingPublishTarget
 import com.cameraconnector.app.storage.SafPublishTarget
+import com.cameraconnector.app.storage.ThumbnailingPublishTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,6 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.io.File
 
 class ReceiverForegroundService : Service() {
@@ -127,16 +129,13 @@ class ReceiverForegroundService : Service() {
         }
 
         val worker = createPublishWorker(core)
-        val storageGateway = AndroidStorageGateway(this)
-        val smartSelectionWorker = SmartSelectionAnalysisWorker(this, core) {
-            storageGateway.smartSelectionStrategyProfileId()
-        }
+        val smartSelectionWorker = SmartSelectionAnalysisWorker(this, core)
         publishWorkerJob = serviceScope.launch {
             while (isActive) {
                 runCatching {
                     worker.drainOnce()
                 }.onSuccess { result ->
-                    val analysis = runCatching { core.drainAnalysisJobs() }.getOrNull()
+                    val analysis = runCatching { drainAnalysisJobsWithProviderState(core) }.getOrNull()
                     val smartSelection = runCatching { smartSelectionWorker.drainOnce() }.getOrNull()
                     if (result.completedCount > 0 || result.failedCount > 0) {
                         Log.i(
@@ -175,11 +174,8 @@ class ReceiverForegroundService : Service() {
         val core = existingCore ?: NativeMobileCore(configPath)
         runCatching {
             val result = createPublishWorker(core).drainOnce()
-            val analysis = core.drainAnalysisJobs()
-            val storageGateway = AndroidStorageGateway(this)
-            val smartSelection = SmartSelectionAnalysisWorker(this, core) {
-                storageGateway.smartSelectionStrategyProfileId()
-            }.drainOnce()
+            val analysis = drainAnalysisJobsWithProviderState(core)
+            val smartSelection = SmartSelectionAnalysisWorker(this, core).drainOnce()
             Triple(result, analysis, smartSelection)
         }.onSuccess { result ->
             Log.i(
@@ -198,14 +194,25 @@ class ReceiverForegroundService : Service() {
         val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
         val storageGateway = AndroidStorageGateway(this)
         val publishTarget = ResolvingPublishTarget {
-            storageGateway.selectedInboxUri()
+            val target = storageGateway.selectedInboxUri()
                 ?.let { uri -> SafPublishTarget(AndroidDocumentTreeStore(this, uri)) }
                 ?: FilePublishTarget(outputDir)
+            ThumbnailingPublishTarget(this, target)
         }
         return AndroidPublishWorker(
             core = core,
             publishTarget = publishTarget,
         )
+    }
+
+    private fun drainAnalysisJobsWithProviderState(core: NativeMobileCore): JSONObject {
+        val smartSelectionCore = NativeSmartSelectionCore(core)
+        smartSelectionCore.activeProject()
+            ?.optString("project_id")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { projectId -> smartSelectionCore.projectEvaluationSettings(projectId) }
+        val providerConfigured = smartSelectionCore.modelProviderSettings().optBoolean("configured", false)
+        return smartSelectionCore.drainAnalysisJobsWithProviderConfigured(providerConfigured = providerConfigured)
     }
 
     private fun stopPublishWorker() {

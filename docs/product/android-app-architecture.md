@@ -78,6 +78,15 @@ UI code talks to a Kotlin `CoreGateway` interface:
 - `saveDeviceAccount()`
 - `removeDeviceAccount()`
 - `retryFailedPublishes()`
+- `loadModelProviderSettings()` / `saveModelProviderSettings()`
+- `loadProjectEvaluationSettings()` / `saveProjectEvaluationSettings()`
+- `loadPromptProfiles(projectId)`
+- `forkPromptProfile()`
+- `savePromptProfileVersion()`
+- `generateProjectRecommendation()`
+- `latestProjectRecommendationRunStatus()`
+- `shouldScheduleSubjectAssessment()`
+- `saveSubjectAssessment()` / `loadSubjectAssessments(projectId, groupIds)`
 
 The first skeleton may use an in-memory gateway for layout and lifecycle wiring. Native Rust bindings should later implement the same interface.
 
@@ -110,6 +119,20 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_save_receiver_settings_json`
 - `camera_connector_mobile_core_save_device_account_json`
 - `camera_connector_mobile_core_remove_device_account_json`
+- `camera_connector_mobile_core_drain_analysis_jobs_with_provider_configured_json`
+- `camera_connector_mobile_core_score_asset_group_preview_with_provider_configured_json`
+- `camera_connector_mobile_core_model_provider_settings_json`
+- `camera_connector_mobile_core_save_model_provider_settings_json`
+- `camera_connector_mobile_core_project_evaluation_settings_json`
+- `camera_connector_mobile_core_save_project_evaluation_settings_json`
+- `camera_connector_mobile_core_prompt_profiles_for_project_json`
+- `camera_connector_mobile_core_fork_prompt_profile_json`
+- `camera_connector_mobile_core_save_prompt_version_json`
+- `camera_connector_mobile_core_generate_project_recommendation_json`
+- `camera_connector_mobile_core_latest_project_recommendation_run_status_json`
+- `camera_connector_mobile_core_should_schedule_subject_assessment_json`
+- `camera_connector_mobile_core_save_subject_assessment_json`
+- `camera_connector_mobile_core_subject_assessments_for_asset_groups_json`
 - `camera_connector_mobile_core_start_receiver_json`
 - `camera_connector_mobile_core_stop_receiver_json`
 
@@ -147,6 +170,12 @@ The Android source now has the Kotlin side of that bridge:
 - Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, project photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
 - The same upload verifier accepts `-RealAssetDirectory`, selects a matching RAW/JPEG filename stem from the folder, and uploads the real bytes. It has been exercised with Nikon `.NEF + .JPG` files from `D:\ps\Photos\2026\5\5.4`.
 - Device account setup flows through the same gateway: Compose collects device name, camera login username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
+- Model provider setup also flows through the gateway without exposing secret text in core DTOs. Android stores provider credential capability or key aliases at the platform storage boundary, while core receives explicit configured/unconfigured provider state.
+- Project intelligence settings are project-scoped. Global provider/model defaults can prefill new projects, but `NativeCoreGateway` must not apply a global default change by silently changing existing project evaluation settings.
+- Prompt profiles exposed through the gateway are named, style-tagged, and versioned. Built-in profiles are read-only; editing one forks a project-scoped profile and saving prompt text creates a new immutable version. Evaluation and recommendation runs record prompt profile id, version id, and hash.
+- Project recommendation is a manual gateway action. Upload drains, background analysis drains, and burst-stable processing can evaluate assets or burst groups, but they must not create project-scope recommendations.
+- No-key behavior is provider-aware: upload, thumbnail generation, grouping, publishing, and local technical CV continue; model evaluation and manual project recommendation are skipped or disabled when provider capability is missing. A development `local_stub` result must remain labelled as `local_stub`.
+- Portrait subject assessment is a Core/FFI storage and interpretation contract, surfaced through subject assessment APIs. It is scheduled only for projects with `scene_profile = portrait`, acts as risk/gate/context for evaluation, and does not require Android to add an ML dependency in the current slice.
 - Receiver setup also flows through the gateway: the project receiver panel edits protocol, bind host, one unified camera-facing port, and the camera-facing setup IP. Pressing Start applies the current form and starts the foreground receiver; there is no separate save button. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
 - The native dashboard includes both runtime status and saved receiver settings. Android uses runtime status while the receiver is running, and falls back to saved settings while stopped so protocol/host/port changes are reflected immediately in the project receiver panel and collapsed running status.
 - Emulator UI verification covers the two-level shell, Project Management startup surface, photo-first project workspace, global Projects/Accounts/Settings destinations, Settings diagnostics, account-gated receiver start, switching the emulator-only bind host to `0.0.0.0`, and receiver start/stop.
@@ -183,6 +212,20 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 - `saveReceiverSettingsJson`
 - `saveDeviceAccountJson`
 - `removeDeviceAccountJson`
+- `drainAnalysisJobsWithProviderConfiguredJson`
+- `scoreAssetGroupPreviewWithProviderConfiguredJson`
+- `modelProviderSettingsJson`
+- `saveModelProviderSettingsJson`
+- `projectEvaluationSettingsJson`
+- `saveProjectEvaluationSettingsJson`
+- `promptProfilesForProjectJson`
+- `forkPromptProfileJson`
+- `savePromptVersionJson`
+- `generateProjectRecommendationJson`
+- `latestProjectRecommendationRunStatusJson`
+- `shouldScheduleSubjectAssessmentJson`
+- `saveSubjectAssessmentJson`
+- `subjectAssessmentsForAssetGroupsJson`
 - `startReceiverJson`
 - `stopReceiverJson`
 

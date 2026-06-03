@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -58,10 +59,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -102,15 +104,18 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
+import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.InboxAsset
 import com.cameraconnector.app.core.InboxAssetQuery
 import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ModelProviderSettingsUi
+import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
-import com.cameraconnector.app.core.StrategyProfileUi
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
@@ -137,12 +142,11 @@ internal fun SettingsScreen(
     selectedInboxLabel: String?,
     onChooseInboxDirectory: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenPromptProfiles: () -> Unit,
     projectPhotoGridColumnCount: Int,
     onProjectPhotoGridColumnCountChange: (Int) -> Unit,
-    strategyProfiles: List<StrategyProfileUi>,
-    selectedStrategyProfileId: String,
-    onSelectedStrategyProfileChange: (String) -> Unit,
-    onSaveStrategyProfile: (StrategyProfileUi) -> Unit,
+    modelProviderSettings: ModelProviderSettingsUi = ModelProviderSettingsUi(),
+    onSaveModelProviderSettings: (ModelProviderSettingsUi) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -207,15 +211,20 @@ internal fun SettingsScreen(
             Text("智能优选", style = MaterialTheme.typography.titleMedium)
         }
         item {
-            SmartSelectionStrategySettingsCard(
-                profiles = strategyProfiles,
-                selectedProfileId = selectedStrategyProfileId,
-                actionsEnabled = actionInFlight == null,
-                onSelectedProfileChange = onSelectedStrategyProfileChange,
-                onSaveProfile = onSaveStrategyProfile,
+            SettingsMenuRow(
+                title = "提示词配置",
+                subtitle = "全局评价偏好，协议由系统锁定",
+                trailing = ">",
+                onClick = onOpenPromptProfiles,
             )
         }
-
+        item {
+            ModelProviderSettingsCard(
+                settings = modelProviderSettings,
+                actionsEnabled = actionInFlight == null,
+                onSaveSettings = onSaveModelProviderSettings,
+            )
+        }
         if (notificationPermissionRequired && !notificationPermissionGranted) {
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
@@ -256,84 +265,200 @@ internal fun SettingsScreen(
 }
 
 @Composable
-private fun SmartSelectionStrategySettingsCard(
-    profiles: List<StrategyProfileUi>,
-    selectedProfileId: String,
-    actionsEnabled: Boolean,
-    onSelectedProfileChange: (String) -> Unit,
-    onSaveProfile: (StrategyProfileUi) -> Unit,
+internal fun PromptProfilesScreen(
+    promptProfiles: List<PromptProfileUi>,
+    actionError: String?,
+    actionInFlight: String?,
+    onClearActionError: () -> Unit,
+    onBack: () -> Unit,
+    onOpenPromptProfile: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val selectedProfile = selectedStrategyProfile(profiles, selectedProfileId)
-    var draftProfile by remember(selectedProfile?.profileId, selectedProfile?.updatedAtMs) {
-        mutableStateOf(selectedProfile)
-    }
-
-    ElementCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
+                }
                 Column(Modifier.weight(1f)) {
-                    Text("连拍评分策略", style = MaterialTheme.typography.titleMedium)
+                    Text("提示词配置", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(4.dp))
+                    Text("只编辑评价偏好，输入输出协议由系统锁定", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        actionError?.let { message ->
+            item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
+        }
+
+        actionInFlight?.let { action ->
+            item { ProcessingCard(action) }
+        }
+
+        if (promptProfiles.isEmpty()) {
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        draftProfile?.let {
-                            "${it.name} · ${if (it.builtIn) "内置" else "自定义"}"
-                        } ?: "正在加载策略",
+                        "暂无提示词配置。",
+                        modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Spacer(Modifier.width(12.dp))
-                ElementTag(
-                    text = if (draftProfile?.llmEnabled == true) "LLM 可用" else "本地 CV",
-                    color = ElementBlue,
+            }
+        } else {
+            items(promptProfiles, key = { it.promptProfileId }) { profile ->
+                PromptProfileRow(
+                    profile = profile,
+                    onClick = { onOpenPromptProfile(profile.promptProfileId) },
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+}
 
-            if (profiles.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(profiles, key = { it.profileId }) { profile ->
-                        FilterChipButton(
-                            label = profile.name,
-                            selected = profile.profileId == selectedProfileId,
-                            onClick = { onSelectedProfileChange(profile.profileId) },
-                        )
-                    }
-                }
-            }
-
-            val draft = draftProfile
-            if (draft == null) {
+@Composable
+private fun PromptProfileRow(
+    profile: PromptProfileUi,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ElementCard(modifier = modifier.clickable(onClick = onClick)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    "暂无可用策略，稍后会自动从 core 加载。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    promptProfileDisplayName(profile),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            } else {
-                StrategyWeightField.entries.forEach { field ->
-                    StrategyWeightSlider(
-                        field = field,
-                        value = draft.weightValue(field),
-                        onValueChange = { value ->
-                            draftProfile = draft.withStrategyWeight(field, value)
-                        },
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    listOf(
+                        promptStyleTagsText(profile),
+                        if (profile.builtIn) "内置偏好，只能复制后编辑" else "自定义偏好，可编辑",
+                    ).filter { it.isNotBlank() }.joinToString(" · "),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text("编辑", color = ElementBlue, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+internal fun PromptProfileEditorScreen(
+    profile: PromptProfileUi?,
+    actionError: String?,
+    actionInFlight: String?,
+    onClearActionError: () -> Unit,
+    onBack: () -> Unit,
+    onSave: (PromptProfileUi, String, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var name by remember(profile?.promptProfileId) {
+        mutableStateOf(profile?.let(::promptProfileDisplayName)?.let { "自定义 $it" } ?: "")
+    }
+    var promptText by remember(profile?.promptProfileId, profile?.activePromptText) {
+        mutableStateOf(profile?.activePromptText.orEmpty())
+    }
+    val cleanName = name.trim()
+    val cleanPrompt = promptText.trim()
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回提示词列表")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(profile?.let(::promptProfileDisplayName) ?: "编辑提示词", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (profile?.builtIn == true) "内置评价偏好会复制为全局自定义偏好" else "保存后作为新的全局评价偏好版本",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+
+        actionError?.let { message ->
+            item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
+        }
+
+        actionInFlight?.let { action ->
+            item { ProcessingCard(action) }
+        }
+
+        if (profile == null) {
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "提示词不存在或已被移除。",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            if (profile.builtIn) {
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("复制后的名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+            }
+            item {
+                OutlinedTextField(
+                    value = promptText,
+                    onValueChange = { promptText = it },
+                    label = { Text("用户评价偏好") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 10,
+                    enabled = actionInFlight == null,
+                )
+            }
+            item {
                 Button(
-                    onClick = {
-                        onSaveProfile(
-                            draft.asSavableCustomStrategyProfile(System.currentTimeMillis()),
-                        )
-                    },
-                    enabled = actionsEnabled,
+                    onClick = { onSave(profile, cleanName, cleanPrompt) },
+                    enabled = actionInFlight == null && cleanPrompt.isNotBlank() &&
+                        (!profile.builtIn || cleanName.isNotBlank()),
                     modifier = Modifier.fillMaxWidth(),
                     shape = elementShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ElementBlue,
+                        contentColor = ElementOnAccent,
+                    ),
                 ) {
-                    Text(if (draft.builtIn) "保存为自定义策略" else "保存策略")
+                    Text(if (profile.builtIn) "复制并保存偏好" else "保存偏好版本")
                 }
             }
         }
@@ -341,30 +466,433 @@ private fun SmartSelectionStrategySettingsCard(
 }
 
 @Composable
-private fun StrategyWeightSlider(
-    field: StrategyWeightField,
-    value: Double,
-    onValueChange: (Double) -> Unit,
+internal fun ProjectSettingsScreen(
+    project: ProjectSummary?,
+    provider: ModelProviderSettingsUi,
+    settings: ProjectEvaluationSettingsUi?,
+    promptProfiles: List<PromptProfileUi>,
+    latestRun: EvaluationRunUi?,
+    actionError: String?,
+    actionInFlight: String?,
+    onClearActionError: () -> Unit,
+    onBack: () -> Unit,
+    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+    onGenerateProjectRecommendation: () -> Unit,
+    onConfigureModelProvider: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(field.label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                strategyWeightDisplayText(value),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelLarge,
-            )
+    val projectSettings = settings ?: project?.let { ProjectEvaluationSettingsUi(projectId = it.id) }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回项目管理")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(project?.name ?: "项目配置", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text("项目智能、场景和优选策略", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange(it.toDouble()) },
-            valueRange = field.range.start.toFloat()..field.range.endInclusive.toFloat(),
-            steps = 0,
-        )
+
+        actionError?.let { message ->
+            item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
+        }
+
+        actionInFlight?.let { action ->
+            item { ProcessingCard(action) }
+        }
+
+        if (projectSettings == null) {
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "项目不存在或已被移除。",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            item {
+                ProjectIntelligenceSettingsCard(
+                    provider = provider,
+                    settings = projectSettings,
+                    promptProfiles = promptProfiles,
+                    latestRun = latestRun,
+                    actionsEnabled = actionInFlight == null,
+                    onSaveSettings = onSaveSettings,
+                    onGenerateProjectRecommendation = onGenerateProjectRecommendation,
+                    onConfigureModelProvider = onConfigureModelProvider,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelProviderSettingsCard(
+    settings: ModelProviderSettingsUi,
+    actionsEnabled: Boolean,
+    onSaveSettings: (ModelProviderSettingsUi) -> Unit,
+) {
+    var providerKind by remember(settings.providerKind) { mutableStateOf(settings.providerKind.ifBlank { "none" }) }
+    var baseUrl by remember(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
+    var model by remember(settings.defaultModel) { mutableStateOf(settings.defaultModel) }
+    var apiKey by remember(settings.apiKeyConfigured) { mutableStateOf("") }
+    var sendMode by remember(settings.defaultSendMode) {
+        mutableStateOf(settings.defaultSendMode.ifBlank { "preview_only" })
+    }
+    var batchSize by remember(settings.defaultBatchSize) {
+        mutableStateOf(providerBatchSizeValue(settings.defaultBatchSize))
+    }
+    val configuredText = if (settings.configured) "已配置" else "未配置"
+    val normalizedProviderKind = providerKind.trim().lowercase().ifBlank { "none" }
+    val canSaveProvider = normalizedProviderKind == "none" ||
+        (baseUrl.trim().isNotBlank() &&
+            model.trim().isNotBlank() &&
+            (apiKey.trim().isNotBlank() || settings.apiKeyConfigured || settings.keyAlias != null))
+
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("全局模型服务", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${modelProviderKindLabel(settings.providerKind, settings.providerLabel)} · $configuredText",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ElementTag(
+                    text = modelProviderKindLabel(providerKind, settings.providerLabel),
+                    color = if (settings.configured) ElementBlue else ElementBorder,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("none", "openai", "custom").forEach { kind ->
+                    FilterChipButton(
+                        label = modelProviderKindLabel(kind, settings.providerLabel),
+                        selected = normalizedProviderKind == kind,
+                        onClick = {
+                            providerKind = kind
+                            if (kind == "openai" && baseUrl.isBlank()) {
+                                baseUrl = "https://api.openai.com/v1"
+                            }
+                        },
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = { baseUrl = it },
+                label = { Text("Base URL") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = normalizedProviderKind != "none",
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = model,
+                onValueChange = { model = it },
+                label = { Text("模型名称") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = normalizedProviderKind != "none",
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text("API Key") },
+                supportingText = {
+                    Text(if (settings.apiKeyConfigured) "已保存密钥，留空不会覆盖" else "仅保存到本机配置，不回显明文")
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = normalizedProviderKind != "none",
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("preview_only", "review_image").forEach { mode ->
+                    FilterChipButton(
+                        label = modelSendModeLabel(mode),
+                        selected = sendMode == mode,
+                        onClick = { sendMode = mode },
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("批处理数量", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                BatchSizeToggle(
+                    batchSize = batchSize,
+                    onBatchSizeChange = { batchSize = it },
+                )
+            }
+            Button(
+                onClick = {
+                    val providerEnabled = normalizedProviderKind != "none"
+                    onSaveSettings(
+                        settings.copy(
+                            providerKind = normalizedProviderKind,
+                            providerLabel = modelProviderKindLabel(normalizedProviderKind, settings.providerLabel),
+                            baseUrl = if (providerEnabled) baseUrl.trim() else "",
+                            defaultModel = if (providerEnabled) model.trim() else "",
+                            defaultSendMode = sendMode,
+                            defaultBatchSize = batchSize,
+                            configured = providerEnabled && canSaveProvider,
+                            apiKey = apiKey.trim().takeIf { it.isNotBlank() },
+                        ),
+                    )
+                },
+                enabled = actionsEnabled && canSaveProvider,
+                modifier = Modifier.fillMaxWidth(),
+                shape = elementShape,
+            ) {
+                Text("保存模型服务配置")
+            }
+        }
+    }
+}
+
+private fun modelProviderKindLabel(kind: String, fallback: String): String =
+    when (kind.trim().lowercase()) {
+        "", "none" -> "未配置"
+        "openai" -> "OpenAI"
+        "custom" -> "自定义"
+        "mock", "local_stub" -> "本地占位"
+        else -> fallback
+            .takeUnless { it.equals("Model provider", ignoreCase = true) }
+            ?.ifBlank { kind }
+            ?: "模型服务"
+    }
+
+private fun modelSendModeLabel(mode: String): String =
+    when (mode.trim().lowercase()) {
+        "preview_only" -> "仅发送预览"
+        "review_image" -> "发送审阅图"
+        else -> mode
+    }
+
+@Composable
+private fun ProjectIntelligenceSettingsCard(
+    provider: ModelProviderSettingsUi,
+    settings: ProjectEvaluationSettingsUi?,
+    promptProfiles: List<PromptProfileUi>,
+    latestRun: EvaluationRunUi?,
+    actionsEnabled: Boolean,
+    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+    onGenerateProjectRecommendation: () -> Unit,
+    onConfigureModelProvider: () -> Unit,
+) {
+    val projectSettings = settings ?: ProjectEvaluationSettingsUi(projectId = "")
+    val intelligenceUi = projectIntelligenceSettingsUi(projectSettings, providerConfigured = provider.configured)
+    val selectablePromptProfiles = promptProfiles
+        .filter { it.enabled && (it.scope.equals("global", ignoreCase = true) || it.projectId == null) }
+        .ifEmpty { promptProfiles.filter { it.enabled } }
+    val selectedPrompt = selectablePromptProfiles.firstOrNull { it.promptProfileId == projectSettings.promptProfileId }
+        ?: selectablePromptProfiles.firstOrNull()
+    val recommendationAction = manualProjectRecommendationActionUi(
+        provider = provider,
+        settings = projectSettings,
+        actionInFlight = !actionsEnabled,
+    )
+
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("项目智能设置", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        latestRun?.let { "最近项目优选：${evaluationRunStatusLabel(it.status)}" }
+                            ?: "项目优选：手动触发",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = intelligenceUi.modelEvaluationEnabled,
+                    enabled = actionsEnabled && intelligenceUi.modelEvaluationToggleEnabled &&
+                        projectSettings.projectId.isNotBlank(),
+                    onCheckedChange = { enabled ->
+                        onSaveSettings(projectSettings.copy(modelEvaluationEnabled = enabled))
+                    },
+                )
+            }
+
+            if (!provider.configured) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("模型服务未配置", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(
+                        onClick = onConfigureModelProvider,
+                        enabled = actionsEnabled,
+                        shape = elementShape,
+                    ) {
+                        Text("去配置")
+                    }
+                }
+            }
+
+            SettingsSwitchRow(
+                title = "上传后自动模型评价",
+                checked = projectSettings.autoEvaluateOnUpload,
+                enabled = actionsEnabled && provider.configured && projectSettings.modelEvaluationEnabled,
+                onCheckedChange = { onSaveSettings(projectSettings.copy(autoEvaluateOnUpload = it)) },
+            )
+            SettingsSwitchRow(
+                title = "连拍组自动优选",
+                checked = projectSettings.autoBurstRecommendationEnabled,
+                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                onCheckedChange = { onSaveSettings(projectSettings.copy(autoBurstRecommendationEnabled = it)) },
+            )
+            SettingsSwitchRow(
+                title = "允许风险照片参与优选",
+                checked = projectSettings.allowRiskyModelSelects,
+                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                onCheckedChange = { onSaveSettings(projectSettings.copy(allowRiskyModelSelects = it)) },
+            )
+
+            OptionRow(
+                title = "项目场景",
+                values = listOf("general", "portrait", "action", "landscape", "custom"),
+                selected = projectSettings.sceneProfile,
+                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                labelForValue = ::sceneProfileLabel,
+                onSelected = { onSaveSettings(projectSettings.copy(sceneProfile = it)) },
+            )
+            OptionRow(
+                title = "CV 门控强度",
+                values = listOf("loose", "standard", "strict"),
+                selected = projectSettings.cvPolicy,
+                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                labelForValue = ::cvPolicyLabel,
+                onSelected = { onSaveSettings(projectSettings.copy(cvPolicy = it)) },
+            )
+
+            if (selectablePromptProfiles.isNotEmpty()) {
+                Text("评价提示词", style = MaterialTheme.typography.labelLarge)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(selectablePromptProfiles, key = { it.promptProfileId }) { profile ->
+                        FilterChipButton(
+                            label = listOf(promptProfileDisplayName(profile), promptStyleTagsText(profile))
+                                .filter { it.isNotBlank() }
+                                .joinToString(" · "),
+                            selected = profile.promptProfileId == selectedPrompt?.promptProfileId,
+                            onClick = {
+                                onSaveSettings(projectSettings.copy(promptProfileId = profile.promptProfileId))
+                            },
+                        )
+                    }
+                }
+            }
+
+            Button(
+                onClick = onGenerateProjectRecommendation,
+                enabled = actionsEnabled && recommendationAction.enabled,
+                modifier = Modifier.fillMaxWidth(),
+                shape = elementShape,
+            ) {
+                Text(recommendationAction.ctaLabel)
+            }
+            recommendationAction.disabledReason?.let {
+                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchSizeToggle(
+    batchSize: Int,
+    onBatchSizeChange: (Int) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(1, 2, 4, 8).forEach { value ->
+            OutlinedButton(
+                onClick = { onBatchSizeChange(value) },
+                modifier = Modifier
+                    .height(30.dp)
+                    .defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                border = BorderStroke(1.dp, if (batchSize == value) ElementBlue else ElementBorder),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (batchSize == value) ElementBlue else ElementControlSurface,
+                    contentColor = if (batchSize == value) ElementOnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+                shape = elementShape,
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
+                Text(value.toString(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title)
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun OptionRow(
+    title: String,
+    values: List<String>,
+    selected: String,
+    enabled: Boolean,
+    labelForValue: (String) -> String = { it },
+    onSelected: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(values) { value ->
+                FilterChipButton(
+                    label = labelForValue(value),
+                    selected = value == selected,
+                    onClick = { if (enabled) onSelected(value) },
+                )
+            }
+        }
     }
 }
 

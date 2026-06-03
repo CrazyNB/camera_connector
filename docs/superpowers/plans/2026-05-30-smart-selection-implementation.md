@@ -105,6 +105,15 @@
 - [ ] Run `cargo test -p camera_connector_core burst_grouping_tests`.
 - [ ] Commit with message `Detect burst groups from project assets`.
 
+Follow-up TODO:
+
+- [ ] Promote the lightweight visual signature into an explicit storage field instead of relying on `similarity_cluster_id` conventions.
+- [ ] Add a stronger visual continuity pass for burst refinement: average hash, perceptual hash, color histogram distance, and simple subject-region continuity.
+- [ ] Make visual split thresholds profile-aware, with stricter defaults for action bursts and more tolerant defaults for landscape/general sequences.
+- [ ] Add real-photo regression fixtures for "same timestamp window but different scene" and "similar burst with exposure changes".
+- [ ] Keep visual refinement asynchronous and preview-based; do not block receiver uploads or require full RAW decoding.
+- [ ] Ensure user split/merge overrides remain stronger than automatic visual regrouping.
+
 ### Task 4: Quality Score Persistence And Conservative Local Scoring
 
 **Files:**
@@ -240,7 +249,7 @@
   - `mobile_ffi_saves_custom_strategy_profile`
   - `mobile_core_returns_next_review_card`
   - `mobile_ffi_applies_review_decision`
-- [ ] Run `cargo test -p camera_connector_ffi`.
+- [ ] Run `cargo test -p camera-connector-ffi`.
 - [ ] Run `cargo test -p camera_connector_cli`.
 - [ ] Commit with message `Expose smart selection through FFI and CLI`.
 

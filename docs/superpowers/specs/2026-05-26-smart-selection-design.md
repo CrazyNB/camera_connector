@@ -1,5 +1,10 @@
 # Smart Selection Design
 
+> Superseded for scoring/recommendation semantics by
+> `2026-05-31-smart-selection-evaluation-redesign.md`. Keep using this document
+> for background-job, burst-grouping, project-query, and non-destructive action
+> context, but do not treat local CV scores as the final recommendation model.
+
 ## Goal
 
 Add a general-purpose smart selection layer that groups burst sequences, scores imported assets with local computer vision signals, applies user-configurable selection strategies, and writes non-destructive recommendations back into the dashboard.
@@ -133,6 +138,17 @@ BurstGroup
 Single-frame groups may remain normal assets in the UI. They do not need a visible burst container unless the user enables "show all groups".
 
 User correction must be a first-class path. Users can merge or split burst groups, override the best frame, clear a recommendation, or restore the automatic recommendation. These actions write explicit `user_override` records so later analysis jobs do not silently undo user intent.
+
+Future visual-refinement TODO:
+
+- Time-window grouping is only the first candidate pass. It can still be too coarse when unrelated frames share close capture timestamps.
+- Keep the first implemented visual pass conservative: use lightweight preview signatures to split obvious visual discontinuities inside an existing time candidate burst.
+- Upgrade the visual continuity model when grouping quality becomes the next bottleneck:
+  - Store a dedicated visual signature field instead of overloading recommendation or similarity labels.
+  - Combine multiple cheap signals, such as average hash, perceptual hash, color histogram distance, and simple subject-region continuity.
+  - Tune thresholds per strategy profile, for example stricter for action bursts and looser for landscape sequences.
+  - Keep this work asynchronous and preview-based; do not decode full RAW or block receiver/upload flow.
+  - Treat visual grouping as an automatic suggestion layer. User grouping corrections must remain stronger than later automatic regrouping.
 
 ## Local CV Scoring
 

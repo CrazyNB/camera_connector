@@ -8,9 +8,11 @@ use camera_connector_core::{
 
 #[tokio::test]
 async fn runtime_starts_and_stops_ftp_receiver() {
+    let config_path = unique_temp_path("runtime-config");
     let output_dir = unique_temp_dir("runtime-output");
     let state_dir = unique_temp_dir("runtime-state");
-    let runtime = CameraConnectorRuntime::new(CameraConnectorService::new(None));
+    let runtime =
+        CameraConnectorRuntime::new(CameraConnectorService::new(Some(config_path.clone())));
 
     assert_eq!(runtime.status().phase, ReceiverRuntimePhase::Stopped);
 
@@ -64,6 +66,7 @@ async fn runtime_starts_and_stops_ftp_receiver() {
     );
     let _ = std::fs::remove_dir_all(output_dir);
     let _ = std::fs::remove_dir_all(state_dir);
+    let _ = std::fs::remove_file(config_path);
 }
 
 #[tokio::test]
@@ -110,6 +113,7 @@ async fn runtime_status_reports_account_authentication_mode() {
 
 #[tokio::test]
 async fn runtime_records_failed_status_when_port_is_unavailable() {
+    let config_path = unique_temp_path("runtime-failed-config");
     let occupied = TcpListener::bind(("127.0.0.1", 0)).expect("test port should bind");
     let port = occupied
         .local_addr()
@@ -117,7 +121,8 @@ async fn runtime_records_failed_status_when_port_is_unavailable() {
         .port();
     let output_dir = unique_temp_dir("runtime-failed-output");
     let state_dir = unique_temp_dir("runtime-failed-state");
-    let runtime = CameraConnectorRuntime::new(CameraConnectorService::new(None));
+    let runtime =
+        CameraConnectorRuntime::new(CameraConnectorService::new(Some(config_path.clone())));
 
     let result = runtime
         .start_receiver(ReceiverConfigRequest {
@@ -152,6 +157,7 @@ async fn runtime_records_failed_status_when_port_is_unavailable() {
 
     let _ = std::fs::remove_dir_all(output_dir);
     let _ = std::fs::remove_dir_all(state_dir);
+    let _ = std::fs::remove_file(config_path);
 }
 
 #[test]

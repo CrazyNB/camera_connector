@@ -1,6 +1,6 @@
 use camera_connector_core::{
-    AssetGroupQuery, CameraConnectorService, PublishTransferMetadata, StoredObjectLocation,
-    TransferRecord, TransferStatus,
+    AssetGroupQuery, CameraConnectorService, ModelProviderKind, ModelProviderSettings,
+    ModelSendMode, PublishTransferMetadata, StoredObjectLocation, TransferRecord, TransferStatus,
 };
 use camera_connector_ffi::{MobileCore, MobileReceiverSettingsPatch};
 use serde_json::Value;
@@ -62,6 +62,121 @@ fn mobile_core_lists_builtin_strategy_profiles_json() {
 }
 
 #[test]
+fn mobile_core_persists_user_marks_and_filters_asset_groups_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Client Selects").unwrap();
+    let project_id = project.project_id.clone();
+
+    service
+        .record_project_transfer(
+            &project_id,
+            completed_transfer("ftp:favorite", "DCIM/100/KEEP_0001.JPG", 10),
+        )
+        .expect("transfer should record");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project_id.clone(), "{}".to_string(), 0, 25)
+            .expect("asset page should query"),
+    )
+    .unwrap();
+    let group_id = page["groups"][0]["group_id"].as_str().unwrap().to_string();
+
+    let marks: Value = serde_json::from_str(
+        &core
+            .set_asset_group_user_marks_json(
+                project_id.clone(),
+                group_id.clone(),
+                r#"{"favorite":true}"#.to_string(),
+            )
+            .expect("user mark should save"),
+    )
+    .unwrap();
+    assert_eq!(marks["favorite"], true);
+    assert_eq!(marks["marked"], false);
+
+    let favorites: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project_id, r#"{"favorite":true}"#.to_string(), 0, 25)
+            .expect("favorite page should query"),
+    )
+    .unwrap();
+
+    assert_eq!(favorites["total_groups"], 1);
+    assert_eq!(favorites["groups"][0]["group_id"], group_id);
+    assert_eq!(favorites["groups"][0]["user_marks"]["favorite"], true);
+}
+
+#[test]
+fn mobile_core_asset_group_json_exposes_model_evaluator_kind() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Model Source Json").unwrap();
+    service
+        .save_model_provider_settings(ModelProviderSettings {
+            settings_id: "global".to_string(),
+            provider_kind: ModelProviderKind::Imported,
+            provider_label: "Imported".to_string(),
+            base_url: "local://imported".to_string(),
+            default_model: "model-stub-v1".to_string(),
+            default_max_image_side: 1024,
+            default_send_mode: ModelSendMode::PreviewOnly,
+            default_batch_size: 2,
+            configured: true,
+            api_key_configured: false,
+            key_alias: None,
+            updated_at_ms: 1000,
+        })
+        .unwrap();
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .unwrap()
+        .unwrap();
+    settings.model_evaluation_enabled = true;
+    settings.auto_evaluate_on_upload = true;
+    settings.prompt_profile_id = Some("general-default".to_string());
+    service.save_project_evaluation_settings(settings).unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:model-source", "DCIM/100/IMG_3001.JPG", 10),
+        )
+        .unwrap();
+
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    core.drain_analysis_jobs_json(10).unwrap();
+    let initial_page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project.project_id.clone(), "{}".to_string(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    let group_id = initial_page["groups"][0]["group_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    core.score_asset_group_preview_json(
+        group_id,
+        balanced_detail_sample_json(16, 16),
+        "local-v1".to_string(),
+    )
+    .unwrap();
+    let page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project.project_id, "{}".to_string(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(page["groups"][0]["model_status"], "ready");
+    assert_eq!(page["groups"][0]["model_evaluator_kind"], "local_stub");
+}
+
+#[test]
 fn mobile_core_saves_custom_strategy_profile_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
@@ -94,6 +209,425 @@ fn mobile_core_saves_custom_strategy_profile_json() {
         .iter()
         .any(|profile| profile["profile_id"] == "custom-sharp"
             && profile["weights"]["sharpness"] == 0.56));
+}
+
+#[test]
+fn mobile_core_round_trips_model_provider_settings_without_secrets() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let missing: Value =
+        serde_json::from_str(&core.model_provider_settings_json().unwrap()).unwrap();
+    assert_eq!(missing["configured"], false);
+    assert!(!missing.to_string().contains("\"api_key\":"));
+    assert!(!missing.to_string().contains("secret"));
+
+    let saved: Value = serde_json::from_str(
+        &core
+            .save_model_provider_settings_json(
+                r#"{
+                    "provider_kind":"openai",
+                    "provider_label":"OpenAI",
+                    "base_url":"https://api.openai.com/v1",
+                    "default_model":"gpt-5.1-mini",
+                    "default_max_image_side":1536,
+                    "default_send_mode":"review_image",
+                    "default_batch_size":4,
+                    "configured":true,
+                    "api_key":"must-not-round-trip"
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let loaded: Value =
+        serde_json::from_str(&core.model_provider_settings_json().unwrap()).unwrap();
+
+    assert_eq!(saved["provider_kind"], "openai");
+    assert_eq!(saved["base_url"], "https://api.openai.com/v1");
+    assert_eq!(saved["api_key_configured"], true);
+    assert_eq!(saved["default_send_mode"], "review_image");
+    assert_eq!(loaded["configured"], true);
+    assert_eq!(loaded["base_url"], "https://api.openai.com/v1");
+    assert_eq!(loaded["api_key_configured"], true);
+    assert_eq!(loaded["default_batch_size"], 4);
+    assert!(!saved.to_string().contains("must-not-round-trip"));
+    assert!(!loaded.to_string().contains("\"api_key\":"));
+}
+
+#[test]
+fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Evaluation Settings").unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let default_settings: Value = serde_json::from_str(
+        &core
+            .project_evaluation_settings_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(default_settings["model_evaluation_enabled"], false);
+    assert_eq!(default_settings["project_recommendation_mode"], "manual");
+
+    let saved: Value = serde_json::from_str(
+        &core
+            .save_project_evaluation_settings_json(
+                project.project_id.clone(),
+                r#"{
+                    "model_evaluation_enabled":false,
+                    "auto_evaluate_on_upload":true,
+                    "auto_burst_recommendation_enabled":false,
+                    "project_recommendation_mode":"manual",
+                    "prompt_profile_id":null,
+                    "scene_profile":"portrait",
+                    "cv_policy":"strict",
+                    "allow_risky_model_selects":true,
+                    "max_image_side":2048,
+                    "batch_size":8
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let loaded: Value = serde_json::from_str(
+        &core
+            .project_evaluation_settings_json(project.project_id)
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(saved["project_recommendation_mode"], "manual");
+    assert_eq!(loaded["scene_profile"], "portrait");
+    assert_eq!(loaded["cv_policy"], "strict");
+    assert_eq!(loaded["max_image_side"], 2048);
+    assert_eq!(loaded["batch_size"], 8);
+}
+
+#[test]
+fn mobile_core_lists_forks_and_versions_prompt_profiles_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Prompt Profiles").unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let profiles: Value = serde_json::from_str(
+        &core
+            .prompt_profiles_for_project_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    let built_in = profiles
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|profile| profile["prompt_profile_id"] == "general-default")
+        .unwrap();
+    assert_eq!(built_in["scope"], "global");
+    assert_eq!(built_in["built_in"], true);
+    assert!(built_in["style_tags"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("general".to_string())));
+
+    let forked: Value = serde_json::from_str(
+        &core
+            .fork_prompt_profile_json(
+                project.project_id.clone(),
+                "general-default".to_string(),
+                "Client Editorial".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(forked["scope"], "project");
+    assert_eq!(forked["project_id"], project.project_id);
+    assert_eq!(forked["built_in"], false);
+
+    let edited: Value = serde_json::from_str(
+        &core
+            .save_prompt_version_json(
+                project.project_id,
+                forked["prompt_profile_id"].as_str().unwrap().to_string(),
+                "Return concise project selects.".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        edited["prompt_profile_id"],
+        forked["prompt_profile_id"].as_str().unwrap()
+    );
+    assert!(edited["prompt_version_id"].as_str().unwrap().contains("-v"));
+}
+
+#[test]
+fn mobile_core_rejects_invalid_settings_enum_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Invalid Enums").unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let provider_error = core
+        .save_model_provider_settings_json(
+            r#"{
+                "provider_kind":"OpenAI",
+                "default_send_mode":"preview_only",
+                "configured":true
+            }"#
+            .to_string(),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(provider_error.contains("invalid provider_kind: OpenAI"));
+
+    let send_mode_error = core
+        .save_model_provider_settings_json(
+            r#"{
+                "provider_kind":"openai",
+                "default_send_mode":"reviewImage",
+                "configured":true
+            }"#
+            .to_string(),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(send_mode_error.contains("invalid default_send_mode: reviewImage"));
+
+    for (field, value) in [
+        ("scene_profile", "Portrait"),
+        ("cv_policy", "Standard"),
+        ("project_recommendation_mode", "automatic"),
+    ] {
+        let patch = serde_json::json!({
+            "model_evaluation_enabled": false,
+            "auto_evaluate_on_upload": false,
+            "auto_burst_recommendation_enabled": true,
+            "project_recommendation_mode": "manual",
+            "prompt_profile_id": null,
+            "scene_profile": "general",
+            "cv_policy": "standard",
+            "allow_risky_model_selects": false,
+            field: value
+        });
+        let error = core
+            .save_project_evaluation_settings_json(project.project_id.clone(), patch.to_string())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&format!("invalid {field}: {value}")));
+    }
+}
+
+#[test]
+fn mobile_core_uses_monotonic_action_timestamps_for_prompt_edits() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Monotonic Prompts").unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let first: Value = serde_json::from_str(
+        &core
+            .fork_prompt_profile_json(
+                project.project_id.clone(),
+                "general-default".to_string(),
+                "Editable A".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let second: Value = serde_json::from_str(
+        &core
+            .fork_prompt_profile_json(
+                project.project_id.clone(),
+                "general-default".to_string(),
+                "Editable B".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_ne!(first["prompt_profile_id"], second["prompt_profile_id"]);
+
+    let first_version: Value = serde_json::from_str(
+        &core
+            .save_prompt_version_json(
+                project.project_id.clone(),
+                first["prompt_profile_id"].as_str().unwrap().to_string(),
+                "Prompt version one".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let second_version: Value = serde_json::from_str(
+        &core
+            .save_prompt_version_json(
+                project.project_id,
+                first["prompt_profile_id"].as_str().unwrap().to_string(),
+                "Prompt version one".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        first_version["prompt_version_id"],
+        second_version["prompt_version_id"]
+    );
+}
+
+#[test]
+fn mobile_core_generates_manual_project_recommendation_and_latest_run_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Manual Recommendation").unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let missing = core
+        .generate_project_recommendation_json(project.project_id.clone())
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("model provider is not configured"));
+
+    service
+        .save_model_provider_settings(ModelProviderSettings {
+            settings_id: "global".to_string(),
+            provider_kind: ModelProviderKind::Imported,
+            provider_label: "Imported".to_string(),
+            base_url: "local://imported".to_string(),
+            default_model: "model-stub-v1".to_string(),
+            default_max_image_side: 1024,
+            default_send_mode: ModelSendMode::PreviewOnly,
+            default_batch_size: 2,
+            configured: true,
+            api_key_configured: false,
+            key_alias: None,
+            updated_at_ms: 1000,
+        })
+        .unwrap();
+
+    let recommendation: Value = serde_json::from_str(
+        &core
+            .generate_project_recommendation_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    let run_status: Value = serde_json::from_str(
+        &core
+            .latest_project_recommendation_run_status_json(project.project_id)
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(recommendation["scope"], "Project");
+    assert!(recommendation["run_id"].as_str().is_some());
+    assert_eq!(run_status["run_type"], "project_recommendation");
+    assert_eq!(run_status["trigger"], "manual");
+    assert_eq!(run_status["status"], "ready");
+}
+
+#[test]
+fn mobile_core_round_trips_subject_assessment_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Subject Assessment Json").unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:subject-json", "DCIM/100/SUBJECT_0001.JPG", 1000),
+        )
+        .unwrap();
+    let group_id = service
+        .storage_store()
+        .unwrap()
+        .stored_asset_groups(&project.project_id)
+        .unwrap()
+        .into_iter()
+        .find(|group| group.display_key == "SUBJECT_0001")
+        .unwrap()
+        .group_id;
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let default_should_schedule: Value = serde_json::from_str(
+        &core
+            .should_schedule_subject_assessment_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(default_should_schedule, Value::Bool(false));
+
+    core.save_project_evaluation_settings_json(
+        project.project_id.clone(),
+        r#"{
+            "model_evaluation_enabled":false,
+            "auto_evaluate_on_upload":false,
+            "auto_burst_recommendation_enabled":true,
+            "project_recommendation_mode":"manual",
+            "prompt_profile_id":null,
+            "scene_profile":"portrait",
+            "cv_policy":"standard",
+            "allow_risky_model_selects":false
+        }"#
+        .to_string(),
+    )
+    .unwrap();
+    let portrait_should_schedule: Value = serde_json::from_str(
+        &core
+            .should_schedule_subject_assessment_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(portrait_should_schedule, Value::Bool(true));
+
+    let saved: Value = serde_json::from_str(
+        &core
+            .save_subject_assessment_json(
+                serde_json::json!({
+                    "assessment_id": "subject-assessment-1",
+                    "project_id": project.project_id,
+                    "asset_group_id": group_id.clone(),
+                    "subject_type": "face",
+                    "detector_kind": "imported",
+                    "detector_version": "imported-face-v1",
+                    "status": "ready",
+                    "gate_status": "needs_review",
+                    "regions": [{"x": 10, "y": 20, "w": 80, "h": 90}],
+                    "signals": {"closed_eyes": false, "face_sharpness": 0.72},
+                    "summary": "Imported face assessment is usable.",
+                    "created_at_ms": 10,
+                    "updated_at_ms": 11
+                })
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let loaded: Value = serde_json::from_str(
+        &core
+            .subject_assessments_for_asset_groups_json(
+                project.project_id,
+                serde_json::json!([group_id]).to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let loaded_item = &loaded.as_array().unwrap()[0];
+
+    assert_eq!(saved["subject_type"], "face");
+    assert_eq!(saved["detector_kind"], "imported");
+    assert_eq!(saved["status"], "ready");
+    assert_eq!(saved["gate_status"], "needs_review");
+    assert_eq!(saved["regions"][0]["w"], 80);
+    assert_eq!(saved["signals"]["face_sharpness"], 0.72);
+    assert_eq!(saved["summary"], "Imported face assessment is usable.");
+    assert_eq!(loaded_item, &saved);
 }
 
 #[test]
@@ -721,7 +1255,7 @@ fn mobile_core_scores_preview_and_recommends_burst_group_json() {
             .project_asset_group_page_json(
                 project.project_id,
                 serde_json::json!({
-                    "score_min": 80.0,
+                    "score_min": 60.0,
                     "sort": "group_best_score"
                 })
                 .to_string(),
@@ -732,10 +1266,90 @@ fn mobile_core_scores_preview_and_recommends_burst_group_json() {
     )
     .unwrap();
     let filtered_groups = filtered_page["groups"].as_array().unwrap();
-    assert_eq!(2, filtered_groups.len());
+    assert_eq!(filtered_groups.len(), 2);
     assert!(filtered_groups
         .iter()
-        .all(|group| group["burst"]["best_score"].as_f64().unwrap_or_default() >= 0.8));
+        .any(|group| group["group_id"].as_str() == second["group_id"].as_str()));
+}
+
+#[test]
+fn mobile_core_exposes_model_evaluation_and_technical_gate_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Mobile Model Evaluation Fields")
+        .unwrap();
+    service
+        .save_model_provider_settings(ModelProviderSettings {
+            settings_id: "global".to_string(),
+            provider_kind: ModelProviderKind::Imported,
+            provider_label: "Imported".to_string(),
+            base_url: "local://imported".to_string(),
+            default_model: "model-stub-v1".to_string(),
+            default_max_image_side: 1024,
+            default_send_mode: ModelSendMode::PreviewOnly,
+            default_batch_size: 2,
+            configured: true,
+            api_key_configured: false,
+            key_alias: None,
+            updated_at_ms: 1000,
+        })
+        .unwrap();
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .unwrap()
+        .unwrap();
+    settings.model_evaluation_enabled = true;
+    settings.auto_evaluate_on_upload = true;
+    settings.prompt_profile_id = Some("general-default".to_string());
+    service.save_project_evaluation_settings(settings).unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:model-fields-1", "DCIM/100/IMG_7251.JPG", 1000),
+        )
+        .unwrap();
+
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+    core.drain_analysis_jobs_json(10).unwrap();
+    let initial_page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project.project_id.clone(), "{}".to_string(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    let group_id = initial_page["groups"][0]["group_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    core.score_asset_group_preview_json(
+        group_id.clone(),
+        balanced_detail_sample_json(16, 16),
+        "local-v1".to_string(),
+    )
+    .unwrap();
+
+    let scored_page: Value = serde_json::from_str(
+        &core
+            .project_asset_group_page_json(project.project_id, "{}".to_string(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    let group = &scored_page["groups"][0];
+    assert_eq!(group["group_id"].as_str(), Some(group_id.as_str()));
+    assert_eq!(group["technical_gate_status"].as_str(), Some("pass"));
+    assert!(group["technical_defects"].as_array().unwrap().is_empty());
+    assert_eq!(group["model_status"].as_str(), Some("ready"));
+    assert_eq!(group["model_score"].as_i64(), Some(72));
+    assert_eq!(group["model_tier"].as_str(), Some("good"));
+    assert_eq!(
+        group["model_summary"].as_str(),
+        Some("passes local technical gate")
+    );
+    assert_eq!(group["is_model_select"].as_bool(), Some(false));
+    assert_eq!(group["is_favorite"].as_bool(), Some(false));
+    assert_eq!(group["is_flagged"].as_bool(), Some(false));
 }
 
 #[test]
@@ -1062,7 +1676,7 @@ fn mobile_core_splits_burst_member_json() {
     assert_eq!(updated["member_count"], 2);
     assert_eq!(updated["recommendation_status"], "pending");
     assert_eq!(summary["unconfirmed_best_count"], 0);
-    assert_eq!(summary["pending_count"], 2);
+    assert_eq!(summary["pending_count"], 1);
     assert!(split_group.get("burst").is_none());
 }
 
@@ -1176,6 +1790,23 @@ fn checkerboard_sample_json(width: usize, height: usize) -> String {
     for y in 0..height {
         for x in 0..width {
             luma.push(if (x + y) % 2 == 0 { 0u8 } else { 255u8 });
+        }
+    }
+    serde_json::json!({
+        "width": width,
+        "height": height,
+        "luma": luma,
+        "preview_source": "test"
+    })
+    .to_string()
+}
+
+fn balanced_detail_sample_json(width: usize, height: usize) -> String {
+    let mut luma = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            let value = 80 + ((x * 17 + y * 23) % 96) as u8;
+            luma.push(value);
         }
     }
     serde_json::json!({

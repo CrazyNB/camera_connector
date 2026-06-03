@@ -72,6 +72,21 @@ class AndroidStorageGateway(private val context: Context) {
             .apply()
     }
 
+    fun modelProviderKeyAlias(): String? =
+        preferences.getString(KEY_MODEL_PROVIDER_KEY_ALIAS, null)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+
+    fun modelProviderConfigured(): Boolean =
+        modelProviderKeyAlias() != null || preferences.getBoolean(KEY_MODEL_PROVIDER_CONFIGURED, false)
+
+    fun persistModelProviderConfigured(configured: Boolean, keyAlias: String? = null) {
+        preferences.edit()
+            .putBoolean(KEY_MODEL_PROVIDER_CONFIGURED, configured)
+            .putString(KEY_MODEL_PROVIDER_KEY_ALIAS, keyAlias?.trim()?.takeIf { it.isNotBlank() })
+            .apply()
+    }
+
     fun createAppNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -83,6 +98,8 @@ class AndroidStorageGateway(private val context: Context) {
         const val KEY_PROJECT_PHOTO_GRID_COLUMNS = "project_photo_grid_columns"
         const val KEY_CAMERA_CONNECT_HOST = "camera_connect_host"
         const val KEY_SMART_SELECTION_STRATEGY_PROFILE_ID = "smart_selection_strategy_profile_id"
+        const val KEY_MODEL_PROVIDER_CONFIGURED = "model_provider_configured"
+        const val KEY_MODEL_PROVIDER_KEY_ALIAS = "model_provider_key_alias"
         const val DEFAULT_PROJECT_PHOTO_GRID_COLUMNS = 3
         const val DEFAULT_SMART_SELECTION_STRATEGY_PROFILE_ID = "general"
     }

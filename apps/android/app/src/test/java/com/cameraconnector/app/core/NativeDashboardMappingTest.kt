@@ -3,6 +3,7 @@ package com.cameraconnector.app.core
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,6 +44,8 @@ class NativeDashboardMappingTest {
                 sourceName = "Studio Z5",
                 originalPath = "DCIM/100",
                 role = InboxAssetRole.Raw,
+                favorite = true,
+                marked = false,
                 reviewQueue = "unconfirmed_best",
                 strategyProfileId = "portrait",
             ),
@@ -52,6 +55,8 @@ class NativeDashboardMappingTest {
         assertEquals("Studio Z5", json.getString("source_name"))
         assertEquals("DCIM/100", json.getString("original_path"))
         assertEquals("raw", json.getString("role"))
+        assertEquals(true, json.getBoolean("favorite"))
+        assertEquals(false, json.getBoolean("marked"))
         assertEquals("unconfirmed_best", json.getString("review_queue"))
         assertEquals("portrait", json.getString("strategy_profile_id"))
         assertFalse(json.has("remote_addr"))
@@ -96,6 +101,94 @@ class NativeDashboardMappingTest {
     }
 
     @Test
+    fun inboxAssetsMapUserMarksFromNativeDashboard() {
+        val assets = mapInboxAssets(
+            JSONObject()
+                .put(
+                    "groups",
+                    org.json.JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("group_id", "group-1")
+                                .put("group_key", "IMG_1001")
+                                .put(
+                                    "user_marks",
+                                    JSONObject()
+                                        .put("favorite", true)
+                                        .put("marked", true),
+                                )
+                                .put(
+                                    "primary",
+                                    JSONObject()
+                                        .put("id", "asset-jpg")
+                                        .put("filename", "IMG_1001.JPG")
+                                        .put("format", "Jpeg")
+                                        .put("received_time_ms", 10),
+                                ),
+                        ),
+                ),
+        )
+
+        assertTrue(assets[0].userMarks.favorite)
+        assertTrue(assets[0].userMarks.marked)
+    }
+
+    @Test
+    fun inboxAssetsMapModelEvaluationAndTechnicalGateFromNativeDashboard() {
+        val assets = mapInboxAssets(
+            JSONObject()
+                .put(
+                    "groups",
+                    org.json.JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("group_id", "group-1")
+                                .put("group_key", "IMG_1001")
+                                .put("technical_gate_status", "warn")
+                                .put(
+                                    "technical_defects",
+                                    org.json.JSONArray()
+                                        .put(
+                                            JSONObject()
+                                                .put("defect_type", "blur")
+                                                .put("severity", "high")
+                                                .put("confidence", 0.72)
+                                                .put("reason", "soft detail risk"),
+                                        ),
+                                )
+                                .put("model_status", "ready")
+                                .put("model_score", 74)
+                                .put("model_tier", "good")
+                                .put("model_evaluator_kind", "local_stub")
+                                .put("model_summary", "strong subject moment")
+                                .put("is_model_select", true)
+                                .put("is_favorite", true)
+                                .put("is_flagged", true)
+                                .put(
+                                    "primary",
+                                    JSONObject()
+                                        .put("id", "asset-jpg")
+                                        .put("filename", "IMG_1001.JPG")
+                                        .put("format", "Jpeg")
+                                        .put("received_time_ms", 10),
+                                ),
+                        ),
+                ),
+        )
+
+        val asset = assets.single()
+        assertEquals("warn", asset.technicalGateStatus)
+        assertEquals("blur", asset.technicalDefects.single().defectType)
+        assertEquals(74, asset.modelScore)
+        assertEquals("good", asset.modelTier)
+        assertEquals("local_stub", asset.modelEvaluatorKind)
+        assertEquals("strong subject moment", asset.modelSummary)
+        assertTrue(asset.isModelSelect)
+        assertTrue(asset.userMarks.favorite)
+        assertTrue(asset.userMarks.marked)
+    }
+
+    @Test
     fun inboxAssetsMapBurstBestScoreFromNativeDashboard() {
         val assets = mapInboxAssets(
             JSONObject()
@@ -119,7 +212,6 @@ class NativeDashboardMappingTest {
                                     JSONObject()
                                         .put("burst_group_id", "burst-1")
                                         .put("member_count", 3)
-                                        .put("member_rank", 2)
                                         .put("recommendation_status", "ready")
                                         .put("best_asset_group_id", "group-best")
                                         .put("best_score", 0.93),
@@ -248,32 +340,191 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun reviewQueueSummaryMapsQueueCounts() {
-        val summary = mapReviewQueueSummary(
+    fun modelProviderSettingsMapWithoutSecretFields() {
+        val settings = mapModelProviderSettings(
             JSONObject()
-                .put("project_id", "project-client")
-                .put("strategy_profile_id", "general")
-                .put("total_units", 12)
-                .put("pending_count", 2)
-                .put("unconfirmed_best_count", 5)
-                .put("needs_review_count", 3)
-                .put("low_score_candidate_count", 4)
-                .put("near_duplicate_count", 1)
-                .put("unsupported_count", 2)
-                .put("user_overridden_count", 1)
+                .put("provider_kind", "openai")
+                .put("provider_label", "OpenAI")
+                .put("base_url", "https://api.openai.com/v1")
+                .put("default_model", "gpt-4.1-mini")
+                .put("default_max_image_side", 1536)
+                .put("default_send_mode", "preview_only")
+                .put("default_batch_size", 4)
+                .put("configured", true)
+                .put("api_key_configured", true)
+                .put("key_alias", "android-keystore:camera-model")
+                .put("api_key", "must-not-map"),
+        )
+
+        assertEquals("openai", settings.providerKind)
+        assertEquals("OpenAI", settings.providerLabel)
+        assertEquals("https://api.openai.com/v1", settings.baseUrl)
+        assertEquals("gpt-4.1-mini", settings.defaultModel)
+        assertEquals(1536, settings.defaultMaxImageSide)
+        assertEquals("preview_only", settings.defaultSendMode)
+        assertEquals(4, settings.defaultBatchSize)
+        assertTrue(settings.configured)
+        assertTrue(settings.apiKeyConfigured)
+        assertNull(settings.apiKey)
+        assertEquals("android-keystore:camera-model", settings.keyAlias)
+    }
+
+    @Test
+    fun projectEvaluationSettingsMapDefaultsModelEvaluationOff() {
+        val settings = mapProjectEvaluationSettings(JSONObject().put("project_id", "project-client"))
+
+        assertEquals("project-client", settings.projectId)
+        assertFalse(settings.modelEvaluationEnabled)
+        assertFalse(settings.autoEvaluateOnUpload)
+        assertTrue(settings.autoBurstRecommendationEnabled)
+        assertEquals("manual", settings.projectRecommendationMode)
+        assertEquals("general", settings.sceneProfile)
+        assertEquals("standard", settings.cvPolicy)
+        assertFalse(settings.allowRiskyModelSelects)
+    }
+
+    @Test
+    fun projectEvaluationSettingsSerializeManualRecommendationMode() {
+        val json = ProjectEvaluationSettingsUi(
+            projectId = "project-client",
+            modelEvaluationEnabled = true,
+            autoEvaluateOnUpload = true,
+            autoBurstRecommendationEnabled = false,
+            projectRecommendationMode = "automatic",
+            promptProfileId = "prompt-portrait",
+            sceneProfile = "portrait",
+            cvPolicy = "strict",
+            allowRiskyModelSelects = true,
+            maxImageSide = 1024,
+            batchSize = 2,
+        ).toProjectEvaluationSettingsJson()
+
+        assertEquals("manual", json.getString("project_recommendation_mode"))
+        assertEquals("prompt-portrait", json.getString("prompt_profile_id"))
+        assertEquals(1024, json.getInt("max_image_side"))
+        assertEquals(2, json.getInt("batch_size"))
+    }
+
+    @Test
+    fun providerBatchSizeOneRoundTripsWithoutPromotion() {
+        val settings = ModelProviderSettingsUi(
+            providerKind = "openai",
+            baseUrl = "https://api.openai.com/v1",
+            defaultBatchSize = 1,
+            configured = true,
+            apiKey = "sk-test",
+        )
+
+        val json = settings.toModelProviderSettingsJson()
+        val mapped = mapModelProviderSettings(json)
+
+        assertEquals("https://api.openai.com/v1", json.getString("base_url"))
+        assertEquals("sk-test", json.getString("api_key"))
+        assertEquals(1, json.getInt("default_batch_size"))
+        assertEquals(1, mapped.defaultBatchSize)
+        assertNull(mapped.apiKey)
+    }
+
+    @Test
+    fun nullableStringsTreatJsonNullAndLiteralNullAsMissing() {
+        val assets = mapInboxAssets(
+            JSONObject()
                 .put(
-                    "queues",
+                    "groups",
                     org.json.JSONArray()
-                        .put(JSONObject().put("queue", "unconfirmed_best").put("count", 5))
-                        .put(JSONObject().put("queue", "unsupported").put("count", 2)),
+                        .put(
+                            JSONObject()
+                                .put("group_id", "group-1")
+                                .put("group_key", "IMG_1001")
+                                .put("technical_gate_status", JSONObject.NULL)
+                                .put("model_summary", " null ")
+                                .put(
+                                    "primary",
+                                    JSONObject()
+                                        .put("id", "asset-jpg")
+                                        .put("filename", "IMG_1001.JPG")
+                                        .put("format", "Jpeg")
+                                        .put("received_time_ms", 10),
+                                ),
+                        ),
                 ),
         )
 
-        assertEquals("project-client", summary.projectId)
-        assertEquals(12, summary.totalUnits)
-        assertEquals(5, summary.unconfirmedBestCount)
-        assertEquals(2, summary.queueCount("unsupported"))
-        assertEquals(0, summary.queueCount("missing"))
+        assertNull(assets.single().technicalGateStatus)
+        assertNull(assets.single().modelSummary)
+    }
+
+    @Test
+    fun promptProfilesMapStyleTags() {
+        val profiles = mapPromptProfiles(
+            org.json.JSONArray()
+                .put(
+                    JSONObject()
+                        .put("prompt_profile_id", "portrait-conservative")
+                        .put("scope", "global")
+                        .put("project_id", JSONObject.NULL)
+                        .put("name", "Portrait Conservative")
+                        .put("style_tags", org.json.JSONArray().put("portrait").put("conservative"))
+                        .put("scene_profile", "portrait")
+                        .put("active_version_id", "version-1")
+                        .put("built_in", true)
+                        .put("enabled", true),
+                ),
+        )
+
+        assertEquals(listOf("portrait", "conservative"), profiles.single().styleTags)
+    }
+
+    @Test
+    fun evaluationRunMapsLatestProjectRecommendationStatus() {
+        val run = mapEvaluationRun(
+            JSONObject()
+                .put("run_id", "run-1")
+                .put("project_id", "project-client")
+                .put("run_type", "project_recommendation")
+                .put("trigger", "manual")
+                .put("status", "ready")
+                .put("provider_kind", "openai")
+                .put("provider_model", "gpt-4.1-mini")
+                .put("created_at_ms", 10),
+        )
+
+        assertEquals("run-1", run.runId)
+        assertEquals("project_recommendation", run.runType)
+        assertEquals("manual", run.trigger)
+        assertEquals("ready", run.status)
+    }
+
+    @Test
+    fun generateProjectRecommendationReturnsLatestRunInsteadOfRecommendationBody() {
+        var generateCalls = 0
+        val run = projectRecommendationRunAfterGenerate(
+            generateRecommendation = {
+                generateCalls += 1
+                JSONObject()
+                    .put("recommendation_id", "recommendation-1")
+                    .put("scope", "Project")
+                    .put("project_id", "project-client")
+                    .put("run_id", "run-project-1")
+            },
+            latestRun = {
+                JSONObject()
+                    .put("run_id", "run-project-1")
+                    .put("project_id", "project-client")
+                    .put("run_type", "project_recommendation")
+                    .put("trigger", "manual")
+                    .put("status", "ready")
+                    .put("provider_kind", "openai")
+                    .put("provider_model", "gpt-5.5")
+                    .put("created_at_ms", 12_345)
+            },
+        )
+
+        assertEquals(1, generateCalls)
+        assertEquals("project_recommendation", run.runType)
+        assertEquals("manual", run.trigger)
+        assertEquals("openai", run.providerKind)
+        assertEquals("gpt-5.5", run.providerModel)
     }
 
     @Test

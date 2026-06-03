@@ -5,12 +5,14 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Log
 import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -53,14 +55,51 @@ data class PhotoMetadata(
 }
 
 internal const val PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO = 3f / 2f
+internal const val PERSISTENT_THUMBNAIL_DIRECTORY_NAME = "preview_thumbnails"
 
-private object ThumbnailPreviewMemoryCache {
-    private val maxSizeBytes = (Runtime.getRuntime().maxMemory() / 8)
-        .coerceIn(THUMBNAIL_MEMORY_CACHE_MIN_BYTES.toLong(), THUMBNAIL_MEMORY_CACHE_MAX_BYTES.toLong())
+private object ThumbnailBitmapMemoryCache {
+    private val entries = LinkedHashMap<String, Bitmap>(0, 0.75f, true)
+    private var currentSizeBytes = 0
+
+    fun get(key: String): Bitmap? = synchronized(entries) {
+        entries[key]?.takeUnless { it.isRecycled }
+    }
+
+    fun put(key: String, bitmap: Bitmap) {
+        if (bitmap.isRecycled) {
+            return
+        }
+        synchronized(entries) {
+            entries.remove(key)?.let { oldBitmap ->
+                currentSizeBytes -= bitmapSizeBytes(oldBitmap)
+            }
+            entries[key] = bitmap
+            currentSizeBytes += bitmapSizeBytes(bitmap)
+            trim()
+        }
+    }
+
+    private fun trim() {
+        val iterator = entries.iterator()
+        while (
+            (entries.size > PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES ||
+                currentSizeBytes > PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_BYTES) &&
+            iterator.hasNext()
+        ) {
+            val entry = iterator.next()
+            currentSizeBytes -= bitmapSizeBytes(entry.value)
+            iterator.remove()
+        }
+    }
+}
+
+private object PreviewBitmapMemoryCache {
+    private val maxSizeBytes = (Runtime.getRuntime().maxMemory() / 4)
+        .coerceIn(PREVIEW_MEMORY_CACHE_MIN_BYTES.toLong(), PREVIEW_MEMORY_CACHE_MAX_BYTES.toLong())
         .toInt()
     private val cache = object : LruCache<String, Bitmap>(maxSizeBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int =
-            value.allocationByteCount.takeIf { it > 0 } ?: value.byteCount
+            bitmapSizeBytes(value)
     }
 
     fun get(key: String): Bitmap? = synchronized(cache) {
@@ -77,12 +116,83 @@ private object ThumbnailPreviewMemoryCache {
     }
 }
 
+private object PhotoMetadataMemoryCache {
+    private val cache = object : LruCache<String, PhotoMetadata>(PHOTO_METADATA_CACHE_MAX_ENTRIES) {}
+
+    fun get(location: String): PhotoMetadata? = synchronized(cache) {
+        cache.get(location)
+    }
+
+    fun put(location: String, metadata: PhotoMetadata) {
+        synchronized(cache) {
+            cache.put(location, metadata)
+        }
+    }
+}
+
 fun cachedThumbnailPreview(location: String?): Bitmap? =
-    location?.let { ThumbnailPreviewMemoryCache.get(thumbnailPreviewCacheKey(it)) }
+    cachedPreviewBitmap(location, PreviewQuality.Thumbnail)
 
 fun cacheThumbnailPreview(location: String?, bitmap: Bitmap) {
+    cachePreviewBitmap(location, PreviewQuality.Thumbnail, bitmap)
+}
+
+fun cachedPreviewBitmap(
+    location: String?,
+    quality: PreviewQuality,
+    allowLowerQualityFallback: Boolean = false,
+): Bitmap? {
+    location ?: return null
+    val qualities = if (allowLowerQualityFallback) {
+        previewCacheFallbackQualities(quality)
+    } else {
+        listOf(quality)
+    }
+    return qualities.firstNotNullOfOrNull { fallbackQuality ->
+        previewMemoryCacheGet(location, fallbackQuality)
+    }
+}
+
+fun cachePreviewBitmap(
+    location: String?,
+    quality: PreviewQuality,
+    bitmap: Bitmap,
+) {
     location ?: return
-    ThumbnailPreviewMemoryCache.put(thumbnailPreviewCacheKey(location), bitmap)
+    previewMemoryCachePut(location, quality, bitmap)
+}
+
+fun loadCachedPreviewBitmap(
+    context: Context,
+    location: String?,
+    quality: PreviewQuality,
+): Bitmap? {
+    if (quality == PreviewQuality.Thumbnail) {
+        return loadCachedThumbnailBitmap(context, location)
+    }
+    val cached = cachedPreviewBitmap(location, quality)
+    if (cached != null) {
+        return cached
+    }
+    return loadPreviewBitmap(context, location, quality)?.also { bitmap ->
+        cachePreviewBitmap(location, quality, bitmap)
+    }
+}
+
+fun ensurePersistentThumbnail(context: Context, location: String?): Bitmap? =
+    loadCachedThumbnailBitmap(context, location)
+
+private fun loadCachedThumbnailBitmap(context: Context, location: String?): Bitmap? {
+    location ?: return null
+    cachedPreviewBitmap(location, PreviewQuality.Thumbnail)?.let { return it }
+    loadPersistentThumbnailBitmap(context, location)?.let { bitmap ->
+        cachePreviewBitmap(location, PreviewQuality.Thumbnail, bitmap)
+        return bitmap
+    }
+    return loadPreviewBitmap(context, location, PreviewQuality.Thumbnail)?.also { bitmap ->
+        cachePreviewBitmap(location, PreviewQuality.Thumbnail, bitmap)
+        savePersistentThumbnailBitmap(context, location, bitmap)
+    }
 }
 
 fun loadPreviewBitmap(
@@ -93,22 +203,31 @@ fun loadPreviewBitmap(
     if (location.isNullOrBlank()) {
         return null
     }
-    return runCatching {
+    val bitmap = runCatching {
         if (location.startsWith("content://")) {
             val uri = Uri.parse(location)
             loadCameraPreviewBitmap(
                 isRawPreview = isRawPreviewLocation(location),
                 isJpegPreview = isJpegPreviewLocation(location),
                 quality = quality,
+                localPath = null,
             ) { context.contentResolver.openInputStream(uri) }
         } else {
+            val file = File(location)
             loadCameraPreviewBitmap(
                 isRawPreview = isRawPreviewLocation(location),
                 isJpegPreview = isJpegPreviewLocation(location),
                 quality = quality,
-            ) { File(location).inputStream() }
+                localPath = file.absolutePath,
+            ) { file.inputStream() }
         }
+    }.onFailure { error ->
+        Log.w(PREVIEW_LOG_TAG, "Preview decode failed for $quality at $location", error)
     }.getOrNull()
+    if (bitmap == null) {
+        Log.w(PREVIEW_LOG_TAG, "Preview decode returned null for $quality at $location")
+    }
+    return bitmap
 }
 
 fun loadPreviewSampleJson(
@@ -159,6 +278,7 @@ fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
     if (location.isNullOrBlank()) {
         return null
     }
+    PhotoMetadataMemoryCache.get(location)?.let { return it }
     return runCatching {
         readExifInterface(context, location) { exif ->
             PhotoMetadata(
@@ -201,7 +321,9 @@ fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
                 ),
             )
         }
-    }.getOrNull()?.takeIf { it.lines().isNotEmpty() }
+    }.getOrNull()
+        ?.takeIf { it.lines().isNotEmpty() }
+        ?.also { PhotoMetadataMemoryCache.put(location, it) }
 }
 
 internal fun isDecodablePreviewLocation(location: String?): Boolean {
@@ -225,8 +347,105 @@ internal fun isDecodablePreviewLocation(location: String?): Boolean {
         normalized.endsWith(".dng")
 }
 
-private fun thumbnailPreviewCacheKey(location: String): String =
-    "${PreviewQuality.Thumbnail.name}:$location"
+internal fun persistentThumbnailFileName(location: String): String =
+    "${sha256Hex(location)}.jpg"
+
+internal fun persistentThumbnailDirectory(context: Context): File =
+    File(context.filesDir, PERSISTENT_THUMBNAIL_DIRECTORY_NAME)
+
+private fun persistentThumbnailFile(context: Context, location: String): File =
+    File(persistentThumbnailDirectory(context), persistentThumbnailFileName(location))
+
+private fun loadPersistentThumbnailBitmap(context: Context, location: String): Bitmap? {
+    val file = persistentThumbnailFile(context, location)
+    if (!file.isFile) {
+        return null
+    }
+    return runCatching {
+        BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.RGB_565
+            },
+        )
+    }.getOrNull()
+}
+
+private fun savePersistentThumbnailBitmap(context: Context, location: String, bitmap: Bitmap) {
+    val directory = persistentThumbnailDirectory(context)
+    val finalFile = persistentThumbnailFile(context, location)
+    val tempFile = File(directory, "${finalFile.name}.tmp")
+    runCatching {
+        directory.mkdirs()
+        tempFile.outputStream().use { output ->
+            check(bitmap.compress(Bitmap.CompressFormat.JPEG, PERSISTENT_THUMBNAIL_JPEG_QUALITY, output))
+        }
+        if (!tempFile.renameTo(finalFile)) {
+            tempFile.copyTo(finalFile, overwrite = true)
+            tempFile.delete()
+        }
+    }.onFailure {
+        tempFile.delete()
+    }
+}
+
+private fun previewCacheKey(location: String, quality: PreviewQuality): String =
+    "${previewCacheTier(quality)}:$location"
+
+private fun previewMemoryCacheGet(location: String, quality: PreviewQuality): Bitmap? {
+    val key = previewCacheKey(location, quality)
+    return when (quality) {
+        PreviewQuality.Thumbnail -> ThumbnailBitmapMemoryCache.get(key)
+        PreviewQuality.Detail,
+        PreviewQuality.FullScreen -> PreviewBitmapMemoryCache.get(key)
+    }
+}
+
+private fun previewMemoryCachePut(location: String, quality: PreviewQuality, bitmap: Bitmap) {
+    val key = previewCacheKey(location, quality)
+    when (quality) {
+        PreviewQuality.Thumbnail -> ThumbnailBitmapMemoryCache.put(key, bitmap)
+        PreviewQuality.Detail,
+        PreviewQuality.FullScreen -> PreviewBitmapMemoryCache.put(key, bitmap)
+    }
+}
+
+internal fun previewDecodeMaxDimensionPx(quality: PreviewQuality): Int =
+    when (quality) {
+        PreviewQuality.Thumbnail -> PREVIEW_MAX_DIMENSION_PX
+        PreviewQuality.Detail,
+        PreviewQuality.FullScreen -> PREVIEW_DISPLAY_MAX_DIMENSION_PX
+    }
+
+private fun previewCacheTier(quality: PreviewQuality): String =
+    when (quality) {
+        PreviewQuality.Thumbnail -> "Thumbnail"
+        PreviewQuality.Detail,
+        PreviewQuality.FullScreen -> "Display"
+    }
+
+private fun previewCacheFallbackQualities(quality: PreviewQuality): List<PreviewQuality> =
+    when (quality) {
+        PreviewQuality.FullScreen -> listOf(
+            PreviewQuality.FullScreen,
+            PreviewQuality.Detail,
+            PreviewQuality.Thumbnail,
+        )
+        PreviewQuality.Detail -> listOf(PreviewQuality.Detail, PreviewQuality.Thumbnail)
+        PreviewQuality.Thumbnail -> listOf(
+            PreviewQuality.Thumbnail,
+            PreviewQuality.Detail,
+            PreviewQuality.FullScreen,
+        )
+    }
+
+private fun bitmapSizeBytes(bitmap: Bitmap): Int =
+    bitmap.allocationByteCount.takeIf { it > 0 } ?: bitmap.byteCount
+
+private fun sha256Hex(value: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+    return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+}
 
 private fun <T> readExifInterface(context: Context, location: String, block: (ExifInterface) -> T): T? {
     return if (location.startsWith("content://")) {
@@ -337,6 +556,7 @@ private fun loadCameraPreviewBitmap(
     isRawPreview: Boolean,
     isJpegPreview: Boolean,
     quality: PreviewQuality,
+    localPath: String?,
     openStream: () -> InputStream?,
 ): Bitmap? {
     val orientation = readExifOrientation(
@@ -344,34 +564,58 @@ private fun loadCameraPreviewBitmap(
         openStream = openStream,
     )
     if (quality != PreviewQuality.Thumbnail) {
-        val maxDimensionPx = when (quality) {
-            PreviewQuality.Detail -> PREVIEW_DETAIL_MAX_DIMENSION_PX
-            PreviewQuality.FullScreen -> PREVIEW_FULLSCREEN_MAX_DIMENSION_PX
-            PreviewQuality.Thumbnail -> PREVIEW_MAX_DIMENSION_PX
-        }
-        return (if (isJpegPreview && !isRawPreview) {
-            decodeFullBitmap(
-                openStream = openStream,
-                orientation = orientation,
-            )
-        } else if (isRawPreview) {
+        val maxDimensionPx = previewDecodeMaxDimensionPx(quality)
+        return (if (isRawPreview) {
             decodeLargestEmbeddedJpeg(
                 openStream = openStream,
                 maxDimensionPx = maxDimensionPx,
                 orientation = orientation,
             )
         } else {
-            null
-        })
-            ?: decodeSampledBitmap(
+            decodeSampledBitmapFile(
+                path = localPath,
+                maxDimensionPx = maxDimensionPx,
+                orientation = orientation,
+                preferredConfig = Bitmap.Config.ARGB_8888,
+            ) ?: decodeSampledBitmap(
+                maxDimensionPx = maxDimensionPx,
+                openStream = openStream,
+                orientation = orientation,
+                preferredConfig = Bitmap.Config.ARGB_8888,
+            ) ?: decodeSampledBitmapBytes(
                 maxDimensionPx = maxDimensionPx,
                 openStream = openStream,
                 orientation = orientation,
                 preferredConfig = Bitmap.Config.ARGB_8888,
             )
+        })
             ?: loadExifThumbnail(
                 openStream = openStream,
                 orientation = orientation,
+            )
+    }
+    if (isJpegPreview && !isRawPreview) {
+        return loadExifThumbnail(
+            openStream = openStream,
+            orientation = orientation,
+        )
+            ?: decodeSampledBitmapFile(
+                path = localPath,
+                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+                orientation = orientation,
+                preferredConfig = Bitmap.Config.RGB_565,
+            )
+            ?: decodeSampledBitmap(
+                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+                openStream = openStream,
+                orientation = orientation,
+                preferredConfig = Bitmap.Config.RGB_565,
+            )
+            ?: decodeSampledBitmapBytes(
+                maxDimensionPx = PREVIEW_MAX_DIMENSION_PX,
+                openStream = openStream,
+                orientation = orientation,
+                preferredConfig = Bitmap.Config.RGB_565,
             )
     }
     return loadExifThumbnail(
@@ -501,21 +745,6 @@ private fun readUnsignedInt(bytes: ByteArray, offset: Int, littleEndian: Boolean
     }
 }
 
-private fun decodeFullBitmap(
-    openStream: () -> InputStream?,
-    orientation: Int,
-): Bitmap? {
-    return runCatching {
-        val decodeOptions = BitmapFactory.Options().apply {
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val bitmap = openStream()?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, decodeOptions)
-        }
-        applyExifOrientation(bitmap, orientation)
-    }.getOrNull()
-}
-
 private fun loadExifThumbnail(openStream: () -> InputStream?, orientation: Int): Bitmap? {
     return runCatching {
         openStream()?.use { stream ->
@@ -592,6 +821,7 @@ private fun decodeSampledJpegBytes(
     length: Int,
     maxDimensionPx: Int,
     orientation: Int,
+    preferredConfig: Bitmap.Config = Bitmap.Config.ARGB_8888,
 ): Bitmap? {
     val bounds = BitmapFactory.Options().apply {
         inJustDecodeBounds = true
@@ -606,12 +836,115 @@ private fun decodeSampledJpegBytes(
             height = bounds.outHeight,
             maxDimensionPx = maxDimensionPx,
         )
-        inPreferredConfig = Bitmap.Config.ARGB_8888
+        inPreferredConfig = preferredConfig
     }
     return applyExifOrientation(
         bitmap = BitmapFactory.decodeByteArray(bytes, offset, length, decodeOptions),
         orientation = orientation,
     )
+}
+
+private fun decodeFullBitmapFile(
+    path: String?,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
+    if (path.isNullOrBlank()) {
+        return null
+    }
+    return runCatching {
+        val decodeOptions = BitmapFactory.Options().apply {
+            inPreferredConfig = preferredConfig
+        }
+        applyExifOrientation(
+            bitmap = BitmapFactory.decodeFile(path, decodeOptions),
+            orientation = orientation,
+        )
+    }.getOrNull()
+}
+
+private fun decodeFullBitmap(
+    openStream: () -> InputStream?,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
+    return runCatching {
+        val decodeOptions = BitmapFactory.Options().apply {
+            inPreferredConfig = preferredConfig
+        }
+        val bitmap = openStream()?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOptions)
+        }
+        applyExifOrientation(bitmap, orientation)
+    }.getOrNull()
+}
+
+private fun decodeFullBitmapBytes(
+    openStream: () -> InputStream?,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
+    return runCatching {
+        val bytes = openStream()?.use { stream -> stream.readBytes() } ?: return@runCatching null
+        val decodeOptions = BitmapFactory.Options().apply {
+            inPreferredConfig = preferredConfig
+        }
+        applyExifOrientation(
+            bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions),
+            orientation = orientation,
+        )
+    }.getOrNull()
+}
+
+private fun decodeSampledBitmapFile(
+    path: String?,
+    maxDimensionPx: Int,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
+    if (path.isNullOrBlank()) {
+        return null
+    }
+    return runCatching {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return@runCatching null
+        }
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = calculateBitmapSampleSize(
+                width = bounds.outWidth,
+                height = bounds.outHeight,
+                maxDimensionPx = maxDimensionPx,
+            )
+            inPreferredConfig = preferredConfig
+        }
+        applyExifOrientation(
+            bitmap = BitmapFactory.decodeFile(path, decodeOptions),
+            orientation = orientation,
+        )
+    }.getOrNull()
+}
+
+private fun decodeSampledBitmapBytes(
+    maxDimensionPx: Int,
+    openStream: () -> InputStream?,
+    orientation: Int,
+    preferredConfig: Bitmap.Config,
+): Bitmap? {
+    return runCatching {
+        val bytes = openStream()?.use { stream -> stream.readBytes() } ?: return@runCatching null
+        decodeSampledJpegBytes(
+            bytes = bytes,
+            offset = 0,
+            length = bytes.size,
+            maxDimensionPx = maxDimensionPx,
+            orientation = orientation,
+            preferredConfig = preferredConfig,
+        )
+    }.getOrNull()
 }
 
 private fun decodeSampledBitmap(
@@ -720,11 +1053,15 @@ internal fun isJpegPreviewLocation(location: String?): Boolean {
 }
 
 private const val PREVIEW_MAX_DIMENSION_PX = 512
+private const val PREVIEW_DISPLAY_MAX_DIMENSION_PX = 2560
 private const val PREVIEW_SCORE_SAMPLE_MAX_DIMENSION_PX = 160
-private const val PREVIEW_DETAIL_MAX_DIMENSION_PX = 2400
-private const val PREVIEW_FULLSCREEN_MAX_DIMENSION_PX = 4096
-private const val THUMBNAIL_MEMORY_CACHE_MIN_BYTES = 16 * 1024 * 1024
-private const val THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 64 * 1024 * 1024
+private const val PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = 100
+private const val PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 32 * 1024 * 1024
+private const val PERSISTENT_THUMBNAIL_JPEG_QUALITY = 86
+private const val PREVIEW_MEMORY_CACHE_MIN_BYTES = 32 * 1024 * 1024
+private const val PREVIEW_MEMORY_CACHE_MAX_BYTES = 256 * 1024 * 1024
+private const val PHOTO_METADATA_CACHE_MAX_ENTRIES = 256
+private const val PREVIEW_LOG_TAG = "CameraPreviewMedia"
 private const val RAW_ORIENTATION_READ_LIMIT_BYTES = 512 * 1024
 private const val TIFF_HEADER_SCAN_LIMIT_BYTES = 4096
 private const val TIFF_HEADER_BYTES = 8

@@ -87,12 +87,52 @@ fn review_summary_counts_burst_units_low_scores_and_unsupported_singles() {
         .expect("summary should load");
 
     assert_eq!(summary.total_units, 2);
+    assert_eq!(summary.pending_count, 0);
     assert_eq!(summary.unconfirmed_best_count, 1);
     assert_eq!(summary.low_score_candidate_count, 1);
     assert_eq!(summary.unsupported_count, 1);
     assert_eq!(summary.needs_review_count, 1);
     assert_eq!(summary.queue_count("unconfirmed_best"), Some(1));
     assert_eq!(summary.queue_count("unsupported"), Some(1));
+}
+
+#[test]
+fn scored_single_frame_is_not_pending_without_burst_recommendation() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let project = service
+        .create_project("Single Review Queue")
+        .expect("project should create");
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:single-ready", "DCIM/100/IMG_9102.JPG", 1000),
+        )
+        .expect("single transfer should record");
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, Default::default(), 0, 25)
+        .expect("page should load");
+    let single = page
+        .groups
+        .iter()
+        .find(|group| group.burst.is_none())
+        .expect("single frame group should exist");
+    service
+        .score_asset_group_preview(
+            single.group_id.as_deref().expect("group id"),
+            checkerboard_sample(16, 16),
+            "local-v1",
+        )
+        .expect("single score should save");
+
+    let summary = service
+        .project_review_queue_summary(&project.project_id, None)
+        .expect("summary should load");
+
+    assert_eq!(summary.total_units, 1);
+    assert_eq!(summary.pending_count, 0);
+    assert_eq!(summary.queue_count("pending"), Some(0));
 }
 
 #[test]
@@ -325,7 +365,7 @@ fn split_burst_member_invalidates_recommendation_and_returns_burst_to_pending() 
     assert_eq!(updated.member_count, 2);
     assert_eq!(updated.recommendation_status, "pending");
     assert_eq!(after.unconfirmed_best_count, 0);
-    assert_eq!(after.pending_count, 2);
+    assert_eq!(after.pending_count, 1);
     assert_eq!(after.user_overridden_count, 1);
     assert!(split_group.burst.is_none());
 }

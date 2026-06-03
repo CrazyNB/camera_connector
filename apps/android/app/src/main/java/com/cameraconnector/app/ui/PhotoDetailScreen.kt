@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -13,12 +15,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -26,8 +30,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,12 +46,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.BookmarkAdded
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -69,6 +81,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -86,6 +99,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -93,7 +107,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -114,16 +130,18 @@ import com.cameraconnector.app.core.ReceiverState
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
-import com.cameraconnector.app.media.cacheThumbnailPreview
-import com.cameraconnector.app.media.cachedThumbnailPreview
+import com.cameraconnector.app.media.cachedPreviewBitmap
 import com.cameraconnector.app.media.isDecodablePreviewLocation
+import com.cameraconnector.app.media.loadCachedPreviewBitmap
 import com.cameraconnector.app.media.loadPhotoMetadata
-import com.cameraconnector.app.media.loadPreviewBitmap
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 internal fun PhotoDetailScreen(
@@ -131,14 +149,54 @@ internal fun PhotoDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     actionsEnabled: Boolean = true,
-    onAcceptRecommendedBest: ((String) -> Unit)? = null,
-    onOverrideRecommendedBest: ((String, String) -> Unit)? = null,
-    onMarkBurstNeedsReview: ((String) -> Unit)? = null,
-    onRestoreAutomaticRecommendation: ((String) -> Unit)? = null,
     onSplitBurstMember: ((String, String) -> Unit)? = null,
     burstMembers: List<BurstMemberFilmstripItemUi> = emptyList(),
-    comparisonItems: List<BurstMemberFilmstripItemUi> = emptyList(),
     onOpenBurstMember: ((InboxAsset) -> Unit)? = null,
+    onNavigatePreviousGroup: (() -> Unit)? = null,
+    onNavigateNextGroup: (() -> Unit)? = null,
+    onToggleMarked: ((String) -> Unit)? = null,
+    onToggleFavorite: ((String) -> Unit)? = null,
+    onDeleteAsset: ((String) -> Unit)? = null,
+) {
+    var fullScreenPreview by remember { mutableStateOf(false) }
+    if (fullScreenPreview) {
+        FullScreenPhotoPreview(
+            asset = asset,
+            onDismiss = { fullScreenPreview = false },
+        )
+    }
+    PhotoDetailContent(
+        asset = asset,
+        onBack = onBack,
+        modifier = modifier,
+        actionsEnabled = actionsEnabled,
+        onSplitBurstMember = onSplitBurstMember,
+        burstMembers = burstMembers,
+        onOpenBurstMember = onOpenBurstMember,
+        onNavigatePreviousGroup = onNavigatePreviousGroup,
+        onNavigateNextGroup = onNavigateNextGroup,
+        onToggleMarked = onToggleMarked,
+        onToggleFavorite = onToggleFavorite,
+        onDeleteAsset = onDeleteAsset,
+        onPreviewClick = { fullScreenPreview = true },
+    )
+}
+
+@Composable
+private fun PhotoDetailContent(
+    asset: InboxAsset,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    actionsEnabled: Boolean,
+    onSplitBurstMember: ((String, String) -> Unit)?,
+    burstMembers: List<BurstMemberFilmstripItemUi>,
+    onOpenBurstMember: ((InboxAsset) -> Unit)?,
+    onNavigatePreviousGroup: (() -> Unit)?,
+    onNavigateNextGroup: (() -> Unit)?,
+    onToggleMarked: ((String) -> Unit)?,
+    onToggleFavorite: ((String) -> Unit)?,
+    onDeleteAsset: ((String) -> Unit)?,
+    onPreviewClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val metadataLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
@@ -151,21 +209,31 @@ internal fun PhotoDetailScreen(
             }
         }
     }
-    var fullScreenPreview by remember { mutableStateOf(false) }
-    var burstComparisonOpen by remember(asset.assetSelectionId()) { mutableStateOf(false) }
-    if (fullScreenPreview) {
-        FullScreenPhotoPreview(
+    val previousBurstMember = remember(asset, burstMembers) {
+        adjacentBurstMemberAsset(
+            currentAsset = asset,
+            allProjectAssets = burstMembers.map { it.asset },
+            direction = DetailNavigationDirection.Previous,
+        )
+    }
+    val nextBurstMember = remember(asset, burstMembers) {
+        adjacentBurstMemberAsset(
+            currentAsset = asset,
+            allProjectAssets = burstMembers.map { it.asset },
+            direction = DetailNavigationDirection.Next,
+        )
+    }
+    val detailBurstPositionText = remember(asset, burstMembers) {
+        photoDetailBurstPositionText(
             asset = asset,
-            onDismiss = { fullScreenPreview = false },
+            burstMembers = burstMembers.map { it.asset },
         )
     }
-    if (burstComparisonOpen && comparisonItems.size > 1) {
-        BurstComparisonDialog(
-            items = comparisonItems,
-            onDismiss = { burstComparisonOpen = false },
-        )
-    }
-
+    val decision = photoDetailDecisionUi(asset, actionsEnabled)
+    val hasActionCallbacks = onToggleMarked != null ||
+        onSplitBurstMember != null ||
+        onToggleFavorite != null ||
+        onDeleteAsset != null
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -178,32 +246,61 @@ internal fun PhotoDetailScreen(
             subtitle = "照片详情",
             onBack = onBack,
         )
-        PhotoPreview(
+        DetailPhotoCarousel(
             asset = asset,
-            previewQuality = PreviewQuality.Detail,
-            fitToImageAspect = true,
-            contentScale = ContentScale.Fit,
-            backgroundColor = Color.Black,
-            onClick = { fullScreenPreview = true },
+            previousAsset = previousBurstMember,
+            nextAsset = nextBurstMember,
+            onPrevious = previousBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
+            onNext = nextBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
+            onClick = onPreviewClick,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (photoDetailActionBarVisible(decision, hasActionCallbacks)) {
+            decision.disabledReason?.let { reason ->
+                Text(
+                    reason,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 22.dp),
+                )
+            }
+            PhotoDetailDecisionActions(
+                asset = asset,
+                decision = decision,
+                onSplitBurstMember = onSplitBurstMember,
+                markedSelected = photoDetailMarkedSelected(asset),
+                markedEnabled = actionsEnabled && onToggleMarked != null,
+                onToggleMarked = onToggleMarked,
+                favoriteSelected = photoDetailFavoriteSelected(asset),
+                favoriteEnabled = actionsEnabled && onToggleFavorite != null,
+                onToggleFavorite = onToggleFavorite,
+                onDeleteAsset = onDeleteAsset,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 42.dp),
+            )
+        }
         if (asset.quality != null || asset.burst != null) {
             SmartSelectionDetailCard(
                 asset = asset,
-                actionsEnabled = actionsEnabled,
-                onAcceptRecommendedBest = onAcceptRecommendedBest,
-                onOverrideRecommendedBest = onOverrideRecommendedBest,
-                onMarkBurstNeedsReview = onMarkBurstNeedsReview,
-                onRestoreAutomaticRecommendation = onRestoreAutomaticRecommendation,
-                onSplitBurstMember = onSplitBurstMember,
-                burstMembers = burstMembers,
-                comparisonItems = comparisonItems,
-                onOpenComparison = { burstComparisonOpen = true },
-                onOpenBurstMember = onOpenBurstMember,
+                burstPositionText = detailBurstPositionText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .detailHorizontalSwipe(
+                        onSwipePrevious = onNavigatePreviousGroup,
+                        onSwipeNext = onNavigateNextGroup,
+                    ),
             )
         }
         photoMetadata?.lines()?.takeIf { it.isNotEmpty() }?.let { metadataLines ->
-            ElementCard(modifier = Modifier.fillMaxWidth()) {
+            ElementCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .detailHorizontalSwipe(
+                        onSwipePrevious = onNavigatePreviousGroup,
+                        onSwipeNext = onNavigateNextGroup,
+                    ),
+            ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("拍摄参数", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
@@ -213,7 +310,14 @@ internal fun PhotoDetailScreen(
                 }
             }
         }
-        ElementCard(modifier = Modifier.fillMaxWidth()) {
+        ElementCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .detailHorizontalSwipe(
+                    onSwipePrevious = onNavigatePreviousGroup,
+                    onSwipeNext = onNavigateNextGroup,
+                ),
+        ) {
             Column(Modifier.padding(16.dp)) {
                 Text("来源信息", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
@@ -224,7 +328,14 @@ internal fun PhotoDetailScreen(
                 DetailLine("文件大小", asset.sizeBytes?.let { "$it bytes" } ?: "未记录")
             }
         }
-        ElementCard(modifier = Modifier.fillMaxWidth()) {
+        ElementCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .detailHorizontalSwipe(
+                    onSwipePrevious = onNavigatePreviousGroup,
+                    onSwipeNext = onNavigateNextGroup,
+                ),
+        ) {
             Column(Modifier.padding(16.dp)) {
                 Text("文件组", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
@@ -240,22 +351,13 @@ internal fun PhotoDetailScreen(
 @Composable
 private fun SmartSelectionDetailCard(
     asset: InboxAsset,
-    actionsEnabled: Boolean,
-    onAcceptRecommendedBest: ((String) -> Unit)?,
-    onOverrideRecommendedBest: ((String, String) -> Unit)?,
-    onMarkBurstNeedsReview: ((String) -> Unit)?,
-    onRestoreAutomaticRecommendation: ((String) -> Unit)?,
-    onSplitBurstMember: ((String, String) -> Unit)?,
-    burstMembers: List<BurstMemberFilmstripItemUi>,
-    comparisonItems: List<BurstMemberFilmstripItemUi>,
-    onOpenComparison: () -> Unit,
-    onOpenBurstMember: ((InboxAsset) -> Unit)?,
+    burstPositionText: String?,
+    modifier: Modifier = Modifier,
 ) {
     val quality = asset.quality
     val burst = asset.burst
     val score = asset.qualityScoreText()
-    val decision = photoDetailDecisionUi(asset, actionsEnabled)
-    ElementCard(modifier = Modifier.fillMaxWidth()) {
+    ElementCard(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -288,7 +390,7 @@ private fun SmartSelectionDetailCard(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(it, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("评分", style = MaterialTheme.typography.labelSmall)
+                            Text("模型分", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }
@@ -296,18 +398,32 @@ private fun SmartSelectionDetailCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 asset.qualityBadgeText()?.let { ElementTag(it, smartBadgeColor(asset)) }
                 asset.groupBestBadgeText()?.let { ElementTag(it, ElementWarning) }
-                asset.burstBadgeText()?.let { ElementTag(it, ElementPurple) }
+                burstPositionText?.let { ElementTag(it, ElementPurple) }
                 asset.recommendationBadgeText()?.let {
                     ElementTag(it, if (asset.isBestRecommendedAsset()) ElementSuccess else ElementInfo)
                 }
             }
+            asset.modelStatus?.let { DetailLine("模型状态", it) }
+            asset.modelTier?.let { DetailLine("模型档位", it) }
+            asset.modelEvaluatorKind?.let { DetailLine("评价来源", modelEvaluationSourceLabel(it)) }
+            asset.technicalGateStatus?.let { DetailLine("技术门禁", it) }
+            asset.technicalDefects.takeIf { it.isNotEmpty() }?.let { defects ->
+                DetailLine(
+                    "技术风险",
+                    defects.joinToString(" / ") { defect ->
+                        listOfNotNull(defect.defectType, defect.severity, defect.reason)
+                            .filter { value -> value.isNotBlank() }
+                            .joinToString(":")
+                    },
+                )
+            }
             quality?.let {
-                DetailLine("评分状态", qualityStatusLabel(it.analysisStatus))
+                DetailLine("评价状态", qualityStatusLabel(it.analysisStatus))
                 asset.qualitySignalRows().takeIf { rows -> rows.isNotEmpty() }?.let { rows ->
                     QualitySignalStrip(rows = rows)
                 }
                 it.scorerVersion?.takeIf { version -> version.isNotBlank() }?.let { version ->
-                    DetailLine("评分版本", version)
+                    DetailLine("评价版本", version)
                 }
                 it.analyzedAtMs?.let { analyzedAtMs ->
                     DetailLine("分析时间", formatEpochMillisForDisplay(analyzedAtMs))
@@ -316,153 +432,319 @@ private fun SmartSelectionDetailCard(
             burst?.let {
                 DetailLine(
                     "连拍分组",
-                    asset.burstPositionBadgeText() ?: it.memberCount.toString(),
+                    burstPositionText ?: "1/${it.memberCount}",
                 )
                 asset.groupBestScoreText()?.let { bestScore ->
-                    DetailLine("组内最高评分", bestScore)
+                    DetailLine("组内参考分", bestScore)
                 }
                 DetailLine("推荐状态", recommendationStatusLabel(it.recommendationStatus))
                 it.bestAssetGroupId?.takeIf { bestId -> bestId.isNotBlank() }?.let { bestId ->
                     DetailLine("当前优选", if (asset.isBestRecommendedAsset()) "当前照片" else bestId)
                 }
             }
-            if (burstMembers.isNotEmpty()) {
-                Text("组内照片", style = MaterialTheme.typography.titleSmall)
-                DetailBurstMemberFilmstrip(
-                    memberItems = burstMembers,
-                    currentAssetId = asset.assetSelectionId(),
-                    onOpenBurstMember = onOpenBurstMember,
+        }
+    }
+}
+
+@Composable
+private fun DetailPhotoCarousel(
+    asset: InboxAsset,
+    previousAsset: InboxAsset?,
+    nextAsset: InboxAsset?,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val assetId = asset.assetSelectionId()
+    var dragOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
+    var settleOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
+    var settling by remember(assetId) { mutableStateOf(false) }
+    var pendingNavigationAssetId by remember(assetId) { mutableStateOf<String?>(null) }
+    fun resetMotion() {
+        pendingNavigationAssetId = null
+        settling = false
+        dragOffsetX = 0f
+        settleOffsetX = 0f
+    }
+    LaunchedEffect(previousAsset?.previewLocation, nextAsset?.previewLocation) {
+        withContext(Dispatchers.IO) {
+            listOf(previousAsset, nextAsset)
+                .mapNotNull { it?.previewLocation?.takeIf(::isDecodablePreviewLocation) }
+                .distinct()
+                .forEach { location ->
+                    loadCachedPreviewBitmap(context, location, PreviewQuality.Thumbnail)
+                }
+        }
+    }
+    BoxWithConstraints(
+        modifier = modifier
+            .height(420.dp)
+            .clip(RoundedCornerShape(18.dp)),
+    ) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.toPx() }
+        val sidePeekPx = with(density) { 24.dp.toPx() }
+        val sideGapPx = with(density) { 16.dp.toPx() }
+        val sidePaddingPx = with(density) { 48.dp.toPx() }
+        val pageStridePx = (pageWidthPx - sidePeekPx - sidePaddingPx)
+            .coerceAtLeast(pageWidthPx * 0.72f + sideGapPx)
+        val thresholdPx = pageStridePx * 0.18f
+        val pageOffsetX = if (settling) settleOffsetX else dragOffsetX
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(assetId, previousAsset?.assetSelectionId(), nextAsset?.assetSelectionId()) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            pendingNavigationAssetId = null
+                            settling = false
+                            settleOffsetX = 0f
+                        },
+                        onDragEnd = {
+                            val target = when {
+                                dragOffsetX > thresholdPx && onPrevious != null -> DetailNavigationDirection.Previous
+                                dragOffsetX < -thresholdPx && onNext != null -> DetailNavigationDirection.Next
+                                else -> null
+                            }
+                            val releaseOffset = dragOffsetX
+                            scope.launch {
+                                settling = true
+                                val animation = Animatable(releaseOffset)
+                                when (target) {
+                                    DetailNavigationDirection.Previous -> {
+                                        animation.animateTo(pageStridePx, tween(durationMillis = 90)) {
+                                            settleOffsetX = value
+                                        }
+                                        pendingNavigationAssetId = assetId
+                                        onPrevious?.invoke()
+                                    }
+                                    DetailNavigationDirection.Next -> {
+                                        animation.animateTo(-pageStridePx, tween(durationMillis = 90)) {
+                                            settleOffsetX = value
+                                        }
+                                        pendingNavigationAssetId = assetId
+                                        onNext?.invoke()
+                                    }
+                                    null -> animation.animateTo(0f, tween(durationMillis = 90)) {
+                                        settleOffsetX = value
+                                    }
+                                }
+                                if (target == null) {
+                                    resetMotion()
+                                } else {
+                                    delay(240)
+                                    if (pendingNavigationAssetId == assetId) {
+                                        resetMotion()
+                                    }
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            val releaseOffset = dragOffsetX
+                            scope.launch {
+                                settling = true
+                                Animatable(releaseOffset).animateTo(0f, tween(durationMillis = 90)) {
+                                    settleOffsetX = value
+                                }
+                                resetMotion()
+                            }
+                        },
+                    ) { _, dragAmount ->
+                        dragOffsetX = (dragOffsetX + dragAmount).coerceIn(
+                            minimumValue = if (onNext != null) -pageStridePx else 0f,
+                            maximumValue = if (onPrevious != null) pageStridePx else 0f,
+                        )
+                    }
+                },
+        ) {
+            previousAsset?.let { previous ->
+                DetailCarouselPhotoPage(
+                    asset = previous,
+                    previewQuality = PreviewQuality.Thumbnail,
+                    horizontalPadding = 48.dp,
+                    pageScale = 0.9f,
+                    onClick = onPrevious,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((pageOffsetX - pageStridePx).roundToInt(), 0) },
                 )
-                if (comparisonItems.size > 1) {
-                    OutlinedButton(
-                        onClick = onOpenComparison,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.45f)),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = ElementBlueSoft.copy(alpha = 0.5f),
-                            contentColor = ElementBlue,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    ) {
-                        Text("对比组内照片", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            DetailCarouselPhotoPage(
+                asset = asset,
+                previewQuality = PreviewQuality.Detail,
+                horizontalPadding = 40.dp,
+                onClick = onClick,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(pageOffsetX.roundToInt(), 0) },
+            )
+            nextAsset?.let { next ->
+                DetailCarouselPhotoPage(
+                    asset = next,
+                    previewQuality = PreviewQuality.Thumbnail,
+                    horizontalPadding = 48.dp,
+                    pageScale = 0.9f,
+                    onClick = onNext,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((pageOffsetX + pageStridePx).roundToInt(), 0) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailCarouselPhotoPage(
+    asset: InboxAsset,
+    previewQuality: PreviewQuality,
+    horizontalPadding: Dp,
+    pageScale: Float = 1f,
+    onClick: (() -> Unit)?,
+    onPreviewReady: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = pageScale
+                scaleY = pageScale
+            }
+            .padding(horizontal = horizontalPadding),
+        contentAlignment = Alignment.Center,
+    ) {
+        PhotoPreview(
+            asset = asset,
+            previewQuality = previewQuality,
+            fitToImageAspect = true,
+            contentScale = ContentScale.Fit,
+            backgroundColor = ElementSurface,
+            onClick = onClick,
+            onPreviewReady = onPreviewReady,
+            showFallbackText = false,
+            modifier = Modifier.fillMaxHeight(),
+        )
+    }
+}
+
+@Composable
+private fun PhotoDetailDecisionActions(
+    asset: InboxAsset,
+    decision: PhotoDetailDecisionUi,
+    onSplitBurstMember: ((String, String) -> Unit)?,
+    markedSelected: Boolean,
+    markedEnabled: Boolean,
+    onToggleMarked: ((String) -> Unit)?,
+    favoriteSelected: Boolean,
+    favoriteEnabled: Boolean,
+    onToggleFavorite: ((String) -> Unit)?,
+    onDeleteAsset: ((String) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PhotoDetailIconAction(
+            icon = if (markedSelected) Icons.Outlined.BookmarkAdded else Icons.Outlined.BookmarkAdd,
+            contentDescription = if (markedSelected) "已标记" else "标记",
+            tint = ElementBlue,
+            enabled = markedEnabled,
+            onClick = {
+                onToggleMarked?.invoke(asset.assetSelectionId())
+            },
+        )
+        PhotoDetailIconAction(
+            icon = if (favoriteSelected) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+            contentDescription = if (favoriteSelected) "已收藏" else "收藏",
+            tint = ElementSuccess,
+            enabled = favoriteEnabled,
+            onClick = {
+                onToggleFavorite?.invoke(asset.assetSelectionId())
+            },
+        )
+        PhotoDetailIconAction(
+            icon = Icons.Outlined.DeleteSweep,
+            contentDescription = "移出连拍组，不删除文件",
+            tint = ElementWarning,
+            enabled = decision.splitBurstEnabled && onSplitBurstMember != null,
+            onClick = {
+                decision.splitBurstTarget?.let { target ->
+                    onSplitBurstMember?.invoke(target.burstGroupId, target.memberGroupId)
+                }
+            },
+        )
+        PhotoDetailIconAction(
+            icon = Icons.Outlined.Delete,
+            contentDescription = "删除照片",
+            tint = ElementDanger,
+            enabled = onDeleteAsset != null,
+            onClick = {
+                onDeleteAsset?.invoke(asset.assetSelectionId())
+            },
+        )
+    }
+}
+
+@Composable
+private fun PhotoDetailIconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .size(42.dp)
+            .clickable(enabled = enabled, onClick = onClick),
+        color = if (enabled) tint.copy(alpha = 0.08f) else ElementControlSurface,
+        contentColor = if (enabled) tint else tint.copy(alpha = 0.34f),
+        shape = CircleShape,
+        border = BorderStroke(1.dp, if (enabled) tint.copy(alpha = 0.42f) else ElementBorder),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+private fun Modifier.detailHorizontalSwipe(
+    onSwipePrevious: (() -> Unit)?,
+    onSwipeNext: (() -> Unit)?,
+): Modifier {
+    if (onSwipePrevious == null && onSwipeNext == null) {
+        return this
+    }
+    return pointerInput(onSwipePrevious, onSwipeNext) {
+        var totalX = 0f
+        detectHorizontalDragGestures(
+            onDragStart = {
+                totalX = 0f
+            },
+            onDragEnd = {
+                if (kotlin.math.abs(totalX) > 90f) {
+                    if (totalX > 0f) {
+                        onSwipePrevious?.invoke()
+                    } else {
+                        onSwipeNext?.invoke()
                     }
                 }
-            }
-            if (
-                decision.hasAnyAction &&
-                (
-                    onAcceptRecommendedBest != null ||
-                        onOverrideRecommendedBest != null ||
-                        onMarkBurstNeedsReview != null ||
-                        onRestoreAutomaticRecommendation != null ||
-                        onSplitBurstMember != null
-                    )
-            ) {
-                decision.disabledReason?.let { reason ->
-                    Text(
-                        reason,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    decision.acceptRecommendedBestBurstGroupId
-                        ?.takeIf { onAcceptRecommendedBest != null }
-                        ?.let { burstGroupId ->
-                            Button(
-                                onClick = { onAcceptRecommendedBest?.invoke(burstGroupId) },
-                                enabled = decision.acceptRecommendedBestEnabled,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = ElementSuccess,
-                                    contentColor = ElementOnAccent,
-                                ),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            ) {
-                                Text("接受推荐", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    decision.overrideRecommendedBestTarget
-                        ?.takeIf { onOverrideRecommendedBest != null }
-                        ?.let { target ->
-                            Button(
-                                onClick = {
-                                    onOverrideRecommendedBest?.invoke(
-                                        target.burstGroupId,
-                                        target.bestAssetGroupId,
-                                    )
-                                },
-                                enabled = decision.overrideRecommendedBestEnabled,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = ElementSuccess,
-                                    contentColor = ElementOnAccent,
-                                ),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            ) {
-                                Text("设为优选", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    decision.markNeedsReviewBurstGroupId
-                        ?.takeIf { onMarkBurstNeedsReview != null }
-                        ?.let { burstGroupId ->
-                            OutlinedButton(
-                                onClick = { onMarkBurstNeedsReview?.invoke(burstGroupId) },
-                                enabled = decision.markNeedsReviewEnabled,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, ElementBorder),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            ) {
-                                Text("标记复核", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    decision.splitBurstTarget
-                        ?.takeIf { onSplitBurstMember != null }
-                        ?.let { target ->
-                            OutlinedButton(
-                                onClick = {
-                                    onSplitBurstMember?.invoke(
-                                        target.burstGroupId,
-                                        target.memberGroupId,
-                                    )
-                                },
-                                enabled = decision.splitBurstEnabled,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, ElementWarning.copy(alpha = 0.45f)),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = ElementControlSurface,
-                                    contentColor = ElementWarning,
-                                ),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                            ) {
-                                Text("\u79fb\u51fa\u8fde\u62cd\u7ec4", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                    val restoreAutomaticBurstGroupId = decision.restoreAutomaticBurstGroupId
-                    if (restoreAutomaticBurstGroupId != null && onRestoreAutomaticRecommendation != null) {
-                        OutlinedButton(
-                            onClick = {
-                                onRestoreAutomaticRecommendation.invoke(restoreAutomaticBurstGroupId)
-                            },
-                            enabled = decision.restoreAutomaticEnabled,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, ElementBorder),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        ) {
-                            Text("恢复自动推荐", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
-            }
+                totalX = 0f
+            },
+            onDragCancel = {
+                totalX = 0f
+            },
+        ) { _, dragAmount ->
+            totalX += dragAmount
         }
     }
 }
@@ -723,6 +1005,7 @@ internal fun FullScreenPhotoPreview(
                 contentScale = ContentScale.Fit,
                 backgroundColor = Color.Black,
                 clipPreview = false,
+                showFallbackText = false,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -770,32 +1053,55 @@ internal fun PhotoPreview(
     backgroundColor: Color = ElementPanel,
     clipPreview: Boolean = true,
     onClick: (() -> Unit)? = null,
+    onPreviewReady: (() -> Unit)? = null,
+    showFallbackText: Boolean = true,
 ) {
     val context = LocalContext.current
     val previewLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
     val initialBitmap = remember(previewLocation, previewQuality) {
-        if (previewQuality == PreviewQuality.Thumbnail) {
-            cachedThumbnailPreview(previewLocation)
-        } else {
-            null
-        }
+        cachedPreviewBitmap(
+            location = previewLocation,
+            quality = previewQuality,
+            allowLowerQualityFallback = true,
+        )
     }
-    val bitmap by produceState<Bitmap?>(initialValue = initialBitmap, previewLocation, previewQuality) {
-        value = if (previewLocation == null) {
-            null
-        } else {
-            cachedThumbnailPreview(previewLocation)?.takeIf { previewQuality == PreviewQuality.Thumbnail }
-                ?: withContext(Dispatchers.IO) {
-                    loadPreviewBitmap(context, previewLocation, previewQuality)
-                }?.also { loadedBitmap ->
-                    if (previewQuality == PreviewQuality.Thumbnail) {
-                        cacheThumbnailPreview(previewLocation, loadedBitmap)
-                    }
-                }
+    var bitmap by remember(previewLocation, previewQuality) { mutableStateOf(initialBitmap) }
+    LaunchedEffect(previewLocation, previewQuality) {
+        if (previewLocation == null) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+        val exactCached = cachedPreviewBitmap(previewLocation, previewQuality)
+        if (exactCached != null) {
+            bitmap = exactCached
+            onPreviewReady?.invoke()
+            return@LaunchedEffect
+        }
+        cachedPreviewBitmap(
+            location = previewLocation,
+            quality = previewQuality,
+            allowLowerQualityFallback = true,
+        )?.let { fallbackBitmap ->
+            bitmap = fallbackBitmap
+        }
+        if (previewQuality != PreviewQuality.Thumbnail && bitmap == null) {
+            withContext(Dispatchers.IO) {
+                loadCachedPreviewBitmap(context, previewLocation, PreviewQuality.Thumbnail)
+            }?.let { thumbnailBitmap ->
+                bitmap = thumbnailBitmap
+            }
+        }
+        withContext(Dispatchers.IO) {
+            loadCachedPreviewBitmap(context, previewLocation, previewQuality)
+        }?.let { loadedBitmap ->
+            bitmap = loadedBitmap
+            onPreviewReady?.invoke()
         }
     }
 
     val loadedBitmap = bitmap
+    val showTextLoadingFallback = loadedBitmap == null &&
+        (previewQuality == PreviewQuality.Thumbnail || compactFallback)
     val aspectModifier = if (fitToImageAspect) {
         val imageAspectRatio = loadedBitmap
             ?.takeIf { it.width > 0 && it.height > 0 }
@@ -827,9 +1133,9 @@ internal fun PhotoPreview(
                 contentScale = contentScale,
                 filterQuality = FilterQuality.High,
             )
-        } else {
+        } else if (showFallbackText) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (compactFallback) {
+                if (compactFallback || !showTextLoadingFallback) {
                     Text(
                         asset.formatBadges(),
                         color = ElementInfo,

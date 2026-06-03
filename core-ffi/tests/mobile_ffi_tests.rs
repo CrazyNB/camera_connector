@@ -15,19 +15,25 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_clear_recommendation_json,
     camera_connector_mobile_core_complete_publish_json, camera_connector_mobile_core_create,
     camera_connector_mobile_core_create_project_json, camera_connector_mobile_core_destroy,
+    camera_connector_mobile_core_fork_prompt_profile_json,
     camera_connector_mobile_core_free_string,
+    camera_connector_mobile_core_generate_project_recommendation_json,
     camera_connector_mobile_core_hide_low_score_candidates_json,
     camera_connector_mobile_core_keep_all_candidates_json,
+    camera_connector_mobile_core_latest_project_recommendation_run_status_json,
     camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_mark_burst_needs_review_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
     camera_connector_mobile_core_merge_burst_member_json,
+    camera_connector_mobile_core_model_provider_settings_json,
     camera_connector_mobile_core_move_project_group_json,
     camera_connector_mobile_core_override_recommended_best_json,
     camera_connector_mobile_core_project_dashboard_json,
+    camera_connector_mobile_core_project_evaluation_settings_json,
     camera_connector_mobile_core_project_group_assets_json,
     camera_connector_mobile_core_project_selects_asset_group_page_json,
+    camera_connector_mobile_core_prompt_profiles_for_project_json,
     camera_connector_mobile_core_release_failed_publish_retries_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_rename_project_json,
@@ -35,6 +41,9 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_review_queue_summary_json,
     camera_connector_mobile_core_save_device_account_json,
+    camera_connector_mobile_core_save_model_provider_settings_json,
+    camera_connector_mobile_core_save_project_evaluation_settings_json,
+    camera_connector_mobile_core_save_prompt_version_json,
     camera_connector_mobile_core_save_receiver_settings_json,
     camera_connector_mobile_core_set_active_project_json,
     camera_connector_mobile_core_split_burst_member_json,
@@ -139,6 +148,252 @@ fn ffi_saves_receiver_settings_from_json_patch() {
     assert_eq!(value["value"]["protocol"], "Sftp");
     assert_eq!(value["value"]["source_name"], "Studio Camera");
     assert_eq!(value["value"]["defer_publish"], true);
+}
+
+#[test]
+fn ffi_model_provider_settings_json_round_trips_without_secrets() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let patch = CString::new(
+        r#"{
+            "provider_kind":"openai",
+            "provider_label":"OpenAI",
+            "default_model":"gpt-5.1-mini",
+            "default_max_image_side":1536,
+            "default_send_mode":"review_image",
+            "default_batch_size":3,
+            "configured":true,
+            "secret":"nope"
+        }"#,
+    )
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let missing =
+        take_ffi_string(unsafe { camera_connector_mobile_core_model_provider_settings_json(core) });
+    let saved = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_model_provider_settings_json(core, patch.as_ptr())
+    });
+    let loaded =
+        take_ffi_string(unsafe { camera_connector_mobile_core_model_provider_settings_json(core) });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let missing: Value = serde_json::from_str(&missing).unwrap();
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    let loaded: Value = serde_json::from_str(&loaded).unwrap();
+    assert_eq!(missing["ok"], true);
+    assert_eq!(missing["value"]["configured"], false);
+    assert_eq!(saved["value"]["provider_kind"], "openai");
+    assert_eq!(loaded["value"]["default_batch_size"], 3);
+    assert!(!saved.to_string().contains("nope"));
+    assert!(!loaded.to_string().contains("secret"));
+}
+
+#[test]
+fn ffi_project_settings_and_prompt_profiles_json_are_available() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Evaluation Settings").unwrap();
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes()).unwrap();
+    let project_id = CString::new(project.project_id.clone()).unwrap();
+    let patch = CString::new(
+        r#"{
+            "model_evaluation_enabled":false,
+            "auto_evaluate_on_upload":true,
+            "auto_burst_recommendation_enabled":false,
+            "project_recommendation_mode":"manual",
+            "prompt_profile_id":null,
+            "scene_profile":"landscape",
+            "cv_policy":"loose",
+            "allow_risky_model_selects":true,
+            "max_image_side":1200,
+            "batch_size":5
+        }"#,
+    )
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let saved = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_project_evaluation_settings_json(
+            core,
+            project_id.as_ptr(),
+            patch.as_ptr(),
+        )
+    });
+    let loaded = take_ffi_string(unsafe {
+        camera_connector_mobile_core_project_evaluation_settings_json(core, project_id.as_ptr())
+    });
+    let profiles = take_ffi_string(unsafe {
+        camera_connector_mobile_core_prompt_profiles_for_project_json(core, project_id.as_ptr())
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    let loaded: Value = serde_json::from_str(&loaded).unwrap();
+    let profiles: Value = serde_json::from_str(&profiles).unwrap();
+    assert_eq!(saved["ok"], true);
+    assert_eq!(saved["value"]["project_recommendation_mode"], "manual");
+    assert_eq!(loaded["value"]["scene_profile"], "landscape");
+    assert!(profiles["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|profile| profile["prompt_profile_id"] == "general-default"
+            && profile["built_in"] == true
+            && profile["style_tags"].is_array()));
+}
+
+#[test]
+fn ffi_rejects_invalid_settings_enum_json_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("FFI Invalid Enums").unwrap();
+    let config_path = CString::new(config_path.to_string_lossy().as_bytes()).unwrap();
+    let project_id = CString::new(project.project_id).unwrap();
+    let invalid_provider = CString::new(r#"{"provider_kind":"OpenAI"}"#).unwrap();
+    let invalid_scene = CString::new(
+        r#"{
+            "model_evaluation_enabled":false,
+            "project_recommendation_mode":"manual",
+            "scene_profile":"Portrait",
+            "cv_policy":"standard"
+        }"#,
+    )
+    .unwrap();
+    let invalid_mode = CString::new(
+        r#"{
+            "model_evaluation_enabled":false,
+            "project_recommendation_mode":"automatic",
+            "scene_profile":"general",
+            "cv_policy":"standard"
+        }"#,
+    )
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let provider = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_model_provider_settings_json(
+            core,
+            invalid_provider.as_ptr(),
+        )
+    });
+    let scene = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_project_evaluation_settings_json(
+            core,
+            project_id.as_ptr(),
+            invalid_scene.as_ptr(),
+        )
+    });
+    let mode = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_project_evaluation_settings_json(
+            core,
+            project_id.as_ptr(),
+            invalid_mode.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let provider: Value = serde_json::from_str(&provider).unwrap();
+    let scene: Value = serde_json::from_str(&scene).unwrap();
+    let mode: Value = serde_json::from_str(&mode).unwrap();
+    assert_eq!(provider["ok"], false);
+    assert!(provider["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid provider_kind: OpenAI"));
+    assert_eq!(scene["ok"], false);
+    assert!(scene["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid scene_profile: Portrait"));
+    assert_eq!(mode["ok"], false);
+    assert!(mode["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid project_recommendation_mode: automatic"));
+}
+
+#[test]
+fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let project_name = CString::new("FFI Prompt Recommendation").unwrap();
+    let provider = CString::new(
+        r#"{
+            "provider_kind":"imported",
+            "provider_label":"Imported",
+            "default_model":"model-stub-v1",
+            "default_max_image_side":1024,
+            "default_send_mode":"preview_only",
+            "default_batch_size":2,
+            "configured":true
+        }"#,
+    )
+    .unwrap();
+    let source_profile_id = CString::new("general-default").unwrap();
+    let fork_name = CString::new("FFI Editable").unwrap();
+    let prompt_text = CString::new("Return concise project selections.").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let created = take_ffi_string(unsafe {
+        camera_connector_mobile_core_create_project_json(core, project_name.as_ptr())
+    });
+    let created: Value = serde_json::from_str(&created).unwrap();
+    let project_id = CString::new(created["value"]["project_id"].as_str().unwrap()).unwrap();
+    take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_model_provider_settings_json(core, provider.as_ptr())
+    });
+
+    let forked = take_ffi_string(unsafe {
+        camera_connector_mobile_core_fork_prompt_profile_json(
+            core,
+            project_id.as_ptr(),
+            source_profile_id.as_ptr(),
+            fork_name.as_ptr(),
+        )
+    });
+    let forked: Value = serde_json::from_str(&forked).unwrap();
+    assert_eq!(forked["ok"], true);
+    assert_eq!(forked["value"]["scope"], "project");
+    let prompt_profile_id =
+        CString::new(forked["value"]["prompt_profile_id"].as_str().unwrap()).unwrap();
+
+    let version = take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_prompt_version_json(
+            core,
+            project_id.as_ptr(),
+            prompt_profile_id.as_ptr(),
+            prompt_text.as_ptr(),
+        )
+    });
+    let recommendation = take_ffi_string(unsafe {
+        camera_connector_mobile_core_generate_project_recommendation_json(core, project_id.as_ptr())
+    });
+    let run = take_ffi_string(unsafe {
+        camera_connector_mobile_core_latest_project_recommendation_run_status_json(
+            core,
+            project_id.as_ptr(),
+        )
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let version: Value = serde_json::from_str(&version).unwrap();
+    let recommendation: Value = serde_json::from_str(&recommendation).unwrap();
+    let run: Value = serde_json::from_str(&run).unwrap();
+    assert_eq!(version["ok"], true);
+    assert_eq!(
+        version["value"]["prompt_profile_id"],
+        prompt_profile_id.to_str().unwrap()
+    );
+    assert_eq!(recommendation["ok"], true);
+    assert!(recommendation["value"]["run_id"].as_str().is_some());
+    assert_eq!(run["ok"], true);
+    assert_eq!(run["value"]["run_type"], "project_recommendation");
+    assert_eq!(run["value"]["status"], "ready");
 }
 
 #[test]
@@ -628,7 +883,7 @@ fn ffi_splits_burst_member_json_envelope() {
     assert_eq!(updated["value"]["member_count"], 2);
     assert_eq!(updated["value"]["recommendation_status"], "pending");
     assert_eq!(summary["value"]["unconfirmed_best_count"], 0);
-    assert_eq!(summary["value"]["pending_count"], 2);
+    assert_eq!(summary["value"]["pending_count"], 1);
 }
 
 #[test]

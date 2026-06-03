@@ -2,10 +2,13 @@ package com.cameraconnector.app.ui
 
 import com.cameraconnector.app.core.InboxAsset
 import com.cameraconnector.app.core.InboxAssetQuery
+import com.cameraconnector.app.core.EvaluationRunUi
+import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PhotoSortMode
+import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.ProjectState
-import com.cameraconnector.app.core.ReviewQueueSummary
 import com.cameraconnector.app.core.StrategyProfileUi
 import com.cameraconnector.app.core.StrategyWeightsUi
 import kotlin.math.abs
@@ -37,102 +40,13 @@ internal data class ProjectLifecycleUi(
     val canRename: Boolean,
     val canRestore: Boolean,
 )
-
-internal data class ReviewQueueEntryUi(
-    val primaryLabel: String,
-    val primaryCount: Int,
-    val primaryText: String,
-    val subtitle: String,
-    val queue: String,
-    val recommendationState: String?,
-    val analysisStatus: String?,
-)
-
-internal data class ReviewModeProgressUi(
-    val currentIndex: Int,
-    val totalCount: Int,
-    val text: String,
-)
-
-internal enum class ReviewSessionDecision {
-    AcceptRecommendedBest,
-    OverrideRecommendedBest,
-    MarkNeedsReview,
-    RestoreAutomaticRecommendation,
-    ClearRecommendation,
-    KeepAllCandidates,
-    HideLowScoreCandidates,
-    SkipCurrent,
-}
-
-private fun ReviewSessionDecision.undoLabel(): String? = when (this) {
-    ReviewSessionDecision.AcceptRecommendedBest -> "撤销接受推荐"
-    ReviewSessionDecision.OverrideRecommendedBest -> "撤销手动优选"
-    ReviewSessionDecision.MarkNeedsReview -> "撤销标记复核"
-    ReviewSessionDecision.RestoreAutomaticRecommendation -> null
-    ReviewSessionDecision.ClearRecommendation -> null
-    ReviewSessionDecision.KeepAllCandidates -> null
-    ReviewSessionDecision.HideLowScoreCandidates -> null
-    ReviewSessionDecision.SkipCurrent -> null
-}
-
-internal data class ReviewModeSessionUi(
-    val processedGroupCount: Int = 0,
-    val acceptedRecommendationCount: Int = 0,
-    val manualOverrideCount: Int = 0,
-    val markedNeedsReviewCount: Int = 0,
-    val restoredAutomaticCount: Int = 0,
-    val clearedRecommendationCount: Int = 0,
-    val keptAllCandidatesCount: Int = 0,
-    val hiddenLowScoreCount: Int = 0,
-    val skippedCount: Int = 0,
-    val undoBurstGroupId: String? = null,
-    val undoDecision: ReviewSessionDecision? = null,
-) {
-    val hasActivity: Boolean
-        get() = processedGroupCount > 0
-
-    val undoLabel: String?
-        get() = undoDecision?.undoLabel()
-
-    val compactText: String?
-        get() {
-            if (!hasActivity) {
-                return null
-            }
-            return buildList {
-                add("本轮 $processedGroupCount 组")
-                if (acceptedRecommendationCount > 0) add("接受 $acceptedRecommendationCount")
-                if (manualOverrideCount > 0) add("手动 $manualOverrideCount")
-                if (markedNeedsReviewCount > 0) add("复核 $markedNeedsReviewCount")
-                if (restoredAutomaticCount > 0) add("恢复 $restoredAutomaticCount")
-                if (clearedRecommendationCount > 0) add("清除 $clearedRecommendationCount")
-                if (keptAllCandidatesCount > 0) add("保留 $keptAllCandidatesCount")
-                if (hiddenLowScoreCount > 0) add("隐藏低分 $hiddenLowScoreCount")
-                if (skippedCount > 0) add("跳过 $skippedCount")
-            }.joinToString(" · ")
-        }
-}
-
 internal data class PhotoDetailDecisionUi(
-    val acceptRecommendedBestBurstGroupId: String?,
-    val markNeedsReviewBurstGroupId: String?,
-    val restoreAutomaticBurstGroupId: String?,
-    val overrideRecommendedBestTarget: ManualBestOverrideTarget?,
     val splitBurstTarget: ManualBurstSplitTarget?,
-    val acceptRecommendedBestEnabled: Boolean,
-    val markNeedsReviewEnabled: Boolean,
-    val restoreAutomaticEnabled: Boolean,
-    val overrideRecommendedBestEnabled: Boolean,
     val splitBurstEnabled: Boolean,
     val disabledReason: String?,
 ) {
     val hasAnyAction: Boolean
-        get() = acceptRecommendedBestBurstGroupId != null ||
-            markNeedsReviewBurstGroupId != null ||
-            restoreAutomaticBurstGroupId != null ||
-            overrideRecommendedBestTarget != null ||
-            splitBurstTarget != null
+        get() = splitBurstTarget != null
 }
 
 internal data class BurstMemberFilmstripItemUi(
@@ -140,6 +54,31 @@ internal data class BurstMemberFilmstripItemUi(
     val badgeText: String,
     val scoreText: String?,
 )
+
+internal data class ProjectIntelligenceSettingsUi(
+    val modelEvaluationEnabled: Boolean,
+    val autoEvaluateOnUpload: Boolean,
+    val autoBurstRecommendationEnabled: Boolean,
+    val projectRecommendationMode: String,
+    val sceneProfile: String,
+    val promptProfileId: String?,
+    val cvPolicy: String,
+    val allowRiskyModelSelects: Boolean,
+    val providerConfigured: Boolean,
+) {
+    val modelEvaluationToggleEnabled: Boolean
+        get() = providerConfigured
+}
+
+internal data class ManualProjectRecommendationActionUi(
+    val enabled: Boolean,
+    val ctaLabel: String,
+    val disabledReason: String?,
+)
+
+internal interface ProjectRecommendationGateway {
+    suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi
+}
 
 internal data class ProjectPhotoGridItemUi(
     val key: String,
@@ -159,14 +98,18 @@ internal enum class ScoreFilter(
     val label: String,
     val scoreMin: Double?,
 ) {
-    All("全部评分", null),
+    All("全部评价", null),
     Excellent("80+", 80.0),
     Usable("60+", 60.0),
 }
 
 internal enum class ProjectPhotoCollection(val label: String) {
     All("全部"),
-    Selects("精选"),
+    ModelSelects("模型优选"),
+    Favorites("收藏"),
+    Marked("标记"),
+    QualityRisk("质量风险"),
+    PendingAnalysis("待分析"),
 }
 
 internal enum class ReceiverStartBlockReason {
@@ -191,7 +134,6 @@ internal fun receiverStartBlockReason(
 @Suppress("UNUSED_PARAMETER")
 internal fun projectPhotoContentVisible(
     receiverRunning: Boolean,
-    reviewModeActive: Boolean,
 ): Boolean = true
 
 internal fun ProjectState.activeProjectSummary(): ProjectSummary? =
@@ -203,6 +145,162 @@ internal fun ProjectState.groupMoveTargets(sourceProjectId: String?): List<Proje
         project.id != sourceId && project.canAcceptMovedGroups
     }
 }
+
+internal fun projectIntelligenceSettingsUi(
+    settings: ProjectEvaluationSettingsUi,
+    providerConfigured: Boolean,
+): ProjectIntelligenceSettingsUi =
+    ProjectIntelligenceSettingsUi(
+        modelEvaluationEnabled = settings.modelEvaluationEnabled && providerConfigured,
+        autoEvaluateOnUpload = settings.autoEvaluateOnUpload,
+        autoBurstRecommendationEnabled = settings.autoBurstRecommendationEnabled,
+        projectRecommendationMode = "manual",
+        sceneProfile = settings.sceneProfile.ifBlank { "general" },
+        promptProfileId = settings.promptProfileId,
+        cvPolicy = settings.cvPolicy.ifBlank { "standard" },
+        allowRiskyModelSelects = settings.allowRiskyModelSelects,
+        providerConfigured = providerConfigured,
+    )
+
+internal fun promptStyleTagsText(profile: PromptProfileUi): String =
+    profile.styleTags
+        .filter { it.isNotBlank() }
+        .map(::promptStyleTagLabel)
+        .joinToString(" / ")
+
+internal fun promptProfileDisplayName(profile: PromptProfileUi): String {
+    val name = profile.name.trim()
+    val normalized = name.lowercase()
+    return when {
+        normalized == "general" ||
+            normalized == "general balanced" ||
+            normalized == "general default" -> "通用评价"
+        normalized.contains("portrait") && normalized.contains("conservative") -> "人像稳健"
+        normalized.contains("portrait") -> "人像评价"
+        normalized.contains("landscape") -> "风光评价"
+        normalized.contains("action") -> "动作评价"
+        normalized.contains("custom") -> name.replace("Custom", "自定义")
+        else -> name.ifBlank { "未命名 Prompt" }
+    }
+}
+
+internal fun promptStyleTagLabel(value: String): String =
+    when (value.trim().lowercase()) {
+        "general" -> "通用"
+        "balanced" -> "均衡"
+        "portrait" -> "人像"
+        "action" -> "动作"
+        "landscape" -> "风光"
+        "conservative" -> "稳健"
+        "editorial" -> "编辑向"
+        "technical" -> "技术"
+        "creative" -> "创意"
+        else -> value
+    }
+
+internal fun sceneProfileLabel(value: String): String =
+    when (value.trim().lowercase()) {
+        "general" -> "通用"
+        "portrait" -> "人像"
+        "action" -> "动作"
+        "landscape" -> "风光"
+        "custom" -> "自定义"
+        else -> value
+    }
+
+internal fun cvPolicyLabel(value: String): String =
+    when (value.trim().lowercase()) {
+        "loose" -> "宽松"
+        "standard" -> "标准"
+        "strict" -> "严格"
+        else -> value
+    }
+
+internal fun manualProjectRecommendationActionUi(
+    provider: ModelProviderSettingsUi,
+    settings: ProjectEvaluationSettingsUi,
+    actionInFlight: Boolean,
+): ManualProjectRecommendationActionUi {
+    if (!provider.configured) {
+        return ManualProjectRecommendationActionUi(
+            enabled = false,
+            ctaLabel = "生成项目优选",
+            disabledReason = "模型服务未配置",
+        )
+    }
+    if (settings.projectId.isBlank()) {
+        return ManualProjectRecommendationActionUi(
+            enabled = false,
+            ctaLabel = "生成项目优选",
+            disabledReason = "请先进入项目",
+        )
+    }
+    return ManualProjectRecommendationActionUi(
+        enabled = !actionInFlight && settings.projectRecommendationMode.equals("manual", ignoreCase = true),
+        ctaLabel = "生成项目优选",
+        disabledReason = if (actionInFlight) "项目优选生成中" else null,
+    )
+}
+
+internal suspend fun runManualProjectRecommendationAction(
+    projectId: String?,
+    provider: ModelProviderSettingsUi,
+    gateway: ProjectRecommendationGateway,
+    onFeedback: (String) -> Unit,
+): EvaluationRunUi? {
+    if (!provider.configured) {
+        onFeedback("请先配置模型服务")
+        return null
+    }
+    val activeProjectId = projectId?.takeIf { it.isNotBlank() }
+    if (activeProjectId == null) {
+        onFeedback("请先进入项目")
+        return null
+    }
+    val run = gateway.generateProjectRecommendation(activeProjectId)
+    onFeedback(projectRecommendationRunFeedback(run))
+    return run
+}
+
+internal fun projectRecommendationRunFeedback(run: EvaluationRunUi): String =
+    "项目优选：${evaluationRunStatusLabel(run.status.ifBlank { "updated" })}"
+
+internal fun evaluationRunStatusLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "ready", "done", "completed", "updated" -> "已更新"
+        "running", "processing" -> "生成中"
+        "queued", "pending" -> "等待中"
+        "failed", "error" -> "失败"
+        null, "" -> "未知"
+        else -> value
+    }
+
+internal fun projectRecommendationFeedbackForActiveProject(
+    run: EvaluationRunUi,
+    activeProjectId: String?,
+): String? {
+    val projectId = activeProjectId?.takeIf { it.isNotBlank() } ?: return null
+    return if (run.projectId == projectId) projectRecommendationRunFeedback(run) else null
+}
+
+internal fun scopedProjectRecommendationRun(
+    run: EvaluationRunUi?,
+    activeProjectId: String?,
+): EvaluationRunUi? {
+    val projectId = activeProjectId?.takeIf { it.isNotBlank() } ?: return null
+    return run?.takeIf { it.projectId == projectId }
+}
+
+internal fun modelEvaluationSourceLabel(evaluatorKind: String?): String =
+    when (evaluatorKind?.trim()?.lowercase()) {
+        "local_stub" -> "本地占位结果"
+        "imported" -> "导入结果"
+        "llm_vlm" -> "模型评价"
+        else -> evaluatorKind?.takeIf { it.isNotBlank() } ?: "未知"
+    }
+
+internal fun providerBatchSizeValue(value: Int): Int =
+    value.coerceIn(1, 8)
 
 internal fun InboxAsset.assetSelectionId(): String =
     id.ifBlank { displayPath }
@@ -325,123 +423,22 @@ internal fun StrategyProfileUi.asSavableCustomStrategyProfile(nowMs: Long): Stra
 internal fun strategyWeightDisplayText(value: Double): String =
     "${(value * 100).roundToInt()}%"
 
-internal fun ReviewQueueSummary.reviewQueueEntryUi(): ReviewQueueEntryUi? =
-    reviewQueueEntriesUi().firstOrNull()
-
-internal fun ReviewQueueSummary.reviewQueueEntriesUi(): List<ReviewQueueEntryUi> {
-    if (totalUnits <= 0) {
-        return emptyList()
-    }
-    return buildList {
-        if (unconfirmedBestCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "待确认优选",
-                    count = unconfirmedBestCount,
-                    unit = "组待确认",
-                    queue = "unconfirmed_best",
-                    recommendationState = "ready",
-                ),
-            )
-        }
-        if (unsupportedCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "不支持评分",
-                    count = unsupportedCount,
-                    unit = "组需复核",
-                    queue = "unsupported",
-                ),
-            )
-        }
-        if (needsReviewCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "需要复核",
-                    count = needsReviewCount,
-                    unit = "组需复核",
-                    queue = "needs_review",
-                    recommendationState = "needs_review",
-                ),
-            )
-        }
-        if (lowScoreCandidateCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "低分候选",
-                    count = lowScoreCandidateCount,
-                    unit = "组低分",
-                    queue = "low_score_candidates",
-                ),
-            )
-        }
-        if (nearDuplicateCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "近重复",
-                    count = nearDuplicateCount,
-                    unit = "组近重复",
-                    queue = "near_duplicates",
-                ),
-            )
-        }
-        if (userOverriddenCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "手动调整",
-                    count = userOverriddenCount,
-                    unit = "组已调整",
-                    queue = "user_overridden",
-                ),
-            )
-        }
-        if (pendingCount > 0) {
-            add(
-                ReviewQueuePrimary(
-                    label = "等待分析",
-                    count = pendingCount,
-                    unit = "组待评分",
-                    queue = "pending",
-                    analysisStatus = "pending",
-                ),
-            )
-        }
-    }.map { primary ->
-        ReviewQueueEntryUi(
-            primaryLabel = primary.label,
-            primaryCount = primary.count,
-            primaryText = "${primary.count} ${primary.unit}",
-            subtitle = reviewQueueSubtitle(),
-            queue = primary.queue,
-            recommendationState = primary.recommendationState,
-            analysisStatus = primary.analysisStatus,
-        )
-    }
-}
-
-internal fun List<ReviewQueueEntryUi>.selectedReviewQueueEntry(selectedQueue: String?): ReviewQueueEntryUi? =
-    firstOrNull { it.queue == selectedQueue } ?: firstOrNull()
-
-internal fun ReviewQueueEntryUi.assetQuery(
-    selectedAccount: String?,
-    strategyProfileId: String,
-): InboxAssetQuery =
-    InboxAssetQuery(
-        username = selectedAccount,
-        sort = PhotoSortMode.GroupBestScore,
-        recommendationState = recommendationState,
-        analysisStatus = analysisStatus,
-        reviewQueue = queue,
-        strategyProfileId = strategyProfileId,
-    )
-
 internal fun assetListQuery(
+    selectedCollection: ProjectPhotoCollection,
     selectedAccount: String?,
     selectedFilter: InboxFilter,
     selectedSort: PhotoSortMode,
     selectedScoreFilter: ScoreFilter,
 ): InboxAssetQuery {
     val scoreMin = selectedScoreFilter.scoreMin
+    val favorite = if (selectedCollection == ProjectPhotoCollection.Favorites) true else null
+    val marked = if (selectedCollection == ProjectPhotoCollection.Marked) true else null
+    val reviewQueue = when (selectedCollection) {
+        ProjectPhotoCollection.ModelSelects -> "model_selects"
+        ProjectPhotoCollection.QualityRisk -> "quality_risk"
+        ProjectPhotoCollection.PendingAnalysis -> "pending_analysis"
+        else -> null
+    }
     return InboxAssetQuery(
         username = selectedAccount,
         role = selectedFilter.assetRole(),
@@ -451,6 +448,9 @@ internal fun assetListQuery(
             selectedSort
         },
         scoreMin = scoreMin,
+        reviewQueue = reviewQueue,
+        favorite = favorite,
+        marked = marked,
     )
 }
 
@@ -487,279 +487,10 @@ internal fun projectPhotoCollectionAssets(
 }
 
 private fun InboxAsset.projectQueryBestScore(): Double? =
-    burst?.bestScore ?: quality?.overall
+    burst?.bestScore ?: modelScore?.toDouble() ?: quality?.overall
 
 private fun normalizedProjectQueryScore(value: Double): Double =
     if (value > 1.0) value / 100.0 else value
-
-private data class ReviewQueuePrimary(
-    val label: String,
-    val count: Int,
-    val unit: String,
-    val queue: String,
-    val recommendationState: String? = null,
-    val analysisStatus: String? = null,
-)
-
-private fun ReviewQueueSummary.reviewQueueSubtitle(): String =
-    buildList {
-        add("连拍/单张 $totalUnits 组")
-        if (pendingCount > 0) add("待评分 $pendingCount")
-        if (needsReviewCount > 0) add("需复核 $needsReviewCount")
-        if (lowScoreCandidateCount > 0) add("低分 $lowScoreCandidateCount")
-        if (nearDuplicateCount > 0) add("近重复 $nearDuplicateCount")
-        if (unsupportedCount > 0) add("不支持 $unsupportedCount")
-        if (userOverriddenCount > 0) add("已调整 $userOverriddenCount")
-    }.joinToString(" · ")
-
-internal fun reviewModeProgress(
-    currentIndex: Int,
-    totalCount: Int,
-): ReviewModeProgressUi {
-    val safeTotal = totalCount.coerceAtLeast(0)
-    if (safeTotal == 0) {
-        return ReviewModeProgressUi(currentIndex = 0, totalCount = 0, text = "0/0")
-    }
-    val safeIndex = currentIndex.coerceIn(0, safeTotal - 1)
-    return ReviewModeProgressUi(
-        currentIndex = safeIndex,
-        totalCount = safeTotal,
-        text = "${safeIndex + 1}/$safeTotal",
-    )
-}
-
-internal fun previousReviewIndex(currentIndex: Int): Int =
-    (currentIndex - 1).coerceAtLeast(0)
-
-internal fun nextReviewIndex(currentIndex: Int, totalCount: Int): Int {
-    val lastIndex = (totalCount - 1).coerceAtLeast(0)
-    return (currentIndex + 1).coerceAtMost(lastIndex)
-}
-
-internal fun reviewModeShouldSummarizeAfterAction(
-    currentIndex: Int,
-    totalCount: Int,
-): Boolean =
-    totalCount <= 1 || currentIndex >= totalCount - 1
-
-internal fun InboxAsset.reviewModeSignalRows(): List<QualitySignalRow> =
-    qualitySignalRows()
-        .filter { row -> row.label in setOf("锐度", "曝光", "构图") }
-        .take(3)
-
-internal enum class ReviewModeDragAction {
-    Previous,
-    Next,
-    AcceptRecommendedBest,
-    MarkNeedsReview,
-}
-
-internal data class ReviewModeShortcutHintUi(
-    val gestureLabel: String,
-    val actionLabel: String,
-    val enabled: Boolean,
-)
-
-internal enum class ReviewModePrimaryAction {
-    AcceptRecommendedBest,
-    OverrideRecommendedBest,
-    MarkNeedsReview,
-}
-
-internal data class ReviewModePrimaryActionUi(
-    val action: ReviewModePrimaryAction,
-    val label: String,
-    val enabled: Boolean,
-)
-
-internal fun reviewModePrimaryAction(
-    asset: InboxAsset?,
-    actionsEnabled: Boolean,
-): ReviewModePrimaryActionUi? {
-    if (asset == null) {
-        return null
-    }
-    val action = when {
-        reviewDecisionBurstGroupId(asset, ReviewDecisionAction.AcceptRecommendedBest) != null ->
-            ReviewModePrimaryAction.AcceptRecommendedBest to "接受推荐"
-        manualBestOverrideTarget(asset) != null ->
-            ReviewModePrimaryAction.OverrideRecommendedBest to "设为优选"
-        reviewDecisionBurstGroupId(asset, ReviewDecisionAction.MarkNeedsReview) != null ->
-            ReviewModePrimaryAction.MarkNeedsReview to "标记复核"
-        else -> return null
-    }
-    return ReviewModePrimaryActionUi(
-        action = action.first,
-        label = action.second,
-        enabled = actionsEnabled,
-    )
-}
-
-internal fun reviewModeDragAction(
-    deltaX: Float,
-    deltaY: Float,
-    threshold: Float = 96f,
-): ReviewModeDragAction? {
-    val absX = abs(deltaX)
-    val absY = abs(deltaY)
-    if (maxOf(absX, absY) < threshold) {
-        return null
-    }
-    return if (absX >= absY) {
-        if (deltaX < 0f) ReviewModeDragAction.Next else ReviewModeDragAction.Previous
-    } else {
-        if (deltaY < 0f) ReviewModeDragAction.AcceptRecommendedBest else ReviewModeDragAction.MarkNeedsReview
-    }
-}
-
-internal fun reviewModeShortcutHints(
-    asset: InboxAsset?,
-    currentIndex: Int,
-    totalCount: Int,
-    actionsEnabled: Boolean,
-): List<ReviewModeShortcutHintUi> {
-    if (asset == null) {
-        return emptyList()
-    }
-    val hasPrevious = currentIndex > 0
-    val hasNext = totalCount > 0 && currentIndex < totalCount - 1
-    val hasBurstDecision = asset.burst?.burstGroupId?.isNotBlank() == true
-    return listOf(
-        ReviewModeShortcutHintUi(
-            gestureLabel = "右滑",
-            actionLabel = "上一张",
-            enabled = hasPrevious,
-        ),
-        ReviewModeShortcutHintUi(
-            gestureLabel = "左滑",
-            actionLabel = "下一张",
-            enabled = hasNext,
-        ),
-        ReviewModeShortcutHintUi(
-            gestureLabel = "上滑",
-            actionLabel = "接受推荐",
-            enabled = actionsEnabled && asset.isBestRecommendedAsset(),
-        ),
-        ReviewModeShortcutHintUi(
-            gestureLabel = "下滑",
-            actionLabel = "标记复核",
-            enabled = actionsEnabled && hasBurstDecision,
-        ),
-    )
-}
-
-internal fun ReviewModeSessionUi.record(
-    decision: ReviewSessionDecision,
-    burstGroupId: String? = null,
-): ReviewModeSessionUi =
-    when (decision) {
-        ReviewSessionDecision.AcceptRecommendedBest -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            acceptedRecommendationCount = acceptedRecommendationCount + 1,
-            undoBurstGroupId = burstGroupId?.takeIf { it.isNotBlank() },
-            undoDecision = decision.takeIf { !burstGroupId.isNullOrBlank() },
-        )
-        ReviewSessionDecision.OverrideRecommendedBest -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            manualOverrideCount = manualOverrideCount + 1,
-            undoBurstGroupId = burstGroupId?.takeIf { it.isNotBlank() },
-            undoDecision = decision.takeIf { !burstGroupId.isNullOrBlank() },
-        )
-        ReviewSessionDecision.MarkNeedsReview -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            markedNeedsReviewCount = markedNeedsReviewCount + 1,
-            undoBurstGroupId = burstGroupId?.takeIf { it.isNotBlank() },
-            undoDecision = decision.takeIf { !burstGroupId.isNullOrBlank() },
-        )
-        ReviewSessionDecision.RestoreAutomaticRecommendation -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            restoredAutomaticCount = restoredAutomaticCount + 1,
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.ClearRecommendation -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            clearedRecommendationCount = clearedRecommendationCount + 1,
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.KeepAllCandidates -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            keptAllCandidatesCount = keptAllCandidatesCount + 1,
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.HideLowScoreCandidates -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            hiddenLowScoreCount = hiddenLowScoreCount + 1,
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.SkipCurrent -> copy(
-            processedGroupCount = processedGroupCount + 1,
-            skippedCount = skippedCount + 1,
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-    }
-
-internal fun ReviewModeSessionUi.undoLatestDecision(): ReviewModeSessionUi =
-    when (undoDecision) {
-        ReviewSessionDecision.AcceptRecommendedBest -> copy(
-            processedGroupCount = (processedGroupCount - 1).coerceAtLeast(0),
-            acceptedRecommendationCount = (acceptedRecommendationCount - 1).coerceAtLeast(0),
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.OverrideRecommendedBest -> copy(
-            processedGroupCount = (processedGroupCount - 1).coerceAtLeast(0),
-            manualOverrideCount = (manualOverrideCount - 1).coerceAtLeast(0),
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.MarkNeedsReview -> copy(
-            processedGroupCount = (processedGroupCount - 1).coerceAtLeast(0),
-            markedNeedsReviewCount = (markedNeedsReviewCount - 1).coerceAtLeast(0),
-            undoBurstGroupId = null,
-            undoDecision = null,
-        )
-        ReviewSessionDecision.RestoreAutomaticRecommendation -> this
-        ReviewSessionDecision.ClearRecommendation -> this
-        ReviewSessionDecision.KeepAllCandidates -> this
-        ReviewSessionDecision.HideLowScoreCandidates -> this
-        ReviewSessionDecision.SkipCurrent -> this
-        null -> this
-    }
-
-internal fun reviewModeSessionExitSummaryText(
-    session: ReviewModeSessionUi,
-    remainingReviewGroupCount: Int,
-    lowScoreCandidateCount: Int,
-): String =
-    buildList {
-        add("已处理 ${session.processedGroupCount} 组")
-        add("接受推荐 ${session.acceptedRecommendationCount}")
-        if (session.manualOverrideCount > 0) add("手动调整 ${session.manualOverrideCount}")
-        add("标记复核 ${session.markedNeedsReviewCount}")
-        if (session.restoredAutomaticCount > 0) add("恢复自动 ${session.restoredAutomaticCount}")
-        if (session.clearedRecommendationCount > 0) add("清除推荐 ${session.clearedRecommendationCount}")
-        if (session.keptAllCandidatesCount > 0) add("保留全部 ${session.keptAllCandidatesCount}")
-        if (session.hiddenLowScoreCount > 0) add("隐藏低分 ${session.hiddenLowScoreCount}")
-        if (session.skippedCount > 0) add("跳过 ${session.skippedCount}")
-        add("当前队列剩余 ${remainingReviewGroupCount.coerceAtLeast(0)}")
-        add("低分候选 ${lowScoreCandidateCount.coerceAtLeast(0)}")
-    }.joinToString(" · ")
-
-internal enum class ReviewDecisionAction {
-    AcceptRecommendedBest,
-    MarkNeedsReview,
-    RestoreAutomaticRecommendation,
-}
-
-internal data class ManualBestOverrideTarget(
-    val burstGroupId: String,
-    val bestAssetGroupId: String,
-)
 
 internal data class ManualBurstSplitTarget(
     val burstGroupId: String,
@@ -770,34 +501,6 @@ internal data class ManualBurstMergeTarget(
     val targetBurstGroupId: String,
     val memberGroupId: String,
 )
-
-internal fun reviewDecisionBurstGroupId(
-    asset: InboxAsset,
-    action: ReviewDecisionAction,
-): String? {
-    val burstGroupId = asset.burst?.burstGroupId?.takeIf { it.isNotBlank() } ?: return null
-    return when (action) {
-        ReviewDecisionAction.AcceptRecommendedBest ->
-            burstGroupId.takeIf { asset.isBestRecommendedAsset() }
-        ReviewDecisionAction.MarkNeedsReview -> burstGroupId
-        ReviewDecisionAction.RestoreAutomaticRecommendation ->
-            burstGroupId.takeIf {
-                asset.burst.recommendationStatus.equals("user_overridden", ignoreCase = true)
-            }
-    }
-}
-
-internal fun manualBestOverrideTarget(asset: InboxAsset): ManualBestOverrideTarget? {
-    if (asset.isBestRecommendedAsset()) {
-        return null
-    }
-    val burstGroupId = asset.burst?.burstGroupId?.takeIf { it.isNotBlank() } ?: return null
-    val groupId = asset.groupMoveId() ?: return null
-    return ManualBestOverrideTarget(
-        burstGroupId = burstGroupId,
-        bestAssetGroupId = groupId,
-    )
-}
 
 internal fun manualBurstSplitTarget(asset: InboxAsset): ManualBurstSplitTarget? {
     val burst = asset.burst ?: return null
@@ -810,16 +513,6 @@ internal fun manualBurstSplitTarget(asset: InboxAsset): ManualBurstSplitTarget? 
         burstGroupId = burstGroupId,
         memberGroupId = memberGroupId,
     )
-}
-
-internal fun reviewModeManualSplitTarget(
-    asset: InboxAsset?,
-    actionsEnabled: Boolean,
-): ManualBurstSplitTarget? {
-    if (!actionsEnabled || asset == null) {
-        return null
-    }
-    return manualBurstSplitTarget(asset)
 }
 
 internal fun projectPhotoGridItems(assets: List<InboxAsset>): List<ProjectPhotoGridItemUi> {
@@ -844,10 +537,7 @@ internal fun projectPhotoGridItems(assets: List<InboxAsset>): List<ProjectPhotoG
     return orderedKeys.mapNotNull { key ->
         val members = grouped[key].orEmpty()
         val sortedMembers = if (key.startsWith("burst:")) {
-            members.sortedWith(
-                compareBy<InboxAsset> { it.burst?.memberRank ?: Int.MAX_VALUE }
-                    .thenByDescending { it.quality?.overall ?: -1.0 },
-            )
+            members.sortedWith(burstMemberOrderComparator())
         } else {
             members
         }
@@ -880,6 +570,34 @@ internal fun adjacentBurstMemberAsset(
     }
     return members.getOrNull(targetIndex)
 }
+
+internal fun photoDetailBurstPositionText(
+    asset: InboxAsset,
+    burstMembers: List<InboxAsset>,
+): String? {
+    val burst = asset.burst ?: return null
+    if (burst.memberCount <= 1) {
+        return null
+    }
+    val stableAssetId = asset.assetSelectionId()
+    val orderedMembers = burstMembers
+        .distinctBy { it.assetSelectionId() }
+        .sortedWith(burstMemberOrderComparator())
+    val rank = orderedMembers
+        .indexOfFirst { it.assetSelectionId() == stableAssetId }
+        .takeIf { it >= 0 }
+        ?.plus(1)
+        ?: 1
+    return "$rank/${burst.memberCount}"
+}
+
+internal fun detailBurstMemberIndex(
+    asset: InboxAsset,
+    burstMembers: List<BurstMemberFilmstripItemUi>,
+): Int =
+    burstMembers.indexOfFirst { item ->
+        item.asset.assetSelectionId() == asset.assetSelectionId()
+    }.takeIf { it >= 0 } ?: Int.MAX_VALUE
 
 internal fun adjacentProjectGridAsset(
     currentAsset: InboxAsset,
@@ -939,38 +657,40 @@ internal fun photoDetailDecisionUi(
     asset: InboxAsset,
     actionsEnabled: Boolean,
 ): PhotoDetailDecisionUi {
-    val acceptRecommendedBestBurstGroupId =
-        reviewDecisionBurstGroupId(asset, ReviewDecisionAction.AcceptRecommendedBest)
-    val markNeedsReviewBurstGroupId =
-        reviewDecisionBurstGroupId(asset, ReviewDecisionAction.MarkNeedsReview)
-    val restoreAutomaticBurstGroupId =
-        reviewDecisionBurstGroupId(asset, ReviewDecisionAction.RestoreAutomaticRecommendation)
-    val overrideRecommendedBestTarget = manualBestOverrideTarget(asset)
     val splitBurstTarget = manualBurstSplitTarget(asset)
-    val hasAction = acceptRecommendedBestBurstGroupId != null ||
-        markNeedsReviewBurstGroupId != null ||
-        restoreAutomaticBurstGroupId != null ||
-        overrideRecommendedBestTarget != null ||
-        splitBurstTarget != null
-    val disabledReason = when {
-        !actionsEnabled && hasAction -> "正在处理上一项操作"
-        acceptRecommendedBestBurstGroupId == null && markNeedsReviewBurstGroupId != null ->
-            "当前照片不是推荐优选"
-        else -> null
-    }
     return PhotoDetailDecisionUi(
-        acceptRecommendedBestBurstGroupId = acceptRecommendedBestBurstGroupId,
-        markNeedsReviewBurstGroupId = markNeedsReviewBurstGroupId,
-        restoreAutomaticBurstGroupId = restoreAutomaticBurstGroupId,
-        overrideRecommendedBestTarget = overrideRecommendedBestTarget,
         splitBurstTarget = splitBurstTarget,
-        acceptRecommendedBestEnabled = actionsEnabled && acceptRecommendedBestBurstGroupId != null,
-        markNeedsReviewEnabled = actionsEnabled && markNeedsReviewBurstGroupId != null,
-        restoreAutomaticEnabled = actionsEnabled && restoreAutomaticBurstGroupId != null,
-        overrideRecommendedBestEnabled = actionsEnabled && overrideRecommendedBestTarget != null,
         splitBurstEnabled = actionsEnabled && splitBurstTarget != null,
-        disabledReason = disabledReason,
+        disabledReason = null,
     )
+}
+
+internal fun photoDetailActionBarVisible(
+    decision: PhotoDetailDecisionUi,
+    hasActionCallbacks: Boolean,
+): Boolean = hasActionCallbacks
+
+internal fun photoDetailFavoriteSelected(
+    asset: InboxAsset,
+): Boolean =
+    asset.userMarks.favorite
+
+internal fun photoDetailMarkedSelected(
+    asset: InboxAsset,
+): Boolean =
+    asset.userMarks.marked
+
+internal fun detailPageSlideOffset(
+    fullWidth: Int,
+    direction: DetailNavigationDirection?,
+    entering: Boolean,
+): Int {
+    val directionMultiplier = if (direction == DetailNavigationDirection.Previous) -1 else 1
+    return if (entering) {
+        fullWidth * directionMultiplier
+    } else {
+        -fullWidth * directionMultiplier
+    }
 }
 
 internal fun burstMemberFilmstrip(
@@ -983,10 +703,7 @@ internal fun burstMemberFilmstrip(
         .asSequence()
         .filter { asset -> asset.burst?.burstGroupId == burstGroupId }
         .distinctBy { it.assetSelectionId() }
-        .sortedWith(
-            compareBy<InboxAsset> { it.burst?.memberRank ?: Int.MAX_VALUE }
-                .thenByDescending { it.quality?.overall ?: -1.0 },
-        )
+        .sortedWith(burstMemberOrderComparator())
         .toList()
     if (members.size <= 1) {
         return emptyList()
@@ -1025,7 +742,8 @@ internal fun burstComparisonItems(
         .filter { item -> selected.none { it.asset.assetSelectionId() == item.asset.assetSelectionId() } }
         .sortedWith(
             compareByDescending<BurstMemberFilmstripItemUi> { it.asset.quality?.overall ?: -1.0 }
-                .thenBy { it.asset.burst?.memberRank ?: Int.MAX_VALUE },
+                .thenBy { it.asset.receivedAt.toLongOrNull() ?: Long.MAX_VALUE }
+                .thenBy { burstMemberOrderKey(it.asset) },
         )
         .take(maxItems - selected.size)
         .forEach(::addIfMissing)
@@ -1041,3 +759,11 @@ private fun burstMemberBadgeText(asset: InboxAsset, currentId: String): String =
         asset.burst?.recommendationStatus.equals("needs_review", ignoreCase = true) -> "需复核"
         else -> "备选"
     }
+
+private fun burstMemberOrderComparator(): Comparator<InboxAsset> =
+    compareBy<InboxAsset> { it.receivedAt.toLongOrNull() ?: Long.MAX_VALUE }
+        .thenBy(::burstMemberOrderKey)
+        .thenBy { it.assetSelectionId() }
+
+private fun burstMemberOrderKey(asset: InboxAsset): String =
+    asset.groupKey.ifBlank { asset.displayPath }

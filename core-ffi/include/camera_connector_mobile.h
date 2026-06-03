@@ -1,6 +1,7 @@
 #ifndef CAMERA_CONNECTOR_MOBILE_H
 #define CAMERA_CONNECTOR_MOBILE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -98,6 +99,13 @@ char *camera_connector_mobile_core_move_project_group_json(
     const char *target_project_id
 );
 
+char *camera_connector_mobile_core_set_asset_group_user_marks_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *group_id,
+    const char *patch_json
+);
+
 char *camera_connector_mobile_core_claim_next_publish_item_json(
     const CameraConnectorMobileCore *core
 );
@@ -131,11 +139,25 @@ char *camera_connector_mobile_core_drain_analysis_jobs_json(
     uint32_t limit
 );
 
+char *camera_connector_mobile_core_drain_analysis_jobs_with_provider_configured_json(
+    const CameraConnectorMobileCore *core,
+    uint32_t limit,
+    bool provider_configured
+);
+
 char *camera_connector_mobile_core_score_asset_group_preview_json(
     const CameraConnectorMobileCore *core,
     const char *asset_group_id,
     const char *sample_json,
     const char *scorer_version
+);
+
+char *camera_connector_mobile_core_score_asset_group_preview_with_provider_configured_json(
+    const CameraConnectorMobileCore *core,
+    const char *asset_group_id,
+    const char *sample_json,
+    const char *scorer_version,
+    bool provider_configured
 );
 
 char *camera_connector_mobile_core_recommend_burst_group_json(
@@ -197,6 +219,71 @@ char *camera_connector_mobile_core_merge_burst_member_json(
     const CameraConnectorMobileCore *core,
     const char *target_burst_group_id,
     const char *member_group_id
+);
+
+char *camera_connector_mobile_core_model_provider_settings_json(
+    const CameraConnectorMobileCore *core
+);
+
+char *camera_connector_mobile_core_save_model_provider_settings_json(
+    const CameraConnectorMobileCore *core,
+    const char *settings_json
+);
+
+char *camera_connector_mobile_core_project_evaluation_settings_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_save_project_evaluation_settings_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *settings_json
+);
+
+char *camera_connector_mobile_core_prompt_profiles_for_project_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_fork_prompt_profile_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *source_profile_id,
+    const char *name
+);
+
+char *camera_connector_mobile_core_save_prompt_version_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *prompt_profile_id,
+    const char *prompt_text
+);
+
+char *camera_connector_mobile_core_generate_project_recommendation_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_latest_project_recommendation_run_status_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_should_schedule_subject_assessment_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
+char *camera_connector_mobile_core_save_subject_assessment_json(
+    const CameraConnectorMobileCore *core,
+    const char *assessment_json
+);
+
+char *camera_connector_mobile_core_subject_assessments_for_asset_groups_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *group_ids_json
 );
 
 char *camera_connector_mobile_core_strategy_profiles_json(

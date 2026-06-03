@@ -110,6 +110,54 @@ pub struct CameraConnectorConfig {
     pub receiver: ReceiverSettingsConfig,
     #[serde(default)]
     pub accounts: BTreeMap<String, ReceiverAccountConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_project_id: Option<String>,
+    #[serde(default)]
+    pub model_provider: ModelProviderSettingsConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelProviderSettingsConfig {
+    #[serde(default)]
+    pub provider_kind: String,
+    #[serde(default)]
+    pub provider_label: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub default_model: String,
+    #[serde(default = "default_model_max_image_side")]
+    pub default_max_image_side: i64,
+    #[serde(default = "default_model_send_mode")]
+    pub default_send_mode: String,
+    #[serde(default = "default_model_batch_size")]
+    pub default_batch_size: i64,
+    #[serde(default)]
+    pub configured: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_alias: Option<String>,
+    #[serde(default)]
+    pub updated_at_ms: i64,
+}
+
+impl Default for ModelProviderSettingsConfig {
+    fn default() -> Self {
+        Self {
+            provider_kind: "none".to_string(),
+            provider_label: String::new(),
+            base_url: String::new(),
+            default_model: String::new(),
+            default_max_image_side: default_model_max_image_side(),
+            default_send_mode: default_model_send_mode(),
+            default_batch_size: default_model_batch_size(),
+            configured: false,
+            api_key: None,
+            key_alias: None,
+            updated_at_ms: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -374,6 +422,18 @@ fn default_sftp_port() -> u16 {
     2222
 }
 
+fn default_model_max_image_side() -> i64 {
+    1024
+}
+
+fn default_model_send_mode() -> String {
+    "preview_only".to_string()
+}
+
+fn default_model_batch_size() -> i64 {
+    1
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushReceiverConfig {
     pub protocol: PushProtocol,
@@ -533,15 +593,17 @@ impl PushReceiverConfig {
 
     fn resolve_storage_project_id_with_store(&self, store: &SqliteStore) -> Result<String> {
         match self.active_project_id.as_deref() {
-            Some(project_id) => Ok(project_id.to_string()),
-            None => store
-                .active_project()?
-                .map(|project| project.project_id)
-                .ok_or_else(|| {
-                    ImporterError::internal(
-                        "no active project selected; create and select a project first",
-                    )
-                }),
+            Some(project_id) => {
+                store
+                    .list_projects()?
+                    .into_iter()
+                    .find(|project| project.project_id == project_id)
+                    .ok_or_else(|| ImporterError::internal("active project not found"))?;
+                Ok(project_id.to_string())
+            }
+            None => Err(ImporterError::internal(
+                "no active project selected; enter a project before receiving files",
+            )),
         }
     }
 }

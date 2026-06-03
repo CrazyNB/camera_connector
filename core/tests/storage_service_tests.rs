@@ -162,9 +162,7 @@ fn service_uses_configured_state_dir_for_project_storage() {
         .set_active_project(&project.project_id)
         .expect("active project should save");
 
-    let configured_store =
-        SqliteStore::open_state_dir(&configured_state_dir).expect("configured store should open");
-    let active = configured_store
+    let active = service
         .active_project()
         .expect("active project should load")
         .expect("active project should exist");

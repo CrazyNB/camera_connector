@@ -134,6 +134,7 @@ internal fun ProjectManagementScreen(
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onEnterProject: (String) -> Unit,
+    onConfigureProject: (String) -> Unit,
     onCreateAndEnterProject: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -189,6 +190,7 @@ internal fun ProjectManagementScreen(
                     selected = project.id == projectState.activeProjectId,
                     enabled = actionsEnabled && project.canBeActiveProject,
                     onEnter = { onEnterProject(project.id) },
+                    onConfigure = { onConfigureProject(project.id) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -363,6 +365,7 @@ internal fun ProjectManagementRow(
     selected: Boolean,
     enabled: Boolean,
     onEnter: () -> Unit,
+    onConfigure: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val lifecycle = projectLifecycleUi(project, selected, actionsEnabled = true)
@@ -397,12 +400,23 @@ internal fun ProjectManagementRow(
                 )
             }
             Spacer(Modifier.width(12.dp))
-            OutlinedButton(
-                onClick = onEnter,
-                enabled = enabled,
-                shape = elementShape,
-            ) {
-                Text(if (selected) "进入" else "选择")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onConfigure,
+                    enabled = enabled,
+                    shape = elementShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Text("配置")
+                }
+                Button(
+                    onClick = onEnter,
+                    enabled = enabled,
+                    shape = elementShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                    Text("进入")
+                }
             }
         }
     }

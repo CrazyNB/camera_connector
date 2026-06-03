@@ -38,8 +38,10 @@ fn push_receiver_config_requires_active_project_for_storage_recording() {
     assert!(result.is_err());
 
     let store = SqliteStore::open_state_dir(state_dir.path()).expect("store should open");
-    let active = store.active_project().expect("active project should load");
-    assert!(active.is_none());
+    assert!(store
+        .list_projects()
+        .expect("projects should load")
+        .is_empty());
 }
 
 #[tokio::test]

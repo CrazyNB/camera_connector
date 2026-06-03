@@ -4,7 +4,11 @@ use serde::{Deserialize, Serialize};
 pub enum AnalysisJobType {
     DetectBurstForAssetGroup,
     ScoreAssetGroup,
+    AssessAssetGroupTechnicalQuality,
+    AssessPortraitSubject,
+    EvaluateAssetGroupWithModel,
     RecommendBurstGroup,
+    RecommendProjectSelects,
 }
 
 impl AnalysisJobType {
@@ -12,14 +16,22 @@ impl AnalysisJobType {
         match self {
             Self::DetectBurstForAssetGroup => "detect_burst_for_asset_group",
             Self::ScoreAssetGroup => "score_asset_group",
+            Self::AssessAssetGroupTechnicalQuality => "assess_asset_group_technical_quality",
+            Self::AssessPortraitSubject => "assess_portrait_subject",
+            Self::EvaluateAssetGroupWithModel => "evaluate_asset_group_with_model",
             Self::RecommendBurstGroup => "recommend_burst_group",
+            Self::RecommendProjectSelects => "recommend_project_selects",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value {
             "score_asset_group" => Self::ScoreAssetGroup,
+            "assess_asset_group_technical_quality" => Self::AssessAssetGroupTechnicalQuality,
+            "assess_portrait_subject" => Self::AssessPortraitSubject,
+            "evaluate_asset_group_with_model" => Self::EvaluateAssetGroupWithModel,
             "recommend_burst_group" => Self::RecommendBurstGroup,
+            "recommend_project_selects" => Self::RecommendProjectSelects,
             _ => Self::DetectBurstForAssetGroup,
         }
     }
@@ -29,6 +41,7 @@ impl AnalysisJobType {
 pub enum AnalysisEntityType {
     AssetGroup,
     BurstGroup,
+    Project,
 }
 
 impl AnalysisEntityType {
@@ -36,12 +49,14 @@ impl AnalysisEntityType {
         match self {
             Self::AssetGroup => "asset_group",
             Self::BurstGroup => "burst_group",
+            Self::Project => "project",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value {
             "burst_group" => Self::BurstGroup,
+            "project" => Self::Project,
             _ => Self::AssetGroup,
         }
     }

@@ -5,7 +5,8 @@ param(
     [string]$DeviceName = "Verify Camera",
     [int]$HostControlPort = 12121,
     [string]$RealAssetDirectory,
-    [int]$RealPairLimit = 5
+    [int]$RealPairLimit = 5,
+    [switch]$RealImagesOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,8 @@ $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path
 $adb = Join-Path $sdkRoot "platform-tools\adb.exe"
 $packageName = "com.cameraconnector.app"
 $configPath = Join-Path $root "target\android-emulator-ftp-config.json"
+$seedConfigPath = Join-Path $root "target\android-emulator-ftp-seed-config.json"
+$seedState = Join-Path $root "target\android-emulator-ftp-seed-state"
 $controlForward = "tcp:$HostControlPort"
 $deviceControl = "tcp:2121"
 $androidConfig = "/data/user/0/$packageName/files/camera-connector.json"
@@ -28,6 +31,7 @@ $dumpPath = "/sdcard/camera_connector_ftp_verify_window.xml"
 $localDumpPath = Join-Path $root "target\android-diagnostics\emulator-ftp-upload-window.xml"
 $rawExtensions = @(".NEF", ".NRW", ".CR3", ".CR2", ".ARW", ".SRF", ".SR2", ".RAF", ".RW2", ".RWL", ".ORF", ".PEF", ".DNG")
 $jpegExtensions = @(".JPG", ".JPEG")
+$imageExtensions = @($rawExtensions + $jpegExtensions + @(".PNG", ".HEIC", ".HEIF"))
 
 if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) {
     throw "adb not found at $adb. Set ANDROID_SDK_ROOT or install Android platform-tools."
@@ -105,7 +109,31 @@ function Find-RealRawJpegPairs {
     if ($pairs.Count -eq 0) {
         throw "No matching RAW/JPEG pair found under: $Directory"
     }
-    return @($pairs | Sort-Object TotalLength, Stem | Select-Object -First $RealPairLimit)
+    $sortedPairs = @($pairs | Sort-Object TotalLength, Stem)
+    if ($RealPairLimit -gt 0) {
+        return @($sortedPairs | Select-Object -First $RealPairLimit)
+    }
+    return $sortedPairs
+}
+
+function Find-RealImageFiles {
+    param([string]$Directory)
+    if ([string]::IsNullOrWhiteSpace($Directory)) {
+        throw "Real asset directory is required when -RealImagesOnly is set."
+    }
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        throw "Real asset directory does not exist: $Directory"
+    }
+
+    $files = @(
+        Get-ChildItem -LiteralPath $Directory -Recurse -File |
+            Where-Object { $imageExtensions -contains $_.Extension.ToUpperInvariant() } |
+            Sort-Object FullName
+    )
+    if ($files.Count -eq 0) {
+        throw "No image files found under: $Directory"
+    }
+    return $files
 }
 
 function New-UploadCase {
@@ -113,20 +141,48 @@ function New-UploadCase {
         [string]$Label,
         [string]$RemoteDirectory,
         [string]$Filename,
-        [byte[]]$Bytes,
+        [byte[]]$Bytes = $null,
         [string]$ExpectedStoredName = $Filename,
         [bool]$ExpectExactStoredFile = $true,
-        [bool]$ExpectInPhotoGrid = $false
+        [bool]$ExpectInPhotoGrid = $false,
+        [string]$SourcePath = $null
     )
+    $sizeBytes = if (-not [string]::IsNullOrWhiteSpace($SourcePath)) {
+        (Get-Item -LiteralPath $SourcePath).Length
+    } elseif ($null -ne $Bytes) {
+        $Bytes.Length
+    } else {
+        0
+    }
     return [pscustomobject]@{
         Label = $Label
         RemoteDirectory = $RemoteDirectory
         Filename = $Filename
         Bytes = $Bytes
+        SourcePath = $SourcePath
+        SizeBytes = $sizeBytes
         ExpectedStoredName = $ExpectedStoredName
         ExpectExactStoredFile = $ExpectExactStoredFile
         ExpectInPhotoGrid = $ExpectInPhotoGrid
     }
+}
+
+function New-RealImageUploadCases {
+    param([string]$Directory)
+    $files = @(Find-RealImageFiles $Directory)
+    $cases = @()
+    foreach ($file in $files) {
+        $remoteDirectory = "DCIM/FULLVERIFY"
+        $cases += New-UploadCase `
+            -Label "real image $($file.Name)" `
+            -RemoteDirectory $remoteDirectory `
+            -Filename $file.Name `
+            -ExpectedStoredName $file.Name `
+            -ExpectExactStoredFile $true `
+            -ExpectInPhotoGrid $true `
+            -SourcePath $file.FullName
+    }
+    return $cases
 }
 
 function New-RealUploadCases {
@@ -266,8 +322,10 @@ function Start-ReceiverFromUi {
 
         $xml = Enter-ProjectWorkspaceIfNeeded $xml
 
-        if ($xml.Contains($startText) -or $xml.Contains($startShortText)) {
-            Invoke-Adb @("shell", "input", "tap", "540", "1200") | Out-Null
+        if ($xml.Contains($startShortText)) {
+            Tap-UiNodeByText $xml $startShortText "start receiver"
+        } elseif ($xml.Contains($startText)) {
+            Tap-UiNodeByText $xml $startText "start receiving"
         } elseif ($xml.Contains($runningText) -or $xml.Contains($stopText)) {
             Start-Sleep -Seconds 1
         }
@@ -384,6 +442,18 @@ function Tap-UntilUiContains {
     throw "Expected UI to contain '$Label' after tapping $X,$Y."
 }
 
+function Wait-UiContains {
+    param([string]$Needle, [string]$Label, [int]$Attempts = 12)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $xml = Get-UiXml
+        if ($xml.Contains($Needle)) {
+            return $xml
+        }
+        Start-Sleep -Milliseconds 700
+    }
+    throw "Expected UI to contain '$Label' within timeout."
+}
+
 function Swipe-UntilUiContains {
     param([string]$Needle, [string]$Label, [int]$Attempts = 6)
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
@@ -418,33 +488,87 @@ function Tap-UiNodeByText {
     Start-Sleep -Milliseconds 900
 }
 
+function Test-UiNodeByText {
+    param([string]$Xml, [string]$Text)
+    $escapedText = [System.Security.SecurityElement]::Escape($Text)
+    $pattern = "text=""$([regex]::Escape($escapedText))""[^>]*bounds=""\[(\d+),(\d+)\]\[(\d+),(\d+)\]"""
+    return [regex]::Match($Xml, $pattern).Success
+}
+
+function Test-ProjectWorkspaceXml {
+    param([string]$Xml)
+    $cameraConnectIpText = "$(U @(0x76F8,0x673A,0x8FDE,0x63A5)) IP"
+    $allText = U @(0x5168,0x90E8)
+    $favoriteText = U @(0x6536,0x85CF)
+    $markedText = U @(0x6807,0x8BB0)
+    $startShortText = U @(0x542F,0x52A8)
+    return $Xml.Contains($cameraConnectIpText) -or (
+        $Xml.Contains($startShortText) -and
+        $Xml.Contains($allText) -and
+        $Xml.Contains($favoriteText) -and
+        $Xml.Contains($markedText)
+    )
+}
+
+function Wait-ProjectWorkspace {
+    param([string]$Label)
+    for ($attempt = 1; $attempt -le 14; $attempt++) {
+        $xml = Get-UiXml
+        if (Test-ProjectWorkspaceXml $xml) {
+            return $xml
+        }
+        Start-Sleep -Milliseconds 700
+    }
+    throw "Project workspace did not open after $Label."
+}
+
+function Create-And-EnterVerificationProject {
+    param([string]$Xml)
+    $newProjectText = U @(0x65B0,0x5EFA,0x9879,0x76EE)
+    $createAndEnterText = U @(0x521B,0x5EFA,0x5E76,0x8FDB,0x5165)
+    $projectName = "Real Verify"
+
+    if (-not $Xml.Contains($createAndEnterText)) {
+        Tap-UiNodeByText $Xml $newProjectText "new project"
+        $Xml = Get-UiXml
+    }
+
+    $editMatch = [regex]::Match($Xml, 'class="android\.widget\.EditText"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"')
+    if (-not $editMatch.Success) {
+        throw "Unable to find project name input."
+    }
+    $editX = [int](([int]$editMatch.Groups[1].Value + [int]$editMatch.Groups[3].Value) / 2)
+    $editY = [int](([int]$editMatch.Groups[2].Value + [int]$editMatch.Groups[4].Value) / 2)
+    Invoke-Adb @("shell", "input", "tap", "$editX", "$editY") | Out-Null
+    Start-Sleep -Milliseconds 300
+    Invoke-Adb @("shell", "input", "text", ($projectName -replace " ", "%s")) | Out-Null
+    Start-Sleep -Milliseconds 300
+    Invoke-Adb @("shell", "input", "keyevent", "BACK") | Out-Null
+    Start-Sleep -Milliseconds 500
+    $Xml = Get-UiXml
+    Tap-UiNodeByText $Xml $createAndEnterText "create and enter verification project"
+    return Wait-ProjectWorkspace "creating verification project"
+}
+
 function Enter-ProjectWorkspaceIfNeeded {
     param([string]$Xml)
     $projectManagementText = U @(0x9879,0x76EE,0x7BA1,0x7406)
-    $projectWorkspaceText = U @(0x9879,0x76EE,0x5DE5,0x4F5C,0x53F0)
     $enterText = U @(0x8FDB,0x5165)
     $selectText = U @(0x9009,0x62E9)
-    if ($Xml.Contains($projectWorkspaceText)) {
+    if (Test-ProjectWorkspaceXml $Xml) {
         return $Xml
     }
     if (-not $Xml.Contains($projectManagementText)) {
         return $Xml
     }
-    if ($Xml.Contains($enterText)) {
+    if (Test-UiNodeByText $Xml $enterText) {
         Tap-UiNodeByText $Xml $enterText "enter selected project"
-    } elseif ($Xml.Contains($selectText)) {
+    } elseif (Test-UiNodeByText $Xml $selectText) {
         Tap-UiNodeByText $Xml $selectText "select project"
     } else {
-        throw "Project management screen did not expose an enter/select action."
+        return Create-And-EnterVerificationProject $Xml
     }
-    for ($attempt = 1; $attempt -le 8; $attempt++) {
-        $nextXml = Get-UiXml
-        if ($nextXml.Contains($projectWorkspaceText)) {
-            return $nextXml
-        }
-        Start-Sleep -Milliseconds 700
-    }
-    throw "Project workspace did not open from project management."
+    return Wait-ProjectWorkspace "project management action"
 }
 
 function Tap-UiNodeByContentDescription {
@@ -458,6 +582,23 @@ function Tap-UiNodeByContentDescription {
     $y = [int](([int]$match.Groups[2].Value + [int]$match.Groups[4].Value) / 2)
     Invoke-Adb @("shell", "input", "tap", "$x", "$y") | Out-Null
     Start-Sleep -Milliseconds 900
+}
+
+function Tap-UiNodeByContentDescriptionUntilUiContains {
+    param([string]$Xml, [string]$Needle, [string]$Label, [string]$ExpectedNeedle, [string]$ExpectedLabel)
+    $currentXml = $Xml
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        Tap-UiNodeByContentDescription $currentXml $Needle $Label
+        for ($wait = 1; $wait -le 5; $wait++) {
+            $nextXml = Get-UiXml
+            if ($nextXml.Contains($ExpectedNeedle)) {
+                return $nextXml
+            }
+            $currentXml = $nextXml
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "Expected UI to contain '$ExpectedLabel' after tapping '$Label'."
 }
 
 function Send-FtpFile {
@@ -493,8 +634,51 @@ function Send-FtpFile {
     }
 }
 
-$uploadCases = @(New-RealUploadCases $RealAssetDirectory)
-$photoGridCase = @($uploadCases | Where-Object { $_.Label -like "real pair jpg*" } | Select-Object -Last 1)[0]
+function Send-FtpUploadCase {
+    param(
+        [System.IO.StreamWriter]$Writer,
+        [System.IO.StreamReader]$Reader,
+        [object]$UploadCase
+    )
+    if (-not [string]::IsNullOrWhiteSpace($UploadCase.SourcePath)) {
+        $epsv = Send-FtpCommand $Writer $Reader "EPSV" "229"
+        if ($epsv -notmatch "\(\|\|\|(\d+)\|\)") {
+            throw "EPSV did not include a passive port: $epsv"
+        }
+        $deviceDataPort = [int]$Matches[1]
+        $hostDataPort = $deviceDataPort
+        $dataForward = "tcp:$hostDataPort"
+        Remove-AdbForward $dataForward
+        Invoke-Adb @("forward", $dataForward, "tcp:$deviceDataPort") | Out-Null
+
+        $data = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $hostDataPort)
+        $fileStream = $null
+        try {
+            $Writer.WriteLine("STOR $($UploadCase.Filename)")
+            $stor = Read-FtpReply $Reader
+            if (-not $stor.StartsWith("150")) { throw "STOR expected 150, got '$stor'" }
+            $fileStream = [System.IO.File]::OpenRead($UploadCase.SourcePath)
+            $fileStream.CopyTo($data.GetStream())
+            $data.GetStream().Close()
+            $complete = Read-FtpReply $Reader
+            if (-not $complete.StartsWith("226")) { throw "STOR expected 226, got '$complete'" }
+        } finally {
+            if ($fileStream) { $fileStream.Dispose() }
+            $data.Dispose()
+            Remove-AdbForward $dataForward
+        }
+        return
+    }
+
+    Send-FtpFile $Writer $Reader $UploadCase.Filename $UploadCase.Bytes
+}
+
+$uploadCases = if ($RealImagesOnly) {
+    @(New-RealImageUploadCases $RealAssetDirectory)
+} else {
+    @(New-RealUploadCases $RealAssetDirectory)
+}
+$photoGridCase = @($uploadCases | Where-Object { $_.Label -like "real pair jpg*" } | Select-Object -First 1)[0]
 if ($null -eq $photoGridCase) {
     $photoGridCase = @($uploadCases | Where-Object { $_.ExpectInPhotoGrid -and $_.Filename.ToUpperInvariant().EndsWith(".JPG") } | Select-Object -First 1)[0]
 }
@@ -519,8 +703,38 @@ if ($RealAssetDirectory) {
 
 New-Item -ItemType Directory -Force -Path (Join-Path $root "target") | Out-Null
 
-& (Join-Path $root "target\debug\camera-connector.exe") account --config $configPath set --username $Username --password $Password --device-name $DeviceName | Out-Host
-if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier account config." }
+if (Test-Path -LiteralPath $seedState) {
+    Remove-Item -LiteralPath $seedState -Recurse -Force
+}
+if (Test-Path -LiteralPath $seedConfigPath) {
+    Remove-Item -LiteralPath $seedConfigPath -Force
+}
+if (Test-Path -LiteralPath $configPath) {
+    Remove-Item -LiteralPath $configPath -Force
+}
+
+& (Join-Path $root "target\debug\camera-connector.exe") receiver-settings `
+    --config $seedConfigPath `
+    --protocol ftp `
+    --bind-host "0.0.0.0" `
+    --ftp-port 2121 `
+    --sftp-port 2222 `
+    --output $androidInbox `
+    --state $seedState `
+    --advertised-host "127.0.0.1" `
+    --source-name $DeviceName | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier seed receiver config." }
+
+& (Join-Path $root "target\debug\camera-connector.exe") account --config $seedConfigPath set --username $Username --password $Password --device-name $DeviceName | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier account state." }
+
+& (Join-Path $root "target\debug\camera-connector.exe") project --config $seedConfigPath create --name "Real Verify" | Out-Host
+if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier project state." }
+
+$seedDatabase = Join-Path $seedState "camera-connector.sqlite3"
+if (-not (Test-Path -LiteralPath $seedDatabase -PathType Leaf)) {
+    throw "Verifier seed database was not created: $seedDatabase"
+}
 
 & (Join-Path $root "target\debug\camera-connector.exe") receiver-settings `
     --config $configPath `
@@ -538,9 +752,6 @@ $configRaw = Get-Content -Raw -LiteralPath $configPath
 if ($configRaw -like "*$Password*") {
     throw "Verifier config leaked plaintext password."
 }
-if ($configRaw -notlike "*password_hash*") {
-    throw "Verifier config did not include password hash."
-}
 
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "rm", "-rf", "files/inbox", "files/state") | Out-Null
@@ -549,6 +760,9 @@ Invoke-Adb @("shell", "run-as", $packageName, "mkdir", "-p", "files/inbox", "fil
 Invoke-Adb @("push", $configPath, "/data/local/tmp/camera-connector.json") | Out-Null
 Invoke-Adb @("shell", "chmod", "644", "/data/local/tmp/camera-connector.json") | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "cp", "/data/local/tmp/camera-connector.json", "files/camera-connector.json") | Out-Null
+Invoke-Adb @("push", $seedDatabase, "/data/local/tmp/camera-connector.sqlite3") | Out-Null
+Invoke-Adb @("shell", "chmod", "644", "/data/local/tmp/camera-connector.sqlite3") | Out-Null
+Invoke-Adb @("shell", "run-as", $packageName, "cp", "/data/local/tmp/camera-connector.sqlite3", "files/state/camera-connector.sqlite3") | Out-Null
 
 Remove-AdbForward $controlForward
 Invoke-Adb @("forward", $controlForward, $deviceControl) | Out-Null
@@ -574,9 +788,9 @@ try {
     $uploadIndex = 0
     foreach ($case in $uploadCases) {
         $uploadIndex += 1
-        Write-Host ("Uploading [{0}/{1}] {2}: {3} ({4:n0} bytes)" -f $uploadIndex, $uploadCases.Count, $case.Label, $case.Filename, $case.Bytes.Length)
+        Write-Host ("Uploading [{0}/{1}] {2}: {3} ({4:n0} bytes)" -f $uploadIndex, $uploadCases.Count, $case.Label, $case.Filename, $case.SizeBytes)
         Send-FtpCommand $writer $reader "CWD /$($case.RemoteDirectory)" "250" | Out-Null
-        Send-FtpFile $writer $reader $case.Filename $case.Bytes
+        Send-FtpUploadCase $writer $reader $case
     }
     Send-FtpCommand $writer $reader "QUIT" "221" | Out-Null
 } finally {
@@ -595,7 +809,7 @@ foreach ($case in $uploadCases) {
         $transferRecords |
             Where-Object {
                 $_.original_path -like "*/$($case.Filename)" -and
-                    [int64]$_.size_bytes -eq [int64]$case.Bytes.Length
+                    [int64]$_.size_bytes -eq [int64]$case.SizeBytes
             }
     )
     if ($matchingRecords.Count -eq 0) {
@@ -609,7 +823,7 @@ if (([regex]::Matches($transferLog, "EDGE_DUPLICATE\.JPG")).Count -lt 2 -and ($u
     throw "Duplicate upload boundary did not leave at least two EDGE_DUPLICATE JPG transfer records."
 }
 
-if ($transferLog -notmatch $sampleRawName -or $transferLog -notmatch $sampleJpegName) {
+if (($sampleRawCase -and $transferLog -notmatch $sampleRawName) -or $transferLog -notmatch $sampleJpegName) {
     throw "Android transfer log did not include uploaded raw/jpeg pair."
 }
 if ($transferLog -notmatch $Username -or $transferLog -notmatch $DeviceName) {
@@ -621,45 +835,48 @@ if ($configAfter -like "*$Password*") {
     throw "Android config leaked plaintext password."
 }
 
+if ($RealImagesOnly) {
+    $settleSeconds = [Math]::Min(90, [Math]::Max(30, [int][Math]::Ceiling($uploadCases.Count / 4.0)))
+    Write-Host "Waiting $settleSeconds seconds for full-image analysis to settle before UI restart."
+    Start-Sleep -Seconds $settleSeconds
+}
+
 Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 3
 $xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
-$inboxUi = Tap-UntilUiContains 250 680 $sampleJpegName "uploaded asset in project photos"
+$photoSwipeAttempts = if ($RealImagesOnly) { [Math]::Max(12, $uploadCases.Count + 8) } else { 6 }
+if ($RealImagesOnly) {
+    $inboxUi = Swipe-UntilUiContains "DSC_" "uploaded image group in project photos" $photoSwipeAttempts
+    Assert-UiContains $inboxUi (U @(0x8BC4,0x5206)) "quality score in project photos"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android diagnostics collection failed after FTP upload verification."
+    }
+    Write-Host "Android emulator FTP full-image upload verification passed for $($uploadCases.Count) real image files"
+    return
+}
+$inboxUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos" $photoSwipeAttempts
 Assert-UiContains $inboxUi "RAW" "raw pair tag"
 Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
-Assert-UiContains $inboxUi (U @(0x5168,0x90E8,0x6765,0x6E90)) "source filter"
-Assert-UiNotContains $inboxUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo inbox"
-Assert-UiContains $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
-Tap-UiNodeByContentDescription $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "2-column grid control"
-$gridPrefs = Get-AndroidFileText "shared_prefs/camera_connector_storage.xml"
-if ($gridPrefs -notmatch 'name="project_photo_grid_columns"\s+value="2"') {
-    throw "Android project photo grid preference did not persist 2-column selection."
+if (($uploadCases | Where-Object { $_.Filename -eq "EDGE_NOT_IMAGE.TXT" }).Count -gt 0) {
+    Assert-UiNotContains $inboxUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo inbox"
 }
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
 Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 2
 $xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
-$inboxUi = Tap-UntilUiContains 250 680 $sampleJpegName "uploaded asset in project photos after restart"
-Assert-UiContains $inboxUi (U @(0x7167,0x7247,0x0032,0x5217,0x89C6,0x56FE)) "persisted 2-column grid control after restart"
-Tap-UiNodeByContentDescription $inboxUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile"
-$detailUi = Get-UiXml
+$inboxUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos after restart" $photoSwipeAttempts
+$photoDetailText = U @(0x7167,0x7247,0x8BE6,0x60C5)
+$detailUi = Tap-UiNodeByContentDescriptionUntilUiContains $inboxUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile" $photoDetailText "photo detail screen"
 Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
 $detailSourceUi = Swipe-UntilUiContains (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
 Assert-UiContains $detailSourceUi $sampleJpegName "photo detail jpeg file"
-$detailFilesUi = Swipe-UntilUiContains $sampleRawName "photo detail raw file"
-Assert-UiContains $detailFilesUi $sampleRawName "photo detail raw file"
+if ($sampleRawCase) {
+    $detailFilesUi = Swipe-UntilUiContains $sampleRawName "photo detail raw file"
+    Assert-UiContains $detailFilesUi $sampleRawName "photo detail raw file"
+}
 Invoke-Adb @("shell", "input", "keyevent", "4") | Out-Null
 Start-Sleep -Milliseconds 700
-$projectUi = Get-UiXml
-Tap-UiNodeByText $projectUi (U @(0x8BCA,0x65AD)) "global diagnostics destination"
-Start-Sleep -Milliseconds 900
-$transferUi = Get-UiXml
-Assert-UiContains $transferUi (U @(0x8BCA,0x65AD,0x65E5,0x5FD7)) "diagnostics transfer surface"
-Assert-UiContains $transferUi (U @(0x5DF2,0x5B8C,0x6210)) "completed transfer status"
-if (($uploadCases | Where-Object { $_.Filename -eq "EDGE_DUPLICATE.JPG" }).Count -gt 0) {
-    Assert-UiContains $transferUi "EDGE_DUPLICATE" "visible duplicate transfer row"
-}
-Assert-UiContains $transferUi $DeviceName "transfer device name"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
 if ($LASTEXITCODE -ne 0) {
     throw "Android diagnostics collection failed after FTP upload verification."

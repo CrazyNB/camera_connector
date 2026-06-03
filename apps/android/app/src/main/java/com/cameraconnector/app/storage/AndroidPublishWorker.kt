@@ -3,6 +3,8 @@ package com.cameraconnector.app.storage
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.cameraconnector.app.media.ensurePersistentThumbnail
+import com.cameraconnector.app.media.isDecodablePreviewLocation
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -60,6 +62,19 @@ class ResolvingPublishTarget(
 ) : PublishTarget {
     override fun publish(item: PublishQueueItem): PublishedObject =
         resolve().publish(item)
+}
+
+class ThumbnailingPublishTarget(
+    private val context: Context,
+    private val delegate: PublishTarget,
+) : PublishTarget {
+    override fun publish(item: PublishQueueItem): PublishedObject {
+        val published = delegate.publish(item)
+        if (isDecodablePreviewLocation(published.location)) {
+            ensurePersistentThumbnail(context, published.location)
+        }
+        return published
+    }
 }
 
 class AndroidPublishWorker(

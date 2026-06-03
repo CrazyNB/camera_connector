@@ -48,27 +48,6 @@ class NativeCoreGateway(
             )
         }
 
-    override suspend fun loadSelects(
-        projectId: String?,
-        strategyProfileId: String?,
-        offset: Int,
-        limit: Int,
-    ): List<InboxAsset> =
-        withContext(Dispatchers.IO) {
-            val resolvedProjectId = projectId
-                ?: projects.value.activeProjectId
-                ?: loadProjects().activeProjectId
-                ?: return@withContext emptyList()
-            mapInboxAssets(
-                nativeCore.projectSelectsAssetGroupPageJson(
-                    projectId = resolvedProjectId,
-                    strategyProfileId = strategyProfileId,
-                    offset = offset,
-                    limit = limit,
-                ),
-            )
-        }
-
     suspend fun refresh() {
         val (nextProjects, nextDashboard) = withContext(Dispatchers.IO) {
             val loadedProjects = loadProjects()
@@ -127,6 +106,30 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun setAssetGroupUserMarks(
+        projectId: String,
+        groupId: String,
+        favorite: Boolean?,
+        marked: Boolean?,
+    ): InboxAssetUserMarks {
+        val marks = withContext(Dispatchers.IO) {
+            mapInboxAssetUserMarks(
+                nativeCore.setAssetGroupUserMarks(
+                    projectId = projectId,
+                    groupId = groupId,
+                    favorite = favorite,
+                    marked = marked,
+                ),
+            )
+        }
+        dashboard.value = dashboard.value.copy(
+            inbox = dashboard.value.inbox.map { asset ->
+                if (asset.id == groupId) asset.copy(userMarks = marks) else asset
+            },
+        )
+        return marks
+    }
+
     override suspend fun startReceiver() {
         receiverServiceController.startReceiver()
         refreshAfterServiceCommand()
@@ -180,78 +183,116 @@ class NativeCoreGateway(
             )
         }
 
-    override suspend fun loadReviewQueueSummary(
-        projectId: String?,
-        strategyProfileId: String?,
-    ): ReviewQueueSummary =
+    override suspend fun loadModelProviderSettings(): ModelProviderSettingsUi =
         withContext(Dispatchers.IO) {
-            val resolvedProjectId = projectId
-                ?: projects.value.activeProjectId
-                ?: loadProjects().activeProjectId
-                ?: return@withContext emptyReviewQueueSummary(strategyProfileId = strategyProfileId ?: "general")
-            mapReviewQueueSummary(
-                nativeCore.reviewQueueSummary(
-                    projectId = resolvedProjectId,
-                    strategyProfileId = strategyProfileId,
+            mapModelProviderSettings(nativeCore.modelProviderSettings())
+        }
+
+    override suspend fun saveModelProviderSettings(settings: ModelProviderSettingsUi): ModelProviderSettingsUi =
+        withContext(Dispatchers.IO) {
+            mapModelProviderSettings(
+                nativeCore.saveModelProviderSettings(settings.toModelProviderSettingsJson().toString()),
+            )
+        }
+
+    override suspend fun loadProjectEvaluationSettings(projectId: String): ProjectEvaluationSettingsUi =
+        withContext(Dispatchers.IO) {
+            mapProjectEvaluationSettings(nativeCore.projectEvaluationSettings(projectId))
+        }
+
+    override suspend fun saveProjectEvaluationSettings(
+        settings: ProjectEvaluationSettingsUi,
+    ): ProjectEvaluationSettingsUi =
+        withContext(Dispatchers.IO) {
+            mapProjectEvaluationSettings(
+                nativeCore.saveProjectEvaluationSettings(
+                    settings.projectId,
+                    settings.toProjectEvaluationSettingsJson().toString(),
                 ),
             )
         }
 
-    override suspend fun acceptRecommendedBest(burstGroupId: String, strategyProfileId: String?) {
+    override suspend fun loadGlobalPromptProfiles(): List<PromptProfileUi> =
         withContext(Dispatchers.IO) {
-            nativeCore.acceptRecommendedBest(burstGroupId, strategyProfileId)
+            mapPromptProfiles(nativeCore.globalPromptProfiles())
         }
-        refresh()
-    }
 
-    override suspend fun markBurstNeedsReview(burstGroupId: String, strategyProfileId: String?) {
+    override suspend fun forkGlobalPromptProfile(
+        sourceProfileId: String,
+        name: String,
+    ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            nativeCore.markBurstNeedsReview(burstGroupId, strategyProfileId)
+            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name))
         }
-        refresh()
-    }
 
-    override suspend fun restoreAutomaticRecommendation(
-        burstGroupId: String,
-        strategyProfileId: String?,
-    ) {
+    override suspend fun saveGlobalPromptProfileVersion(
+        promptProfileId: String,
+        promptText: String,
+    ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            nativeCore.restoreAutomaticRecommendation(burstGroupId, strategyProfileId)
+            mapPromptProfile(nativeCore.saveGlobalPromptVersion(promptProfileId, promptText))
         }
-        refresh()
-    }
 
-    override suspend fun clearRecommendation(burstGroupId: String, strategyProfileId: String?) {
+    override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
         withContext(Dispatchers.IO) {
-            nativeCore.clearRecommendation(burstGroupId, strategyProfileId)
+            mapPromptProfiles(nativeCore.promptProfilesForProject(projectId))
         }
-        refresh()
-    }
 
-    override suspend fun keepAllCandidates(burstGroupId: String, strategyProfileId: String?) {
+    override suspend fun forkPromptProfile(
+        projectId: String,
+        sourceProfileId: String,
+        name: String,
+    ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            nativeCore.keepAllCandidates(burstGroupId, strategyProfileId)
+            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name))
         }
-        refresh()
-    }
 
-    override suspend fun hideLowScoreCandidates(burstGroupId: String, strategyProfileId: String?) {
+    override suspend fun savePromptProfileVersion(
+        projectId: String,
+        promptProfileId: String,
+        promptText: String,
+    ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            nativeCore.hideLowScoreCandidates(burstGroupId, strategyProfileId)
+            mapPromptProfile(nativeCore.savePromptVersion(projectId, promptProfileId, promptText))
         }
-        refresh()
-    }
 
-    override suspend fun overrideRecommendedBest(
-        burstGroupId: String,
-        bestAssetGroupId: String,
-        strategyProfileId: String?,
-    ) {
+    override suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi =
         withContext(Dispatchers.IO) {
-            nativeCore.overrideRecommendedBest(burstGroupId, bestAssetGroupId, strategyProfileId)
+            projectRecommendationRunAfterGenerate(
+                generateRecommendation = { nativeCore.generateProjectRecommendation(projectId) },
+                latestRun = { nativeCore.latestProjectRecommendationRunStatus(projectId) },
+            )
         }
-        refresh()
-    }
+
+    override suspend fun latestProjectRecommendationRunStatus(projectId: String): EvaluationRunUi? =
+        withContext(Dispatchers.IO) {
+            nativeCore.latestProjectRecommendationRunStatus(projectId)?.let(::mapEvaluationRun)
+        }
+
+    override suspend fun shouldScheduleSubjectAssessment(projectId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            nativeCore.shouldScheduleSubjectAssessment(projectId)
+        }
+
+    override suspend fun saveSubjectAssessment(assessment: SubjectAssessmentUi): SubjectAssessmentUi =
+        withContext(Dispatchers.IO) {
+            mapSubjectAssessment(
+                nativeCore.saveSubjectAssessment(assessment.toSubjectAssessmentJson().toString()),
+            )
+        }
+
+    override suspend fun loadSubjectAssessments(
+        projectId: String,
+        groupIds: List<String>,
+    ): List<SubjectAssessmentUi> =
+        withContext(Dispatchers.IO) {
+            mapSubjectAssessments(
+                nativeCore.subjectAssessmentsForAssetGroups(
+                    projectId,
+                    JSONArray(groupIds).toString(),
+                ),
+            )
+        }
 
     override suspend fun splitBurstMember(burstGroupId: String, memberGroupId: String) {
         withContext(Dispatchers.IO) {
@@ -595,6 +636,48 @@ internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
                     hasVideo = video != null,
                     burst = group.optJSONObject("burst")?.toInboxAssetBurst(),
                     quality = group.optJSONObject("quality")?.toInboxAssetQuality(),
+                    technicalGateStatus = group.optStringOrNull("technical_gate_status"),
+                    technicalDefects = group.optJSONArray("technical_defects").toInboxAssetTechnicalDefects(),
+                    modelStatus = group.optStringOrNull("model_status"),
+                    modelScore = group.optIntOrNull("model_score"),
+                    modelTier = group.optStringOrNull("model_tier"),
+                    modelEvaluatorKind = group.optStringOrNull("model_evaluator_kind"),
+                    modelSummary = group.optStringOrNull("model_summary"),
+                    isModelSelect = group.optBoolean("is_model_select", false),
+                    userMarks = mapInboxAssetUserMarks(
+                        group.optJSONObject("user_marks"),
+                        favoriteOverride = group.optBooleanOrNull("is_favorite"),
+                        markedOverride = group.optBooleanOrNull("is_flagged"),
+                    ),
+                ),
+            )
+        }
+    }
+}
+
+internal fun mapInboxAssetUserMarks(
+    value: JSONObject?,
+    favoriteOverride: Boolean? = null,
+    markedOverride: Boolean? = null,
+): InboxAssetUserMarks =
+    InboxAssetUserMarks(
+        favorite = favoriteOverride ?: value?.optBoolean("favorite") ?: false,
+        marked = markedOverride ?: value?.optBoolean("marked") ?: false,
+    )
+
+private fun JSONArray?.toInboxAssetTechnicalDefects(): List<InboxAssetTechnicalDefect> {
+    if (this == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until length()) {
+            val item = optJSONObject(index) ?: continue
+            add(
+                InboxAssetTechnicalDefect(
+                    defectType = item.optString("defect_type"),
+                    severity = item.optString("severity"),
+                    confidence = item.optDoubleOrDefault("confidence", 0.0),
+                    reason = item.optStringOrNull("reason"),
                 ),
             )
         }
@@ -605,7 +688,6 @@ private fun JSONObject.toInboxAssetBurst(): InboxAssetBurst =
     InboxAssetBurst(
         burstGroupId = optString("burst_group_id"),
         memberCount = optIntOrNull("member_count") ?: 0,
-        memberRank = optIntOrNull("member_rank"),
         recommendationStatus = optStringOrNull("recommendation_status"),
         bestAssetGroupId = optStringOrNull("best_asset_group_id"),
         bestScore = optDoubleOrNull("best_score"),
@@ -697,36 +779,170 @@ internal fun StrategyProfileUi.toStrategyProfileJson(): JSONObject =
         .put("llm_enabled", llmEnabled)
         .put("updated_at_ms", updatedAtMs)
 
-internal fun mapReviewQueueSummary(value: JSONObject?): ReviewQueueSummary {
-    if (value == null) {
-        return emptyReviewQueueSummary()
-    }
-    val queues = value.optJSONArray("queues")
-    return ReviewQueueSummary(
-        projectId = value.optString("project_id"),
-        strategyProfileId = value.optString("strategy_profile_id").ifBlank { "general" },
-        totalUnits = value.optInt("total_units"),
-        pendingCount = value.optInt("pending_count"),
-        unconfirmedBestCount = value.optInt("unconfirmed_best_count"),
-        needsReviewCount = value.optInt("needs_review_count"),
-        lowScoreCandidateCount = value.optInt("low_score_candidate_count"),
-        nearDuplicateCount = value.optInt("near_duplicate_count"),
-        unsupportedCount = value.optInt("unsupported_count"),
-        userOverriddenCount = value.optInt("user_overridden_count"),
-        queues = buildList {
-            if (queues != null) {
-                for (index in 0 until queues.length()) {
-                    val queue = queues.optJSONObject(index) ?: continue
-                    add(
-                        ReviewQueueCount(
-                            queue = queue.optString("queue"),
-                            count = queue.optInt("count"),
-                        ),
-                    )
-                }
-            }
-        },
+internal fun mapModelProviderSettings(value: JSONObject): ModelProviderSettingsUi =
+    ModelProviderSettingsUi(
+        providerKind = value.optString("provider_kind").ifBlank { "none" },
+        providerLabel = value.optString("provider_label").ifBlank { "Model provider" },
+        baseUrl = value.optString("base_url"),
+        defaultModel = value.optString("default_model"),
+        defaultMaxImageSide = value.optInt("default_max_image_side", 1536),
+        defaultSendMode = value.optString("default_send_mode").ifBlank { "preview_only" },
+        defaultBatchSize = value.optInt("default_batch_size", 1).coerceAtLeast(1),
+        configured = value.optBoolean("configured", false),
+        apiKey = null,
+        apiKeyConfigured = value.optBoolean("api_key_configured", false),
+        keyAlias = jsonStringOrNull(value, "key_alias"),
+        updatedAtMs = value.optLong("updated_at_ms"),
     )
+
+internal fun ModelProviderSettingsUi.toModelProviderSettingsJson(): JSONObject =
+    JSONObject()
+        .put("provider_kind", providerKind.ifBlank { "none" })
+        .put("provider_label", providerLabel)
+        .put("base_url", baseUrl)
+        .put("default_model", defaultModel)
+        .put("default_max_image_side", defaultMaxImageSide)
+        .put("default_send_mode", defaultSendMode.ifBlank { "preview_only" })
+        .put("default_batch_size", defaultBatchSize.coerceAtLeast(1))
+        .put("configured", configured)
+        .put("key_alias", keyAlias ?: JSONObject.NULL)
+        .put("updated_at_ms", updatedAtMs)
+        .also { json ->
+            apiKey?.let { json.put("api_key", it) }
+        }
+
+internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationSettingsUi =
+    ProjectEvaluationSettingsUi(
+        projectId = value.optString("project_id"),
+        modelEvaluationEnabled = value.optBoolean("model_evaluation_enabled", false),
+        autoEvaluateOnUpload = value.optBoolean("auto_evaluate_on_upload", false),
+        autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
+        projectRecommendationMode = "manual",
+        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
+        sceneProfile = value.optString("scene_profile").ifBlank { "general" },
+        cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
+        allowRiskyModelSelects = value.optBoolean("allow_risky_model_selects", false),
+        maxImageSide = value.optIntOrNull("max_image_side"),
+        batchSize = value.optIntOrNull("batch_size"),
+        updatedAtMs = value.optLong("updated_at_ms"),
+    )
+
+internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSONObject =
+    JSONObject()
+        .put("project_id", projectId)
+        .put("model_evaluation_enabled", modelEvaluationEnabled)
+        .put("auto_evaluate_on_upload", autoEvaluateOnUpload)
+        .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
+        .put("project_recommendation_mode", "manual")
+        .put("prompt_profile_id", promptProfileId ?: JSONObject.NULL)
+        .put("scene_profile", sceneProfile.ifBlank { "general" })
+        .put("cv_policy", cvPolicy.ifBlank { "standard" })
+        .put("allow_risky_model_selects", allowRiskyModelSelects)
+        .put("max_image_side", maxImageSide ?: JSONObject.NULL)
+        .put("batch_size", batchSize ?: JSONObject.NULL)
+        .put("updated_at_ms", updatedAtMs)
+
+internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
+    if (profiles == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until profiles.length()) {
+            profiles.optJSONObject(index)?.let { add(mapPromptProfile(it)) }
+        }
+    }
+}
+
+internal fun mapPromptProfile(value: JSONObject): PromptProfileUi =
+    PromptProfileUi(
+        promptProfileId = value.optString("prompt_profile_id"),
+        scope = value.optString("scope").ifBlank { "global" },
+        projectId = jsonStringOrNull(value, "project_id"),
+        name = value.optString("name"),
+        styleTags = value.optJSONArray("style_tags").toStringList(),
+        sceneProfile = value.optString("scene_profile").ifBlank { "general" },
+        activeVersionId = jsonStringOrNull(value, "active_version_id"),
+        builtIn = value.optBoolean("built_in", false),
+        enabled = value.optBoolean("enabled", true),
+        activePromptText = jsonStringOrNull(value, "active_prompt_text"),
+    )
+
+internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
+    EvaluationRunUi(
+        runId = value.optString("run_id"),
+        projectId = value.optString("project_id"),
+        runType = value.optString("run_type"),
+        trigger = value.optString("trigger"),
+        status = value.optString("status"),
+        providerKind = value.optString("provider_kind").ifBlank { "none" },
+        providerModel = value.optString("provider_model"),
+        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
+        promptVersionId = jsonStringOrNull(value, "prompt_version_id"),
+        promptHash = jsonStringOrNull(value, "prompt_hash"),
+        errorMessage = jsonStringOrNull(value, "error_message"),
+        startedAtMs = value.optLongOrNull("started_at_ms"),
+        completedAtMs = value.optLongOrNull("completed_at_ms"),
+        createdAtMs = value.optLong("created_at_ms"),
+    )
+
+internal fun mapSubjectAssessments(assessments: JSONArray?): List<SubjectAssessmentUi> {
+    if (assessments == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until assessments.length()) {
+            assessments.optJSONObject(index)?.let { add(mapSubjectAssessment(it)) }
+        }
+    }
+}
+
+internal fun mapSubjectAssessment(value: JSONObject): SubjectAssessmentUi =
+    SubjectAssessmentUi(
+        assessmentId = value.optString("assessment_id"),
+        projectId = value.optString("project_id"),
+        assetGroupId = value.optString("asset_group_id"),
+        subjectType = value.optString("subject_type"),
+        detectorKind = value.optString("detector_kind"),
+        detectorVersion = value.optString("detector_version"),
+        status = value.optString("status"),
+        gateStatus = value.optString("gate_status"),
+        regionsJson = (value.opt("regions") ?: JSONArray()).toString(),
+        signalsJson = (value.opt("signals") ?: JSONObject()).toString(),
+        summary = value.optString("summary"),
+        createdAtMs = value.optLong("created_at_ms"),
+        updatedAtMs = value.optLong("updated_at_ms"),
+    )
+
+internal fun SubjectAssessmentUi.toSubjectAssessmentJson(): JSONObject =
+    JSONObject()
+        .put("assessment_id", assessmentId)
+        .put("project_id", projectId)
+        .put("asset_group_id", assetGroupId)
+        .put("subject_type", subjectType)
+        .put("detector_kind", detectorKind)
+        .put("detector_version", detectorVersion)
+        .put("status", status)
+        .put("gate_status", gateStatus)
+        .put("regions", parseJsonPayload(regionsJson, JSONArray()))
+        .put("signals", parseJsonPayload(signalsJson, JSONObject()))
+        .put("summary", summary)
+        .put("created_at_ms", createdAtMs)
+        .put("updated_at_ms", updatedAtMs)
+
+private fun parseJsonPayload(raw: String, fallback: Any): Any =
+    runCatching { JSONObject(raw) }
+        .getOrElse {
+            runCatching { JSONArray(raw) }.getOrDefault(fallback)
+        }
+
+internal fun projectRecommendationRunAfterGenerate(
+    generateRecommendation: () -> JSONObject,
+    latestRun: () -> JSONObject?,
+): EvaluationRunUi {
+    generateRecommendation()
+    val run = latestRun()
+        ?: error("Project recommendation completed without a latest run status")
+    return mapEvaluationRun(run)
 }
 
 private fun JSONObject.assetDisplayPath(): String =
@@ -740,7 +956,13 @@ private fun JSONObject.assetStorageLocation(): String? {
 }
 
 private fun JSONObject.optStringOrNull(key: String): String? =
-    optString(key).takeIf { it.isNotBlank() }
+    if (has(key) && !isNull(key)) {
+        optString(key)
+            .trim()
+            .takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+    } else {
+        null
+    }
 
 private fun JSONObject.optIntOrNull(key: String): Int? =
     if (has(key) && !isNull(key)) optInt(key) else null
@@ -750,6 +972,20 @@ private fun JSONObject.optLongOrNull(key: String): Long? =
 
 private fun JSONObject.optDoubleOrNull(key: String): Double? =
     if (has(key) && !isNull(key)) optDouble(key).takeUnless { it.isNaN() } else null
+
+private fun JSONObject.optBooleanOrNull(key: String): Boolean? =
+    if (has(key) && !isNull(key)) optBoolean(key) else null
+
+private fun JSONArray?.toStringList(): List<String> {
+    if (this == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until length()) {
+            optString(index).takeIf { it.isNotBlank() }?.let(::add)
+        }
+    }
+}
 
 private fun JSONObject?.optDoubleOrDefault(key: String, default: Double): Double =
     this?.takeIf { it.has(key) && !it.isNull(key) }

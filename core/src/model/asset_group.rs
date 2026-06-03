@@ -17,13 +17,42 @@ pub struct ReceivedAssetGroup {
     pub burst: Option<ReceivedAssetBurstSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality: Option<ReceivedAssetQualitySummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub technical_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub technical_gate_status: Option<String>,
+    #[serde(default)]
+    pub technical_defects: Vec<ReceivedAssetTechnicalDefectSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_score: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_evaluator_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_summary: Option<String>,
+    #[serde(default)]
+    pub is_model_select: bool,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default)]
+    pub is_flagged: bool,
+    #[serde(default)]
+    pub user_marks: AssetUserMarks,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssetUserMarks {
+    pub favorite: bool,
+    pub marked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReceivedAssetBurstSummary {
     pub burst_group_id: String,
     pub member_count: usize,
-    pub member_rank: usize,
     pub recommendation_status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub best_asset_group_id: Option<String>,
@@ -51,6 +80,15 @@ pub struct ReceivedAssetQualitySummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_confidence: Option<f64>,
     pub analyzed_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReceivedAssetTechnicalDefectSummary {
+    pub defect_type: String,
+    pub severity: String,
+    pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGroup> {
@@ -93,6 +131,18 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
                 video,
                 burst: None,
                 quality: None,
+                technical_status: None,
+                technical_gate_status: None,
+                technical_defects: Vec::new(),
+                model_status: None,
+                model_score: None,
+                model_tier: None,
+                model_evaluator_kind: None,
+                model_summary: None,
+                is_model_select: false,
+                is_favorite: false,
+                is_flagged: false,
+                user_marks: AssetUserMarks::default(),
             }
         })
         .collect();

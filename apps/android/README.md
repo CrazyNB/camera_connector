@@ -16,6 +16,9 @@ The Android source now has a native gateway boundary:
 
 - `NativeMobileCore` owns the native handle and JSON envelope parsing.
 - `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
+- The gateway includes provider settings, project evaluation settings, prompt
+  profile list/fork/save, manual project recommendation, latest run status, and
+  portrait subject assessment APIs.
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
 - `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/inbox` and `filesDir/state`.
 - `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
@@ -33,6 +36,23 @@ The Android source now has a native gateway boundary:
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
+- Rust also exports provider-aware intelligence JNI calls for model provider
+  state, project evaluation settings, prompt profiles and versions, manual
+  project recommendation runs, latest run status, provider-aware drain/score
+  gating, and subject assessment storage.
+- With no provider/API key configured, upload, thumbnails, grouping, publishing,
+  and local technical CV continue. Model evaluation and project recommendation
+  are skipped or disabled rather than faked; any explicit development stub result
+  must be surfaced as `local_stub`.
+- Project-level recommendation is manual-only. Upload/background drains do not
+  create project-scope Model Selects, and global provider defaults do not
+  silently rewrite existing project settings.
+- Prompt profiles are named, style-tagged, and versioned. Editing a built-in
+  prompt forks it for the project before saving a new prompt version, and runs
+  record prompt version/hash.
+- Portrait subject assessment is exposed as a Core/FFI contract for risk/gate
+  context on portrait projects only; Android does not need a new ML dependency to
+  honor the storage/API contract in this slice.
 - The app opens on Project Management. Entering a project opens the photo-first project workspace: the receiver launch panel starts expanded while stopped, collapses into a compact running status after start, and the rest of the page is the project photo grid with compact tiles, JPEG previews from local paths or SAF document URIs, tap-to-detail, and long-press selection.
 
 The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation.

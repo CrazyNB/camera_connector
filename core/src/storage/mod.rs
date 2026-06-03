@@ -1,27 +1,36 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 mod pipeline;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
+use crate::media_metadata::extract_capture_time_ms;
 use crate::{
     group_received_assets, normalized_review_queue_key, review_unit_flags, AnalysisEntityType,
     AnalysisJob, AnalysisJobStatus, AnalysisJobType, AssetFacetCount, AssetGroupPage,
-    AssetGroupQuery, AssetGroupSort, AssetGroupSummary, BurstGroup, ConnectedDevice, ImportSource,
-    ImporterError, NewAnalysisJob, ObjectFormat, PushProtocol, QualityAnalysisStatus, QualityScore,
-    ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetQualitySummary,
-    ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, Result,
-    ReviewQueueSummary, SelectionRecommendation, SelectionRecommendationStatus, SelectionSource,
-    SignalScore, StoredObjectLocation, StrategyProfile, TransferRecord, TransferStatus,
+    AssetGroupQuery, AssetGroupSort, AssetGroupSummary, AssetUserMarks, BurstGroup,
+    ConnectedDevice, CvPolicy, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger,
+    EvaluationRunType, ImportSource, ImporterError, ModelEvaluation, ModelEvaluationStatus,
+    ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind, NewAnalysisJob, ObjectFormat,
+    ProjectEvaluationSettings, ProjectRecommendationMode, PromptProfile, PromptProfileVersion,
+    PromptScope, PushProtocol, QualityAnalysisStatus, QualityScore, ReceivedAsset,
+    ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetQualitySummary,
+    ReceivedAssetTechnicalDefectSummary, ReceiverAccountConfig, ReceiverAuthMode,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, ReviewQueueSummary, SceneProfile,
+    ScopedSelectionRecommendation, SelectionRecommendation, SelectionRecommendationScope,
+    SelectionRecommendationStatus, SelectionSource, SignalScore, StoredObjectLocation,
+    StrategyProfile, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus,
+    TechnicalDefectFlag, TechnicalGateStatus, TransferRecord, TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
 
 const DB_FILENAME: &str = "camera-connector.sqlite3";
-const ACTIVE_PROJECT_KEY: &str = "active_project_id";
 const FAILED_PUBLISH_RETRY_DELAY_MS: i64 = 30_000;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -124,7 +133,6 @@ pub struct StoredAsset {
     pub group_id: Option<String>,
     pub transfer_id: String,
     pub group_role: String,
-    pub group_rank: i64,
     pub media_kind: String,
     pub format: ObjectFormat,
     pub original_filename: String,
@@ -267,7 +275,8 @@ impl SqliteStore {
         let store = Self { db_path: path };
         store.with_connection(|connection| {
             initialize_schema(connection)?;
-            seed_builtin_strategy_profiles(connection)
+            seed_builtin_strategy_profiles(connection)?;
+            seed_builtin_prompt_profiles(connection)
         })?;
         Ok(store)
     }
@@ -308,6 +317,10 @@ impl SqliteStore {
                     project.default_output_target_id,
                     project.default_strategy_profile_id,
                 ],
+            )?;
+            save_project_evaluation_settings_for_connection(
+                connection,
+                ProjectEvaluationSettings::default_for_project(&project.project_id, now),
             )?;
             Ok(project)
         })
@@ -354,10 +367,6 @@ impl SqliteStore {
                  WHERE project_id = ?3",
                 params![ProjectStatus::Archived.as_str(), now, project_id],
             )?;
-            connection.execute(
-                "DELETE FROM app_state WHERE key = ?1 AND value = ?2",
-                params![ACTIVE_PROJECT_KEY, project_id],
-            )?;
             project_by_id(connection, project_id)?.ok_or_else(|| {
                 rusqlite::Error::InvalidParameterName("project not found".to_string())
             })
@@ -380,40 +389,77 @@ impl SqliteStore {
         })
     }
 
-    pub fn set_active_project(&self, project_id: &str) -> Result<()> {
+    pub fn prompt_profiles_for_project(&self, project_id: &str) -> Result<Vec<PromptProfile>> {
+        self.with_connection(|connection| prompt_profiles_for_project(connection, project_id))
+    }
+
+    pub fn prompt_profile(&self, profile_id: &str) -> Result<Option<PromptProfile>> {
+        self.with_connection(|connection| prompt_profile_by_id(connection, profile_id))
+    }
+
+    pub fn prompt_profile_version(&self, version_id: &str) -> Result<Option<PromptProfileVersion>> {
+        self.with_connection(|connection| prompt_profile_version_by_id(connection, version_id))
+    }
+
+    pub fn save_prompt_profile(&self, profile: PromptProfile) -> Result<PromptProfile> {
+        self.with_connection(|connection| save_prompt_profile_for_connection(connection, profile))
+    }
+
+    pub fn save_prompt_profile_version(
+        &self,
+        version: PromptProfileVersion,
+    ) -> Result<PromptProfileVersion> {
         self.with_connection(|connection| {
-            ensure_project_is_active(connection, project_id)?;
-            connection.execute(
-                "INSERT INTO app_state (key, value) VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![ACTIVE_PROJECT_KEY, project_id],
-            )?;
-            Ok(())
+            save_prompt_profile_version_for_connection(connection, version)
         })
     }
 
-    pub fn active_project(&self) -> Result<Option<Project>> {
+    pub fn project_evaluation_settings(
+        &self,
+        project_id: &str,
+    ) -> Result<Option<ProjectEvaluationSettings>> {
         self.with_connection(|connection| {
-            let project_id = connection
-                .query_row(
-                    "SELECT value FROM app_state WHERE key = ?1",
-                    params![ACTIVE_PROJECT_KEY],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            let Some(project_id) = project_id else {
-                return Ok(None);
-            };
-            connection
-                .query_row(
-                    "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
-                            archived_at_ms, default_output_target_id, default_strategy_profile_id
-                     FROM projects
-                     WHERE project_id = ?1 AND status = 'active'",
-                    params![project_id],
-                    project_from_row,
-                )
-                .optional()
+            project_evaluation_settings_for_project(connection, project_id)
+        })
+    }
+
+    pub fn save_project_evaluation_settings(
+        &self,
+        settings: ProjectEvaluationSettings,
+    ) -> Result<ProjectEvaluationSettings> {
+        self.with_connection(|connection| {
+            save_project_evaluation_settings_for_connection(connection, settings)
+        })
+    }
+
+    pub fn save_evaluation_run(&self, run: EvaluationRun) -> Result<EvaluationRun> {
+        self.with_connection(|connection| save_evaluation_run_for_connection(connection, run))
+    }
+
+    pub fn latest_evaluation_run(
+        &self,
+        project_id: &str,
+        run_type: EvaluationRunType,
+    ) -> Result<Option<EvaluationRun>> {
+        self.with_connection(|connection| latest_evaluation_run(connection, project_id, run_type))
+    }
+
+    pub fn save_subject_assessment(
+        &self,
+        assessment: SubjectAssessment,
+    ) -> Result<SubjectAssessment> {
+        self.with_connection(|connection| {
+            save_subject_assessment_for_connection(connection, assessment)
+        })
+    }
+
+    pub fn subject_assessments_for_asset_groups(
+        &self,
+        project_id: &str,
+        group_ids: &[String],
+    ) -> Result<Vec<SubjectAssessment>> {
+        self.with_connection(|connection| {
+            subject_assessments_for_asset_groups(connection, project_id, group_ids)
         })
     }
 
@@ -705,6 +751,13 @@ impl SqliteStore {
                         project_id,
                         &asset_group_id,
                     )?;
+                    if should_schedule_subject_assessment_for_project(&transaction, project_id)? {
+                        enqueue_portrait_subject_assessment_job_for_connection(
+                            &transaction,
+                            project_id,
+                            &asset_group_id,
+                        )?;
+                    }
                 }
                 refresh_duplicate_info(&transaction, project_id)?;
             }
@@ -729,10 +782,25 @@ impl SqliteStore {
                 if let Some(mut group) = group_received_assets(assets).into_iter().next() {
                     group.group_id = Some(stored_group.group_id);
                     if asset_group_matches(&group, &query) {
-                        if let Some(group_id) = group.group_id.as_deref() {
+                        if let Some(group_id) = group.group_id.clone() {
                             group.burst =
-                                burst_summary_for_asset_group(connection, project_id, group_id)?;
-                            group.quality = quality_summary_for_asset_group(connection, group_id)?;
+                                burst_summary_for_asset_group(connection, project_id, &group_id)?;
+                            group.quality = quality_summary_for_asset_group(connection, &group_id)?;
+                            apply_technical_summary(connection, &group_id, &mut group)?;
+                            apply_model_evaluation_summary(connection, &group_id, &mut group)?;
+                            group.is_model_select = is_model_selected_asset_group(
+                                connection,
+                                project_id,
+                                &group_id,
+                                group
+                                    .burst
+                                    .as_ref()
+                                    .map(|burst| burst.burst_group_id.as_str()),
+                            )?;
+                            group.user_marks =
+                                user_marks_for_asset_group(connection, project_id, &group_id)?;
+                            group.is_favorite = group.user_marks.favorite;
+                            group.is_flagged = group.user_marks.marked;
                         }
                         if asset_group_matches_analysis(&group, &query) {
                             groups.push(group);
@@ -764,17 +832,58 @@ impl SqliteStore {
     pub fn assets_for_group(&self, project_id: &str, group_id: &str) -> Result<Vec<StoredAsset>> {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
-                "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
+                "SELECT asset_id, project_id, group_id, transfer_id, group_role,
                         media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                         original_parent_path, final_location_payload, size_bytes, capture_at_ms,
                         received_at_ms, published_at_ms, source_identity, username, remote_addr,
                         duplicate_index, duplicate_count
                  FROM assets
                  WHERE project_id = ?1 AND group_id = ?2
-                 ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
+                 ORDER BY CASE group_role
+                            WHEN 'jpeg' THEN 0
+                            WHEN 'raw' THEN 1
+                            WHEN 'video' THEN 2
+                            ELSE 3
+                          END ASC,
+                          published_at_ms ASC,
+                          asset_id ASC",
             )?;
             let rows = statement.query_map(params![project_id, group_id], stored_asset_from_row)?;
             collect_rows(rows)
+        })
+    }
+
+    pub fn set_asset_group_user_marks(
+        &self,
+        project_id: &str,
+        group_id: &str,
+        favorite: Option<bool>,
+        marked: Option<bool>,
+    ) -> Result<AssetUserMarks> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            if stored_asset_group_by_id(connection, project_id, group_id)?.is_none() {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "asset group not found".to_string(),
+                ));
+            }
+            let existing = user_marks_for_asset_group(connection, project_id, group_id)?;
+            let next = AssetUserMarks {
+                favorite: favorite.unwrap_or(existing.favorite),
+                marked: marked.unwrap_or(existing.marked),
+            };
+            let now = current_time_ms();
+            connection.execute(
+                "INSERT INTO asset_group_user_marks (
+                    project_id, group_id, favorite, marked, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                 ON CONFLICT(project_id, group_id) DO UPDATE SET
+                    favorite = excluded.favorite,
+                    marked = excluded.marked,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![project_id, group_id, next.favorite, next.marked, now,],
+            )?;
+            Ok(next)
         })
     }
 
@@ -810,6 +919,8 @@ impl SqliteStore {
             }
 
             let now = current_time_ms();
+            let source_marks =
+                user_marks_for_asset_group(&transaction, source_project_id, group_id)?;
             let target_group_identity = asset_group_identity(
                 target_project_id,
                 source_group.source_identity.as_deref(),
@@ -860,6 +971,24 @@ impl SqliteStore {
                     params![target_project_id, transfer_id],
                 )?;
             }
+            if source_marks.favorite || source_marks.marked {
+                transaction.execute(
+                    "INSERT INTO asset_group_user_marks (
+                        project_id, group_id, favorite, marked, created_at_ms, updated_at_ms
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                     ON CONFLICT(project_id, group_id) DO UPDATE SET
+                        favorite = excluded.favorite,
+                        marked = excluded.marked,
+                        updated_at_ms = excluded.updated_at_ms",
+                    params![
+                        target_project_id,
+                        target_group_id,
+                        source_marks.favorite,
+                        source_marks.marked,
+                        now,
+                    ],
+                )?;
+            }
             transaction.execute(
                 "DELETE FROM asset_groups WHERE project_id = ?1 AND group_id = ?2",
                 params![source_project_id, group_id],
@@ -886,6 +1015,19 @@ impl SqliteStore {
 
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
         self.with_connection(|connection| stored_asset_groups_for_project(connection, project_id))
+    }
+
+    pub fn project_id_for_asset_group(&self, asset_group_id: &str) -> Result<Option<String>> {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT project_id FROM asset_groups WHERE group_id = ?1 LIMIT 1",
+                    params![asset_group_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(Into::into)
+        })
     }
 
     pub fn save_strategy_profile(&self, profile: StrategyProfile) -> Result<StrategyProfile> {
@@ -926,6 +1068,63 @@ impl SqliteStore {
     ) -> Result<Option<QualityScore>> {
         self.with_connection(|connection| {
             quality_score_by_key(connection, asset_group_id, scorer_version)
+        })
+    }
+
+    pub fn save_technical_assessment(
+        &self,
+        assessment: TechnicalAssessment,
+    ) -> Result<TechnicalAssessment> {
+        self.with_connection(|connection| {
+            save_technical_assessment_for_connection(connection, assessment)
+        })
+    }
+
+    pub fn technical_assessments_for_asset_groups(
+        &self,
+        asset_group_ids: &[String],
+        assessor_version: &str,
+    ) -> Result<Vec<TechnicalAssessment>> {
+        self.with_connection(|connection| {
+            technical_assessments_for_asset_group_ids(connection, asset_group_ids, assessor_version)
+        })
+    }
+
+    pub fn save_model_evaluation(&self, evaluation: ModelEvaluation) -> Result<ModelEvaluation> {
+        self.with_connection(|connection| {
+            save_model_evaluation_for_connection(connection, evaluation)
+        })
+    }
+
+    pub fn model_evaluations_for_asset_groups(
+        &self,
+        asset_group_ids: &[String],
+        evaluator_version: &str,
+    ) -> Result<Vec<ModelEvaluation>> {
+        self.with_connection(|connection| {
+            model_evaluations_for_asset_group_ids(connection, asset_group_ids, evaluator_version)
+        })
+    }
+
+    pub fn save_scoped_selection_recommendation(
+        &self,
+        recommendation: ScopedSelectionRecommendation,
+    ) -> Result<ScopedSelectionRecommendation> {
+        self.with_connection(|connection| {
+            save_scoped_selection_recommendation_for_connection(connection, recommendation)
+        })
+    }
+
+    pub fn latest_scoped_selection_recommendation(
+        &self,
+        project_id: &str,
+        scope: SelectionRecommendationScope,
+        subject_id: &str,
+    ) -> Result<Option<ScopedSelectionRecommendation>> {
+        self.with_connection(|connection| {
+            latest_scoped_selection_recommendation_for_connection(
+                connection, project_id, scope, subject_id,
+            )
         })
     }
 
@@ -1086,6 +1285,10 @@ impl SqliteStore {
                         &scores,
                         &profile,
                         burst.user_override_state.as_deref(),
+                        recommendation.is_none()
+                            && SelectionRecommendationStatus::from_str(
+                                &burst.recommendation_status,
+                            ) == SelectionRecommendationStatus::Pending,
                     );
                 } else {
                     let scores = quality_scores_for_asset_group_ids(
@@ -1093,7 +1296,7 @@ impl SqliteStore {
                         std::slice::from_ref(&group.group_id),
                         "local-v1",
                     )?;
-                    summary.add_unit(None, &scores, &profile, None);
+                    summary.add_unit(None, &scores, &profile, None, false);
                 }
             }
 
@@ -1148,6 +1351,10 @@ impl SqliteStore {
                         &scores,
                         &profile,
                         burst.user_override_state.as_deref(),
+                        recommendation.is_none()
+                            && SelectionRecommendationStatus::from_str(
+                                &burst.recommendation_status,
+                            ) == SelectionRecommendationStatus::Pending,
                     )
                     .matches_queue(&queue)
                     {
@@ -1177,7 +1384,9 @@ impl SqliteStore {
                         std::slice::from_ref(&stored_group.group_id),
                         "local-v1",
                     )?;
-                    if !review_unit_flags(None, &scores, &profile, None).matches_queue(&queue) {
+                    if !review_unit_flags(None, &scores, &profile, None, false)
+                        .matches_queue(&queue)
+                    {
                         continue;
                     }
                     if let Some(group) = received_asset_group_for_group_id(
@@ -1313,6 +1522,150 @@ impl SqliteStore {
                         .any(|member_group_id| member_group_id == asset_group_id)
                 })
                 .collect())
+        })
+    }
+
+    pub fn refine_burst_group_by_visual_similarity(
+        &self,
+        burst_group_id: &str,
+        profile: &StrategyProfile,
+        scorer_version: &str,
+    ) -> Result<Vec<BurstGroup>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let Some(burst) = burst_group_by_id(&transaction, burst_group_id)? else {
+                transaction.commit()?;
+                return Ok(Vec::new());
+            };
+            let scores = quality_scores_for_asset_group_ids(
+                &transaction,
+                &burst.member_group_ids,
+                scorer_version,
+            )?;
+            let score_by_group_id = scores
+                .iter()
+                .map(|score| (score.asset_group_id.as_str(), score))
+                .collect::<BTreeMap<_, _>>();
+            let mut visual_hashes = Vec::new();
+            for member_group_id in &burst.member_group_ids {
+                let Some(score) = score_by_group_id.get(member_group_id.as_str()) else {
+                    transaction.commit()?;
+                    return Ok(vec![burst]);
+                };
+                if score.analysis_status != QualityAnalysisStatus::Ready {
+                    transaction.commit()?;
+                    return Ok(vec![burst]);
+                }
+                let Some(hash) = visual_hash_from_similarity_cluster(score) else {
+                    transaction.commit()?;
+                    return Ok(vec![burst]);
+                };
+                visual_hashes.push((member_group_id.clone(), hash));
+            }
+
+            let threshold = visual_burst_continuity_threshold(profile);
+            let mut runs: Vec<Vec<String>> = Vec::new();
+            let mut current_run: Vec<String> = Vec::new();
+            let mut previous_hash: Option<u64> = None;
+            for (member_group_id, hash) in visual_hashes {
+                let continues = previous_hash
+                    .map(|previous| visual_hash_similarity(previous, hash) >= threshold)
+                    .unwrap_or(true);
+                if !continues && !current_run.is_empty() {
+                    runs.push(std::mem::take(&mut current_run));
+                }
+                current_run.push(member_group_id);
+                previous_hash = Some(hash);
+            }
+            if !current_run.is_empty() {
+                runs.push(current_run);
+            }
+            if runs.len() <= 1 {
+                transaction.commit()?;
+                return Ok(vec![burst]);
+            }
+
+            transaction.execute(
+                "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
+                params![burst_group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM background_jobs
+                 WHERE entity_type = ?1 AND entity_id = ?2 AND status IN ('pending', 'failed')",
+                params![AnalysisEntityType::BurstGroup.as_str(), burst_group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
+                params![burst_group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM burst_groups WHERE burst_group_id = ?1",
+                params![burst_group_id],
+            )?;
+
+            let now = current_time_ms();
+            let mut refined_bursts = Vec::new();
+            for run in runs {
+                if run.len() < profile.min_group_size {
+                    continue;
+                }
+                let mut member_groups = Vec::new();
+                for member_group_id in &run {
+                    if let Some(group) =
+                        stored_asset_group_by_id(&transaction, &burst.project_id, member_group_id)?
+                    {
+                        member_groups.push(group);
+                    }
+                }
+                if member_groups.len() < profile.min_group_size {
+                    continue;
+                }
+                let member_group_ids = member_groups
+                    .iter()
+                    .map(|group| group.group_id.clone())
+                    .collect::<Vec<_>>();
+                let stable_members = member_group_ids.join(",");
+                let refined_burst_group_id = format!(
+                    "burst-{}",
+                    stable_key(&format!(
+                        "{}\t{}\t{}",
+                        burst.project_id, profile.strategy_version, stable_members
+                    ))
+                );
+                let started_at_ms = member_groups
+                    .iter()
+                    .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+                    .min();
+                let ended_at_ms = member_groups
+                    .iter()
+                    .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
+                    .max();
+                let refined = BurstGroup {
+                    burst_group_id: refined_burst_group_id,
+                    project_id: burst.project_id.clone(),
+                    source_identity: common_burst_source_identity(
+                        &transaction,
+                        &burst.project_id,
+                        &member_groups,
+                    )?
+                    .or_else(|| burst.source_identity.clone()),
+                    started_at_ms,
+                    ended_at_ms,
+                    member_count: member_group_ids.len(),
+                    member_group_ids,
+                    grouping_version: burst.grouping_version + 1,
+                    recommendation_status: SelectionRecommendationStatus::Pending
+                        .as_str()
+                        .to_string(),
+                    user_override_state: None,
+                    created_at_ms: now,
+                    updated_at_ms: now,
+                };
+                insert_burst_group(&transaction, &refined)?;
+                refined_bursts.push(refined);
+            }
+            transaction.commit()?;
+            Ok(refined_bursts)
         })
     }
 
@@ -1789,6 +2142,12 @@ impl SqliteStore {
     ) -> Result<T> {
         let mut connection = Connection::open(&self.db_path)
             .map_err(|error| ImporterError::internal(error.to_string()))?;
+        connection
+            .busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
         operation(&mut connection).map_err(|error| ImporterError::internal(error.to_string()))
     }
 }
@@ -1857,6 +2216,7 @@ struct BurstCandidate {
     source_identity: Option<String>,
     sequence_number: Option<i64>,
     event_time_ms: Option<i64>,
+    event_time_is_capture: bool,
 }
 
 fn rebuild_burst_groups_for_project(
@@ -1894,15 +2254,19 @@ fn rebuild_burst_groups_for_project(
                 burst_source_identity_for_group(connection, project_id, &group.group_id)?
                     .or_else(|| group.source_identity.clone());
             let sequence_number = trailing_sequence_number(&group.display_key);
-            let event_time_ms = group
-                .first_capture_at_ms
-                .or(group.first_received_at_ms)
-                .or(Some(group.created_at_ms));
+            let (event_time_ms, event_time_is_capture) = match group.first_capture_at_ms {
+                Some(value) => (Some(value), true),
+                None => (
+                    group.first_received_at_ms.or(Some(group.created_at_ms)),
+                    false,
+                ),
+            };
             Ok(BurstCandidate {
                 group,
                 source_identity,
                 sequence_number,
                 event_time_ms,
+                event_time_is_capture,
             })
         })
         .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
@@ -2069,7 +2433,14 @@ fn burst_source_identity_for_group(
             "SELECT COALESCE(NULLIF(username, ''), NULLIF(source_identity, ''), NULLIF(remote_addr, ''))
              FROM assets
              WHERE project_id = ?1 AND group_id = ?2
-             ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC
+             ORDER BY CASE group_role
+                        WHEN 'jpeg' THEN 0
+                        WHEN 'raw' THEN 1
+                        WHEN 'video' THEN 2
+                        ELSE 3
+                      END ASC,
+                      published_at_ms ASC,
+                      asset_id ASC
              LIMIT 1",
             params![project_id, group_id],
             |row| row.get(0),
@@ -2148,18 +2519,37 @@ fn burst_candidates_are_adjacent(
         return false;
     }
 
-    let sequence_is_adjacent = previous
+    let time_is_adjacent = previous.event_time_is_capture
+        && candidate.event_time_is_capture
+        && previous
+            .event_time_ms
+            .zip(candidate.event_time_ms)
+            .map(|(left, right)| right >= left && right - left <= profile.burst_window_ms)
+            .unwrap_or(false);
+
+    if previous.event_time_is_capture || candidate.event_time_is_capture {
+        return time_is_adjacent;
+    }
+
+    previous
         .sequence_number
         .zip(candidate.sequence_number)
         .map(|(left, right)| right > left && right - left <= 1)
-        .unwrap_or(false);
-    let time_is_adjacent = previous
-        .event_time_ms
-        .zip(candidate.event_time_ms)
-        .map(|(left, right)| right >= left && right - left <= profile.burst_window_ms)
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
 
-    sequence_is_adjacent || time_is_adjacent
+fn visual_hash_from_similarity_cluster(score: &QualityScore) -> Option<u64> {
+    let value = score.similarity_cluster_id.as_deref()?;
+    let hex = value.strip_prefix("ahash-v1:")?;
+    u64::from_str_radix(hex, 16).ok()
+}
+
+fn visual_hash_similarity(left: u64, right: u64) -> f64 {
+    1.0 - ((left ^ right).count_ones() as f64 / 64.0)
+}
+
+fn visual_burst_continuity_threshold(profile: &StrategyProfile) -> f64 {
+    (profile.near_duplicate_similarity_above - 0.12).clamp(0.70, 0.90)
 }
 
 fn insert_burst_group(
@@ -2187,11 +2577,11 @@ fn insert_burst_group(
         ],
     )?;
 
-    for (index, member_group_id) in burst.member_group_ids.iter().enumerate() {
+    for member_group_id in burst.member_group_ids.iter() {
         connection.execute(
-            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
-             VALUES (?1, ?2, ?3)",
-            params![burst.burst_group_id, member_group_id, index as i64],
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id)
+             VALUES (?1, ?2)",
+            params![burst.burst_group_id, member_group_id],
         )?;
     }
     Ok(())
@@ -2204,7 +2594,7 @@ fn burst_summary_for_asset_group(
 ) -> std::result::Result<Option<ReceivedAssetBurstSummary>, rusqlite::Error> {
     let summary = connection
         .query_row(
-            "SELECT bg.burst_group_id, bg.member_count, bgm.member_rank,
+            "SELECT bg.burst_group_id, bg.member_count,
                     COALESCE((
                         SELECT recommendation.status
                         FROM selection_recommendations recommendation
@@ -2229,9 +2619,8 @@ fn burst_summary_for_asset_group(
                 Ok(ReceivedAssetBurstSummary {
                     burst_group_id: row.get(0)?,
                     member_count: row.get::<_, i64>(1)? as usize,
-                    member_rank: row.get::<_, i64>(2)? as usize,
-                    recommendation_status: row.get(3)?,
-                    best_asset_group_id: row.get(4)?,
+                    recommendation_status: row.get(2)?,
+                    best_asset_group_id: row.get(3)?,
                     best_score: None,
                 })
             },
@@ -2239,11 +2628,48 @@ fn burst_summary_for_asset_group(
         .optional()?;
     summary
         .map(|mut summary| {
-            summary.best_score =
-                burst_best_score_for_burst_group(connection, &summary.burst_group_id)?;
+            if let Some(scoped) = latest_scoped_selection_recommendation_for_connection(
+                connection,
+                project_id,
+                SelectionRecommendationScope::BurstGroup,
+                &summary.burst_group_id,
+            )? {
+                summary.recommendation_status = scoped.status.as_str().to_string();
+                summary.best_asset_group_id = scoped.selected_asset_group_ids.first().cloned();
+            }
+            let model_best_score =
+                burst_best_model_score_for_burst_group(connection, &summary.burst_group_id)?;
+            summary.best_score = if model_best_score.is_some() {
+                model_best_score
+            } else {
+                burst_best_score_for_burst_group(connection, &summary.burst_group_id)?
+            };
             Ok(summary)
         })
         .transpose()
+}
+
+fn burst_best_model_score_for_burst_group(
+    connection: &Connection,
+    burst_group_id: &str,
+) -> std::result::Result<Option<f64>, rusqlite::Error> {
+    connection.query_row(
+        "SELECT MAX(me.score)
+         FROM model_evaluations me
+         JOIN burst_group_members bgm ON bgm.member_group_id = me.asset_group_id
+         WHERE bgm.burst_group_id = ?1
+           AND me.status = 'ready'
+           AND me.updated_at_ms = (
+               SELECT MAX(latest.updated_at_ms)
+               FROM model_evaluations latest
+               WHERE latest.asset_group_id = me.asset_group_id
+           )",
+        params![burst_group_id],
+        |row| {
+            row.get::<_, Option<i64>>(0)
+                .map(|score| score.map(|value| value as f64))
+        },
+    )
 }
 
 fn burst_best_score_for_burst_group(
@@ -2301,10 +2727,13 @@ fn burst_group_by_id(
     };
 
     let mut statement = connection.prepare(
-        "SELECT member_group_id
-         FROM burst_group_members
-         WHERE burst_group_id = ?1
-         ORDER BY member_rank ASC, member_group_id ASC",
+        "SELECT bgm.member_group_id
+         FROM burst_group_members bgm
+         LEFT JOIN asset_groups ag ON ag.group_id = bgm.member_group_id
+         WHERE bgm.burst_group_id = ?1
+         ORDER BY COALESCE(ag.first_capture_at_ms, ag.first_received_at_ms, ag.created_at_ms) ASC,
+                  ag.display_key ASC,
+                  bgm.member_group_id ASC",
     )?;
     let rows = statement.query_map(params![burst_group_id], |row| row.get(0))?;
     burst.member_group_ids = collect_rows(rows)?;
@@ -2373,11 +2802,11 @@ fn split_burst_member_for_connection(
         "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
         params![burst_group_id],
     )?;
-    for (index, member_group_id) in remaining_member_ids.iter().enumerate() {
+    for member_group_id in remaining_member_ids.iter() {
         connection.execute(
-            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
-             VALUES (?1, ?2, ?3)",
-            params![burst_group_id, member_group_id, index as i64],
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id)
+             VALUES (?1, ?2)",
+            params![burst_group_id, member_group_id],
         )?;
     }
     connection.execute(
@@ -2470,11 +2899,11 @@ fn merge_burst_member_for_connection(
         "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
         params![target_burst.burst_group_id],
     )?;
-    for (index, member_group_id) in merged_member_ids.iter().enumerate() {
+    for member_group_id in merged_member_ids.iter() {
         connection.execute(
-            "INSERT INTO burst_group_members (burst_group_id, member_group_id, member_rank)
-             VALUES (?1, ?2, ?3)",
-            params![target_burst.burst_group_id, member_group_id, index as i64],
+            "INSERT INTO burst_group_members (burst_group_id, member_group_id)
+             VALUES (?1, ?2)",
+            params![target_burst.burst_group_id, member_group_id],
         )?;
     }
 
@@ -2607,6 +3036,131 @@ fn quality_summary_for_asset_group(
         })
 }
 
+fn apply_technical_summary(
+    connection: &Connection,
+    asset_group_id: &str,
+    group: &mut ReceivedAssetGroup,
+) -> std::result::Result<(), rusqlite::Error> {
+    let Some(assessment) = latest_technical_assessment_for_asset_group(connection, asset_group_id)?
+    else {
+        return Ok(());
+    };
+    group.technical_status = Some(assessment.status.as_str().to_string());
+    group.technical_gate_status = Some(assessment.gate_status.as_str().to_string());
+    group.technical_defects = assessment
+        .defect_flags
+        .into_iter()
+        .map(|flag| ReceivedAssetTechnicalDefectSummary {
+            defect_type: flag.defect_type.as_str().to_string(),
+            severity: flag.severity.as_str().to_string(),
+            confidence: flag.confidence,
+            reason: (!flag.reason.is_empty()).then_some(flag.reason),
+        })
+        .collect();
+    Ok(())
+}
+
+fn latest_technical_assessment_for_asset_group(
+    connection: &Connection,
+    asset_group_id: &str,
+) -> std::result::Result<Option<TechnicalAssessment>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT asset_group_id, assessor_version, status, gate_status, defect_flags_json,
+                    preview_source, analyzed_at_ms
+             FROM technical_assessments
+             WHERE asset_group_id = ?1
+             ORDER BY analyzed_at_ms DESC, assessor_version DESC
+             LIMIT 1",
+            params![asset_group_id],
+            technical_assessment_from_row,
+        )
+        .optional()
+}
+
+fn apply_model_evaluation_summary(
+    connection: &Connection,
+    asset_group_id: &str,
+    group: &mut ReceivedAssetGroup,
+) -> std::result::Result<(), rusqlite::Error> {
+    let Some(evaluation) = latest_any_model_evaluation_for_asset_group(connection, asset_group_id)?
+    else {
+        return Ok(());
+    };
+    group.model_status = Some(evaluation.status.as_str().to_string());
+    group.model_score = Some(evaluation.score);
+    group.model_tier = Some(evaluation.tier.as_str().to_string());
+    group.model_evaluator_kind = Some(evaluation.evaluator_kind.as_str().to_string());
+    group.model_summary = Some(evaluation.summary);
+    Ok(())
+}
+
+fn latest_any_model_evaluation_for_asset_group(
+    connection: &Connection,
+    asset_group_id: &str,
+) -> std::result::Result<Option<ModelEvaluation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
+                    run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
+                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    created_at_ms, updated_at_ms
+             FROM model_evaluations
+             WHERE asset_group_id = ?1
+             ORDER BY updated_at_ms DESC, evaluator_version DESC
+             LIMIT 1",
+            params![asset_group_id],
+            model_evaluation_from_row,
+        )
+        .optional()
+}
+
+fn is_model_selected_asset_group(
+    connection: &Connection,
+    project_id: &str,
+    asset_group_id: &str,
+    burst_group_id: Option<&str>,
+) -> std::result::Result<bool, rusqlite::Error> {
+    if scoped_recommendation_selects(
+        latest_scoped_selection_recommendation_for_connection(
+            connection,
+            project_id,
+            SelectionRecommendationScope::Project,
+            project_id,
+        )?,
+        asset_group_id,
+    ) {
+        return Ok(true);
+    }
+    if let Some(burst_group_id) = burst_group_id {
+        return Ok(scoped_recommendation_selects(
+            latest_scoped_selection_recommendation_for_connection(
+                connection,
+                project_id,
+                SelectionRecommendationScope::BurstGroup,
+                burst_group_id,
+            )?,
+            asset_group_id,
+        ));
+    }
+    Ok(false)
+}
+
+fn scoped_recommendation_selects(
+    recommendation: Option<ScopedSelectionRecommendation>,
+    asset_group_id: &str,
+) -> bool {
+    recommendation
+        .filter(|value| value.status == SelectionRecommendationStatus::Ready)
+        .map(|value| {
+            value
+                .selected_asset_group_ids
+                .iter()
+                .any(|selected| selected == asset_group_id)
+        })
+        .unwrap_or(false)
+}
+
 fn available_signal_value(score: SignalScore) -> Option<f64> {
     score.available.then_some(score.value)
 }
@@ -2637,7 +3191,14 @@ fn transfer_ids_for_asset_group(
         "SELECT transfer_id
          FROM assets
          WHERE project_id = ?1 AND group_id = ?2
-         ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
+         ORDER BY CASE group_role
+                    WHEN 'jpeg' THEN 0
+                    WHEN 'raw' THEN 1
+                    WHEN 'video' THEN 2
+                    ELSE 3
+                  END ASC,
+                  published_at_ms ASC,
+                  asset_id ASC",
     )?;
     let rows = statement.query_map(params![project_id, group_id], |row| row.get(0))?;
     collect_rows(rows)
@@ -2649,14 +3210,21 @@ fn received_assets_for_group(
     group_id: &str,
 ) -> std::result::Result<Vec<ReceivedAsset>, rusqlite::Error> {
     let mut statement = connection.prepare(
-        "SELECT asset_id, project_id, group_id, transfer_id, group_role, group_rank,
+        "SELECT asset_id, project_id, group_id, transfer_id, group_role,
                 media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                 original_parent_path, final_location_payload, size_bytes, capture_at_ms,
                 received_at_ms, published_at_ms, source_identity, username, remote_addr,
                 duplicate_index, duplicate_count
          FROM assets
          WHERE project_id = ?1 AND group_id = ?2
-         ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC",
+         ORDER BY CASE group_role
+                    WHEN 'jpeg' THEN 0
+                    WHEN 'raw' THEN 1
+                    WHEN 'video' THEN 2
+                    ELSE 3
+                  END ASC,
+                  published_at_ms ASC,
+                  asset_id ASC",
     )?;
     let rows = statement.query_map(params![project_id, group_id], received_asset_from_row)?;
     collect_rows(rows)
@@ -2674,7 +3242,43 @@ fn received_asset_group_for_group_id(
     group.group_id = Some(group_id.to_string());
     group.burst = burst_summary_for_asset_group(connection, project_id, group_id)?;
     group.quality = quality_summary_for_asset_group(connection, group_id)?;
+    apply_technical_summary(connection, group_id, &mut group)?;
+    apply_model_evaluation_summary(connection, group_id, &mut group)?;
+    group.is_model_select = is_model_selected_asset_group(
+        connection,
+        project_id,
+        group_id,
+        group
+            .burst
+            .as_ref()
+            .map(|burst| burst.burst_group_id.as_str()),
+    )?;
+    group.user_marks = user_marks_for_asset_group(connection, project_id, group_id)?;
+    group.is_favorite = group.user_marks.favorite;
+    group.is_flagged = group.user_marks.marked;
     Ok(Some(group))
+}
+
+fn user_marks_for_asset_group(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<AssetUserMarks, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT favorite, marked
+             FROM asset_group_user_marks
+             WHERE project_id = ?1 AND group_id = ?2",
+            params![project_id, group_id],
+            |row| {
+                Ok(AssetUserMarks {
+                    favorite: row.get::<_, bool>(0)?,
+                    marked: row.get::<_, bool>(1)?,
+                })
+            },
+        )
+        .optional()
+        .map(|marks| marks.unwrap_or_default())
 }
 
 fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlite::Error> {
@@ -2694,9 +3298,76 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             default_strategy_profile_id TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS app_state (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS prompt_profiles (
+            prompt_profile_id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            project_id TEXT,
+            name TEXT NOT NULL,
+            style_tags_json TEXT NOT NULL,
+            scene_profile TEXT NOT NULL,
+            active_version_id TEXT,
+            built_in INTEGER NOT NULL,
+            enabled INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS prompt_profile_versions (
+            prompt_version_id TEXT PRIMARY KEY,
+            prompt_profile_id TEXT NOT NULL REFERENCES prompt_profiles(prompt_profile_id),
+            prompt_text TEXT NOT NULL,
+            output_schema_version TEXT NOT NULL,
+            prompt_hash TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_evaluation_settings (
+            project_id TEXT PRIMARY KEY REFERENCES projects(project_id),
+            model_evaluation_enabled INTEGER NOT NULL,
+            auto_evaluate_on_upload INTEGER NOT NULL,
+            auto_burst_recommendation_enabled INTEGER NOT NULL,
+            project_recommendation_mode TEXT NOT NULL,
+            prompt_profile_id TEXT,
+            scene_profile TEXT NOT NULL,
+            cv_policy TEXT NOT NULL,
+            allow_risky_model_selects INTEGER NOT NULL,
+            max_image_side INTEGER,
+            batch_size INTEGER,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS evaluation_runs (
+            run_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            run_type TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            status TEXT NOT NULL,
+            provider_kind TEXT NOT NULL,
+            provider_model TEXT NOT NULL,
+            prompt_profile_id TEXT,
+            prompt_version_id TEXT,
+            prompt_hash TEXT,
+            settings_snapshot_json TEXT NOT NULL,
+            error_message TEXT,
+            started_at_ms INTEGER,
+            completed_at_ms INTEGER,
+            created_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS subject_assessments (
+            assessment_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            asset_group_id TEXT NOT NULL,
+            subject_type TEXT NOT NULL,
+            detector_kind TEXT NOT NULL,
+            detector_version TEXT NOT NULL,
+            status TEXT NOT NULL,
+            gate_status TEXT NOT NULL,
+            regions_json TEXT NOT NULL,
+            signals_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS receiver_accounts (
@@ -2778,7 +3449,6 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             group_id TEXT NOT NULL REFERENCES asset_groups(group_id),
             transfer_id TEXT NOT NULL UNIQUE REFERENCES transfers(transfer_id),
             group_role TEXT NOT NULL,
-            group_rank INTEGER NOT NULL,
             media_kind TEXT NOT NULL,
             format TEXT NOT NULL,
             original_filename TEXT NOT NULL,
@@ -2854,7 +3524,6 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
         CREATE TABLE IF NOT EXISTS burst_group_members (
             burst_group_id TEXT NOT NULL REFERENCES burst_groups(burst_group_id) ON DELETE CASCADE,
             member_group_id TEXT NOT NULL REFERENCES asset_groups(group_id),
-            member_rank INTEGER NOT NULL,
             PRIMARY KEY(burst_group_id, member_group_id)
         );
 
@@ -2865,6 +3534,16 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             override_group_id TEXT,
             created_at_ms INTEGER NOT NULL,
             PRIMARY KEY(project_id, member_group_id, action)
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_group_user_marks (
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            group_id TEXT NOT NULL REFERENCES asset_groups(group_id) ON DELETE CASCADE,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            marked INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, group_id)
         );
 
         CREATE TABLE IF NOT EXISTS strategy_profiles (
@@ -2901,6 +3580,56 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             PRIMARY KEY(asset_group_id, scorer_version)
         );
 
+        CREATE TABLE IF NOT EXISTS technical_assessments (
+            asset_group_id TEXT NOT NULL,
+            assessor_version TEXT NOT NULL,
+            status TEXT NOT NULL,
+            gate_status TEXT NOT NULL,
+            defect_flags_json TEXT NOT NULL,
+            preview_source TEXT,
+            analyzed_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(asset_group_id, assessor_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS model_evaluations (
+            evaluation_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            asset_group_id TEXT NOT NULL,
+            evaluator_kind TEXT NOT NULL,
+            evaluator_version TEXT NOT NULL,
+            status TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            tier TEXT NOT NULL,
+            selectable INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            strengths_json TEXT NOT NULL,
+            weaknesses_json TEXT NOT NULL,
+            technical_warnings_json TEXT NOT NULL,
+            prompt_profile_id TEXT,
+            prompt_version_id TEXT,
+            prompt_hash TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS scoped_selection_recommendations (
+            recommendation_id TEXT PRIMARY KEY,
+            run_id TEXT,
+            scope TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            subject_id TEXT NOT NULL,
+            selected_asset_group_ids_json TEXT NOT NULL,
+            candidate_asset_group_ids_json TEXT NOT NULL,
+            rejected_asset_group_ids_json TEXT NOT NULL,
+            source TEXT NOT NULL,
+            status TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            reason TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS selection_recommendations (
             recommendation_id TEXT PRIMARY KEY,
             burst_group_id TEXT NOT NULL,
@@ -2929,13 +3658,106 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
         CREATE INDEX IF NOT EXISTS idx_publish_queue_state ON publish_queue(state, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_background_jobs_claim ON background_jobs(status, priority, next_attempt_at_ms, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_background_jobs_dedupe ON background_jobs(dedupe_key);
+        CREATE INDEX IF NOT EXISTS idx_prompt_profiles_scope_project ON prompt_profiles(scope, project_id, enabled);
+        CREATE INDEX IF NOT EXISTS idx_prompt_versions_profile ON prompt_profile_versions(prompt_profile_id, created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_evaluation_runs_project ON evaluation_runs(project_id, run_type, status, created_at_ms);
+        CREATE INDEX IF NOT EXISTS idx_subject_assessments_group ON subject_assessments(project_id, asset_group_id, subject_type);
         CREATE INDEX IF NOT EXISTS idx_burst_groups_project ON burst_groups(project_id, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_burst_members_group ON burst_group_members(member_group_id, burst_group_id);
         CREATE INDEX IF NOT EXISTS idx_burst_member_overrides_project ON burst_member_overrides(project_id, action, member_group_id);
+        CREATE INDEX IF NOT EXISTS idx_asset_group_user_marks_project ON asset_group_user_marks(project_id, favorite, marked);
         CREATE INDEX IF NOT EXISTS idx_quality_scores_group ON quality_scores(asset_group_id, scorer_version);
+        CREATE INDEX IF NOT EXISTS idx_technical_assessments_status ON technical_assessments(status, gate_status);
+        CREATE INDEX IF NOT EXISTS idx_model_evaluations_project ON model_evaluations(project_id, status, tier);
+        CREATE INDEX IF NOT EXISTS idx_model_evaluations_asset_group ON model_evaluations(asset_group_id, evaluator_version);
+        CREATE INDEX IF NOT EXISTS idx_scoped_recommendations_scope ON scoped_selection_recommendations(project_id, scope, subject_id, status);
         CREATE INDEX IF NOT EXISTS idx_recommendations_group ON selection_recommendations(burst_group_id, strategy_profile_id, status);
         ",
-    )
+    )?;
+    ensure_model_evaluation_dev_columns(connection)?;
+    Ok(())
+}
+
+fn ensure_model_evaluation_dev_columns(
+    connection: &Connection,
+) -> std::result::Result<(), rusqlite::Error> {
+    ensure_column(
+        connection,
+        "model_evaluations",
+        "run_id",
+        "TEXT",
+        "ALTER TABLE model_evaluations ADD COLUMN run_id TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "model_evaluations",
+        "prompt_profile_id",
+        "TEXT",
+        "ALTER TABLE model_evaluations ADD COLUMN prompt_profile_id TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "model_evaluations",
+        "prompt_version_id",
+        "TEXT",
+        "ALTER TABLE model_evaluations ADD COLUMN prompt_version_id TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "model_evaluations",
+        "prompt_hash",
+        "TEXT",
+        "ALTER TABLE model_evaluations ADD COLUMN prompt_hash TEXT",
+    )?;
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    expected_affinity: &str,
+    alter_sql: &str,
+) -> std::result::Result<(), rusqlite::Error> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let columns = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    for column in columns {
+        let (name, declared_type) = column?;
+        if name == column_name {
+            let affinity = sqlite_type_affinity(&declared_type);
+            if affinity != expected_affinity {
+                return Err(rusqlite::Error::InvalidParameterName(format!(
+                    "{table_name}.{column_name} must have {expected_affinity} affinity, found {declared_type}"
+                )));
+            }
+            return Ok(());
+        }
+    }
+    connection.execute(alter_sql, [])?;
+    Ok(())
+}
+
+fn sqlite_type_affinity(declared_type: &str) -> &'static str {
+    let normalized = declared_type.trim().to_ascii_uppercase();
+    if normalized.contains("INT") {
+        "INTEGER"
+    } else if normalized.contains("CHAR")
+        || normalized.contains("CLOB")
+        || normalized.contains("TEXT")
+    {
+        "TEXT"
+    } else if normalized.contains("BLOB") || normalized.is_empty() {
+        "BLOB"
+    } else if normalized.contains("REAL")
+        || normalized.contains("FLOA")
+        || normalized.contains("DOUB")
+    {
+        "REAL"
+    } else {
+        "NUMERIC"
+    }
 }
 
 fn seed_builtin_strategy_profiles(
@@ -2945,6 +3767,735 @@ fn seed_builtin_strategy_profiles(
         save_strategy_profile_for_connection(connection, profile)?;
     }
     Ok(())
+}
+
+fn seed_builtin_prompt_profiles(
+    connection: &Connection,
+) -> std::result::Result<(), rusqlite::Error> {
+    let built_ins = [
+        (
+            "general-default",
+            "General Default",
+            vec!["general".to_string(), "balanced".to_string()],
+            SceneProfile::General,
+            "Evaluate the image for technical quality, subject clarity, composition, and selection usefulness.",
+            "builtin-general-default-v1",
+        ),
+        (
+            "portrait-conservative",
+            "Portrait Conservative",
+            vec!["portrait".to_string(), "conservative".to_string()],
+            SceneProfile::Portrait,
+            "Evaluate portrait candidates conservatively with attention to expression, focus, skin tone, and subject dignity.",
+            "builtin-portrait-conservative-v1",
+        ),
+        (
+            "landscape-technical",
+            "Landscape Technical",
+            vec!["landscape".to_string(), "technical".to_string()],
+            SceneProfile::Landscape,
+            "Evaluate landscape candidates with emphasis on exposure, horizon, fine detail, color, and atmospheric clarity.",
+            "builtin-landscape-technical-v1",
+        ),
+    ];
+
+    for (profile_id, name, tags, scene_profile, prompt_text, prompt_hash) in built_ins {
+        let version_id = format!("{profile_id}-v1");
+        save_prompt_profile_for_connection(
+            connection,
+            PromptProfile {
+                prompt_profile_id: profile_id.to_string(),
+                scope: PromptScope::Global,
+                project_id: None,
+                name: name.to_string(),
+                style_tags: tags.clone(),
+                scene_profile,
+                active_version_id: None,
+                built_in: true,
+                enabled: true,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            },
+        )?;
+        let version = PromptProfileVersion {
+            prompt_version_id: version_id.clone(),
+            prompt_profile_id: profile_id.to_string(),
+            prompt_text: prompt_text.to_string(),
+            output_schema_version: "model-evaluation-v1".to_string(),
+            prompt_hash: prompt_hash.to_string(),
+            created_at_ms: 0,
+        };
+        save_prompt_profile_version_for_connection(connection, version)?;
+        save_prompt_profile_for_connection(
+            connection,
+            PromptProfile {
+                prompt_profile_id: profile_id.to_string(),
+                scope: PromptScope::Global,
+                project_id: None,
+                name: name.to_string(),
+                style_tags: tags,
+                scene_profile,
+                active_version_id: Some(version_id),
+                built_in: true,
+                enabled: true,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn prompt_profiles_for_project(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Vec<PromptProfile>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
+                active_version_id, built_in, enabled, created_at_ms, updated_at_ms
+         FROM prompt_profiles
+         WHERE enabled = 1
+           AND (scope = 'global' OR (scope = 'project' AND project_id = ?1))
+         ORDER BY CASE prompt_profile_id
+                    WHEN 'general-default' THEN 0
+                    WHEN 'portrait-conservative' THEN 1
+                    WHEN 'landscape-technical' THEN 2
+                    ELSE 3
+                  END ASC,
+                  scope ASC,
+                  name ASC,
+                  prompt_profile_id ASC",
+    )?;
+    let rows = statement.query_map(params![project_id], prompt_profile_from_row)?;
+    collect_rows(rows)
+}
+
+fn prompt_profile_by_id(
+    connection: &Connection,
+    profile_id: &str,
+) -> std::result::Result<Option<PromptProfile>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
+                    active_version_id, built_in, enabled, created_at_ms, updated_at_ms
+             FROM prompt_profiles
+             WHERE prompt_profile_id = ?1",
+            params![profile_id],
+            prompt_profile_from_row,
+        )
+        .optional()
+}
+
+fn save_prompt_profile_for_connection(
+    connection: &Connection,
+    profile: PromptProfile,
+) -> std::result::Result<PromptProfile, rusqlite::Error> {
+    validate_prompt_profile(connection, &profile)?;
+    connection.execute(
+        "INSERT INTO prompt_profiles (
+            prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
+            active_version_id, built_in, enabled, created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(prompt_profile_id) DO UPDATE SET
+            scope = excluded.scope,
+            project_id = excluded.project_id,
+            name = excluded.name,
+            style_tags_json = excluded.style_tags_json,
+            scene_profile = excluded.scene_profile,
+            active_version_id = excluded.active_version_id,
+            built_in = excluded.built_in,
+            enabled = excluded.enabled,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            &profile.prompt_profile_id,
+            profile.scope.as_str(),
+            profile.project_id.as_deref(),
+            &profile.name,
+            string_vec_json(&profile.style_tags)?,
+            profile.scene_profile.as_str(),
+            profile.active_version_id.as_deref(),
+            profile.built_in,
+            profile.enabled,
+            profile.created_at_ms,
+            profile.updated_at_ms,
+        ],
+    )?;
+    prompt_profile_by_id(connection, &profile.prompt_profile_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("prompt profile not found".to_string())
+    })
+}
+
+fn validate_prompt_profile(
+    connection: &Connection,
+    profile: &PromptProfile,
+) -> std::result::Result<(), rusqlite::Error> {
+    match profile.scope {
+        PromptScope::Global => {
+            if profile.project_id.is_some() {
+                return Err(sqlite_data_error(
+                    "global prompt profile cannot have project_id",
+                ));
+            }
+        }
+        PromptScope::Project => {
+            let Some(project_id) = profile.project_id.as_deref() else {
+                return Err(sqlite_data_error(
+                    "project prompt profile requires project_id",
+                ));
+            };
+            ensure_project_exists(connection, project_id)?;
+        }
+    }
+
+    if let Some(active_version_id) = profile.active_version_id.as_deref() {
+        let owner_profile_id = connection
+            .query_row(
+                "SELECT prompt_profile_id
+                 FROM prompt_profile_versions
+                 WHERE prompt_version_id = ?1",
+                params![active_version_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        match owner_profile_id {
+            Some(owner_profile_id) if owner_profile_id == profile.prompt_profile_id => {}
+            Some(_) => {
+                return Err(sqlite_data_error(
+                    "active prompt version belongs to another profile",
+                ));
+            }
+            None => return Err(sqlite_data_error("active prompt version not found")),
+        }
+    }
+
+    Ok(())
+}
+
+fn prompt_profile_from_row(row: &Row<'_>) -> std::result::Result<PromptProfile, rusqlite::Error> {
+    let scope: String = row.get(1)?;
+    let scene_profile: String = row.get(5)?;
+    Ok(PromptProfile {
+        prompt_profile_id: row.get(0)?,
+        scope: PromptScope::from_str(&scope),
+        project_id: row.get(2)?,
+        name: row.get(3)?,
+        style_tags: string_vec_from_json(row.get::<_, String>(4)?)?,
+        scene_profile: SceneProfile::from_str(&scene_profile),
+        active_version_id: row.get(6)?,
+        built_in: row.get(7)?,
+        enabled: row.get(8)?,
+        created_at_ms: row.get(9)?,
+        updated_at_ms: row.get(10)?,
+    })
+}
+
+fn prompt_profile_version_by_id(
+    connection: &Connection,
+    version_id: &str,
+) -> std::result::Result<Option<PromptProfileVersion>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT prompt_version_id, prompt_profile_id, prompt_text, output_schema_version,
+                    prompt_hash, created_at_ms
+             FROM prompt_profile_versions
+             WHERE prompt_version_id = ?1",
+            params![version_id],
+            prompt_profile_version_from_row,
+        )
+        .optional()
+}
+
+fn save_prompt_profile_version_for_connection(
+    connection: &Connection,
+    version: PromptProfileVersion,
+) -> std::result::Result<PromptProfileVersion, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO prompt_profile_versions (
+            prompt_version_id, prompt_profile_id, prompt_text, output_schema_version,
+            prompt_hash, created_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(prompt_version_id) DO UPDATE SET
+            prompt_profile_id = excluded.prompt_profile_id,
+            prompt_text = excluded.prompt_text,
+            output_schema_version = excluded.output_schema_version,
+            prompt_hash = excluded.prompt_hash,
+            created_at_ms = excluded.created_at_ms",
+        params![
+            version.prompt_version_id,
+            version.prompt_profile_id,
+            version.prompt_text,
+            version.output_schema_version,
+            version.prompt_hash,
+            version.created_at_ms,
+        ],
+    )?;
+    connection.execute(
+        "UPDATE prompt_profiles
+         SET active_version_id = ?1, updated_at_ms = MAX(updated_at_ms, ?2)
+         WHERE prompt_profile_id = ?3",
+        params![
+            version.prompt_version_id,
+            version.created_at_ms,
+            version.prompt_profile_id,
+        ],
+    )?;
+    prompt_profile_version_by_id(connection, &version.prompt_version_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("prompt profile version not found".to_string())
+    })
+}
+
+fn prompt_profile_version_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<PromptProfileVersion, rusqlite::Error> {
+    Ok(PromptProfileVersion {
+        prompt_version_id: row.get(0)?,
+        prompt_profile_id: row.get(1)?,
+        prompt_text: row.get(2)?,
+        output_schema_version: row.get(3)?,
+        prompt_hash: row.get(4)?,
+        created_at_ms: row.get(5)?,
+    })
+}
+
+fn project_evaluation_settings_for_project(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Option<ProjectEvaluationSettings>, rusqlite::Error> {
+    if project_by_id(connection, project_id)?.is_none() {
+        return Ok(None);
+    }
+    if let Some(settings) = project_evaluation_settings_by_project_id(connection, project_id)? {
+        return Ok(Some(settings));
+    }
+    let settings =
+        ProjectEvaluationSettings::default_for_project(project_id.to_string(), current_time_ms());
+    save_project_evaluation_settings_for_connection(connection, settings).map(Some)
+}
+
+fn project_evaluation_settings_by_project_id(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<Option<ProjectEvaluationSettings>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT project_id, model_evaluation_enabled, auto_evaluate_on_upload,
+                    auto_burst_recommendation_enabled, project_recommendation_mode,
+                    prompt_profile_id, scene_profile, cv_policy, allow_risky_model_selects,
+                    max_image_side, batch_size, updated_at_ms
+             FROM project_evaluation_settings
+             WHERE project_id = ?1",
+            params![project_id],
+            project_evaluation_settings_from_row,
+        )
+        .optional()
+}
+
+fn save_project_evaluation_settings_for_connection(
+    connection: &Connection,
+    settings: ProjectEvaluationSettings,
+) -> std::result::Result<ProjectEvaluationSettings, rusqlite::Error> {
+    ensure_project_exists(connection, &settings.project_id)?;
+    validate_project_evaluation_settings(connection, &settings)?;
+    connection.execute(
+        "INSERT INTO project_evaluation_settings (
+            project_id, model_evaluation_enabled, auto_evaluate_on_upload,
+            auto_burst_recommendation_enabled, project_recommendation_mode, prompt_profile_id,
+            scene_profile, cv_policy, allow_risky_model_selects, max_image_side, batch_size,
+            updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(project_id) DO UPDATE SET
+            model_evaluation_enabled = excluded.model_evaluation_enabled,
+            auto_evaluate_on_upload = excluded.auto_evaluate_on_upload,
+            auto_burst_recommendation_enabled = excluded.auto_burst_recommendation_enabled,
+            project_recommendation_mode = excluded.project_recommendation_mode,
+            prompt_profile_id = excluded.prompt_profile_id,
+            scene_profile = excluded.scene_profile,
+            cv_policy = excluded.cv_policy,
+            allow_risky_model_selects = excluded.allow_risky_model_selects,
+            max_image_side = excluded.max_image_side,
+            batch_size = excluded.batch_size,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            &settings.project_id,
+            settings.model_evaluation_enabled,
+            settings.auto_evaluate_on_upload,
+            settings.auto_burst_recommendation_enabled,
+            settings.project_recommendation_mode.as_str(),
+            settings.prompt_profile_id.as_deref(),
+            settings.scene_profile.as_str(),
+            settings.cv_policy.as_str(),
+            settings.allow_risky_model_selects,
+            settings.max_image_side,
+            settings.batch_size,
+            settings.updated_at_ms,
+        ],
+    )?;
+    project_evaluation_settings_by_project_id(connection, &settings.project_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("project evaluation settings not found".to_string())
+    })
+}
+
+fn validate_project_evaluation_settings(
+    connection: &Connection,
+    settings: &ProjectEvaluationSettings,
+) -> std::result::Result<(), rusqlite::Error> {
+    let Some(prompt_profile_id) = settings.prompt_profile_id.as_deref() else {
+        if settings.model_evaluation_enabled {
+            return Err(sqlite_data_error(
+                "model evaluation requires a prompt profile",
+            ));
+        }
+        return Ok(());
+    };
+
+    let profile = prompt_profile_by_id(connection, prompt_profile_id)?
+        .ok_or_else(|| sqlite_data_error("prompt profile not found"))?;
+    match profile.scope {
+        PromptScope::Global => validate_prompt_profile_is_usable(connection, &profile),
+        PromptScope::Project => {
+            if profile.project_id.as_deref() == Some(settings.project_id.as_str()) {
+                validate_prompt_profile_is_usable(connection, &profile)
+            } else {
+                Err(sqlite_data_error(
+                    "project prompt profile belongs to another project",
+                ))
+            }
+        }
+    }
+}
+
+fn validate_prompt_profile_is_usable(
+    connection: &Connection,
+    profile: &PromptProfile,
+) -> std::result::Result<(), rusqlite::Error> {
+    if !profile.enabled {
+        return Err(sqlite_data_error("prompt profile is disabled"));
+    }
+    let active_version_id = profile
+        .active_version_id
+        .as_deref()
+        .ok_or_else(|| sqlite_data_error("prompt profile has no active version"))?;
+    let active_version = prompt_profile_version_by_id(connection, active_version_id)?
+        .ok_or_else(|| sqlite_data_error("active prompt version not found"))?;
+    if active_version.prompt_profile_id != profile.prompt_profile_id {
+        return Err(sqlite_data_error(
+            "active prompt version belongs to another profile",
+        ));
+    }
+    Ok(())
+}
+
+fn project_evaluation_settings_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<ProjectEvaluationSettings, rusqlite::Error> {
+    let project_recommendation_mode: String = row.get(4)?;
+    let scene_profile: String = row.get(6)?;
+    let cv_policy: String = row.get(7)?;
+    Ok(ProjectEvaluationSettings {
+        project_id: row.get(0)?,
+        model_evaluation_enabled: row.get(1)?,
+        auto_evaluate_on_upload: row.get(2)?,
+        auto_burst_recommendation_enabled: row.get(3)?,
+        project_recommendation_mode: ProjectRecommendationMode::from_str(
+            &project_recommendation_mode,
+        ),
+        prompt_profile_id: row.get(5)?,
+        scene_profile: SceneProfile::from_str(&scene_profile),
+        cv_policy: CvPolicy::from_str(&cv_policy),
+        allow_risky_model_selects: row.get(8)?,
+        max_image_side: row.get(9)?,
+        batch_size: row.get(10)?,
+        updated_at_ms: row.get(11)?,
+    })
+}
+
+fn save_evaluation_run_for_connection(
+    connection: &Connection,
+    run: EvaluationRun,
+) -> std::result::Result<EvaluationRun, rusqlite::Error> {
+    ensure_project_exists(connection, &run.project_id)?;
+    connection.execute(
+        "INSERT INTO evaluation_runs (
+            run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
+            prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+            error_message, started_at_ms, completed_at_ms, created_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         ON CONFLICT(run_id) DO UPDATE SET
+            project_id = excluded.project_id,
+            run_type = excluded.run_type,
+            trigger = excluded.trigger,
+            status = excluded.status,
+            provider_kind = excluded.provider_kind,
+            provider_model = excluded.provider_model,
+            prompt_profile_id = excluded.prompt_profile_id,
+            prompt_version_id = excluded.prompt_version_id,
+            prompt_hash = excluded.prompt_hash,
+            settings_snapshot_json = excluded.settings_snapshot_json,
+            error_message = excluded.error_message,
+            started_at_ms = excluded.started_at_ms,
+            completed_at_ms = excluded.completed_at_ms,
+            created_at_ms = excluded.created_at_ms",
+        params![
+            run.run_id,
+            run.project_id,
+            run.run_type.as_str(),
+            run.trigger.as_str(),
+            run.status.as_str(),
+            run.provider_kind.as_str(),
+            run.provider_model,
+            run.prompt_profile_id,
+            run.prompt_version_id,
+            run.prompt_hash,
+            run.settings_snapshot_json,
+            run.error_message,
+            run.started_at_ms,
+            run.completed_at_ms,
+            run.created_at_ms,
+        ],
+    )?;
+    evaluation_run_by_id(connection, &run.run_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("evaluation run not found".to_string())
+    })
+}
+
+fn evaluation_run_by_id(
+    connection: &Connection,
+    run_id: &str,
+) -> std::result::Result<Option<EvaluationRun>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
+                    prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+                    error_message, started_at_ms, completed_at_ms, created_at_ms
+             FROM evaluation_runs
+             WHERE run_id = ?1",
+            params![run_id],
+            evaluation_run_from_row,
+        )
+        .optional()
+}
+
+fn latest_evaluation_run(
+    connection: &Connection,
+    project_id: &str,
+    run_type: EvaluationRunType,
+) -> std::result::Result<Option<EvaluationRun>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
+                    prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+                    error_message, started_at_ms, completed_at_ms, created_at_ms
+             FROM evaluation_runs
+             WHERE project_id = ?1 AND run_type = ?2
+             ORDER BY created_at_ms DESC, run_id DESC
+             LIMIT 1",
+            params![project_id, run_type.as_str()],
+            evaluation_run_from_row,
+        )
+        .optional()
+}
+
+fn evaluation_run_from_row(row: &Row<'_>) -> std::result::Result<EvaluationRun, rusqlite::Error> {
+    let run_type: String = row.get(2)?;
+    let trigger: String = row.get(3)?;
+    let status: String = row.get(4)?;
+    let provider_kind: String = row.get(5)?;
+    Ok(EvaluationRun {
+        run_id: row.get(0)?,
+        project_id: row.get(1)?,
+        run_type: EvaluationRunType::from_str(&run_type),
+        trigger: EvaluationRunTrigger::from_str(&trigger),
+        status: EvaluationRunStatus::from_str(&status),
+        provider_kind: ModelProviderKind::from_str(&provider_kind),
+        provider_model: row.get(6)?,
+        prompt_profile_id: row.get(7)?,
+        prompt_version_id: row.get(8)?,
+        prompt_hash: row.get(9)?,
+        settings_snapshot_json: row.get(10)?,
+        error_message: row.get(11)?,
+        started_at_ms: row.get(12)?,
+        completed_at_ms: row.get(13)?,
+        created_at_ms: row.get(14)?,
+    })
+}
+
+fn save_subject_assessment_for_connection(
+    connection: &Connection,
+    assessment: SubjectAssessment,
+) -> std::result::Result<SubjectAssessment, rusqlite::Error> {
+    ensure_project_exists(connection, &assessment.project_id)?;
+    ensure_asset_group_exists_in_project(
+        connection,
+        &assessment.project_id,
+        &assessment.asset_group_id,
+    )?;
+    ensure_subject_assessment_identity_is_stable(connection, &assessment)?;
+    validate_subject_assessment_json(&assessment)?;
+    connection.execute(
+        "INSERT INTO subject_assessments (
+            assessment_id, project_id, asset_group_id, subject_type, detector_kind,
+            detector_version, status, gate_status, regions_json, signals_json, summary,
+            created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(assessment_id) DO UPDATE SET
+            project_id = excluded.project_id,
+            asset_group_id = excluded.asset_group_id,
+            subject_type = excluded.subject_type,
+            detector_kind = excluded.detector_kind,
+            detector_version = excluded.detector_version,
+            status = excluded.status,
+            gate_status = excluded.gate_status,
+            regions_json = excluded.regions_json,
+            signals_json = excluded.signals_json,
+            summary = excluded.summary,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            assessment.assessment_id,
+            assessment.project_id,
+            assessment.asset_group_id,
+            assessment.subject_type,
+            assessment.detector_kind,
+            assessment.detector_version,
+            assessment.status.as_str(),
+            assessment.gate_status,
+            assessment.regions_json,
+            assessment.signals_json,
+            assessment.summary,
+            assessment.created_at_ms,
+            assessment.updated_at_ms,
+        ],
+    )?;
+    subject_assessment_by_id(connection, &assessment.assessment_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("subject assessment not found".to_string())
+    })
+}
+
+fn ensure_asset_group_exists_in_project(
+    connection: &Connection,
+    project_id: &str,
+    asset_group_id: &str,
+) -> std::result::Result<(), rusqlite::Error> {
+    let exists = connection.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM asset_groups WHERE project_id = ?1 AND group_id = ?2
+         )",
+        params![project_id, asset_group_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if exists {
+        Ok(())
+    } else {
+        Err(sqlite_data_error(
+            "subject assessment asset group not found in project",
+        ))
+    }
+}
+
+fn ensure_subject_assessment_identity_is_stable(
+    connection: &Connection,
+    assessment: &SubjectAssessment,
+) -> std::result::Result<(), rusqlite::Error> {
+    let existing = connection
+        .query_row(
+            "SELECT project_id, asset_group_id
+             FROM subject_assessments
+             WHERE assessment_id = ?1",
+            params![assessment.assessment_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    if let Some((project_id, asset_group_id)) = existing {
+        if project_id != assessment.project_id || asset_group_id != assessment.asset_group_id {
+            return Err(sqlite_data_error(
+                "subject assessment id cannot move between asset groups",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_subject_assessment_json(
+    assessment: &SubjectAssessment,
+) -> std::result::Result<(), rusqlite::Error> {
+    let regions =
+        serde_json::from_str::<serde_json::Value>(&assessment.regions_json).map_err(|error| {
+            sqlite_data_error(format!("invalid subject assessment regions_json: {error}"))
+        })?;
+    if !regions.is_array() {
+        return Err(sqlite_data_error(
+            "subject assessment regions_json must be a JSON array",
+        ));
+    }
+    let signals =
+        serde_json::from_str::<serde_json::Value>(&assessment.signals_json).map_err(|error| {
+            sqlite_data_error(format!("invalid subject assessment signals_json: {error}"))
+        })?;
+    if !signals.is_object() {
+        return Err(sqlite_data_error(
+            "subject assessment signals_json must be a JSON object",
+        ));
+    }
+    Ok(())
+}
+
+fn subject_assessment_by_id(
+    connection: &Connection,
+    assessment_id: &str,
+) -> std::result::Result<Option<SubjectAssessment>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT assessment_id, project_id, asset_group_id, subject_type, detector_kind,
+                    detector_version, status, gate_status, regions_json, signals_json, summary,
+                    created_at_ms, updated_at_ms
+             FROM subject_assessments
+             WHERE assessment_id = ?1",
+            params![assessment_id],
+            subject_assessment_from_row,
+        )
+        .optional()
+}
+
+fn subject_assessments_for_asset_groups(
+    connection: &Connection,
+    project_id: &str,
+    group_ids: &[String],
+) -> std::result::Result<Vec<SubjectAssessment>, rusqlite::Error> {
+    let mut assessments = Vec::new();
+    for group_id in group_ids {
+        let mut statement = connection.prepare(
+            "SELECT assessment_id, project_id, asset_group_id, subject_type, detector_kind,
+                    detector_version, status, gate_status, regions_json, signals_json, summary,
+                    created_at_ms, updated_at_ms
+             FROM subject_assessments
+             WHERE project_id = ?1 AND asset_group_id = ?2
+             ORDER BY created_at_ms DESC, assessment_id DESC",
+        )?;
+        let rows =
+            statement.query_map(params![project_id, group_id], subject_assessment_from_row)?;
+        assessments.extend(collect_rows(rows)?);
+    }
+    Ok(assessments)
+}
+
+fn subject_assessment_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<SubjectAssessment, rusqlite::Error> {
+    let status: String = row.get(6)?;
+    Ok(SubjectAssessment {
+        assessment_id: row.get(0)?,
+        project_id: row.get(1)?,
+        asset_group_id: row.get(2)?,
+        subject_type: row.get(3)?,
+        detector_kind: row.get(4)?,
+        detector_version: row.get(5)?,
+        status: EvaluationRunStatus::from_str(&status),
+        gate_status: row.get(7)?,
+        regions_json: row.get(8)?,
+        signals_json: row.get(9)?,
+        summary: row.get(10)?,
+        created_at_ms: row.get(11)?,
+        updated_at_ms: row.get(12)?,
+    })
 }
 
 fn receiver_account_by_username(
@@ -3231,8 +4782,11 @@ fn insert_asset_for_transfer(
     let final_location = record.resolved_final_location();
     let final_location_payload = final_location_json(final_location.as_ref())?;
     let group_role = group_role(format).to_string();
-    let group_rank = group_rank(format);
     let published_at_ms = record.completed_at_ms.or(Some(record.started_at_ms));
+    let capture_at_ms = final_location
+        .as_ref()
+        .and_then(|location| location.as_local_path())
+        .and_then(extract_capture_time_ms);
     let duplicate_key = duplicate_key(record);
 
     connection.execute(
@@ -3255,18 +4809,17 @@ fn insert_asset_for_transfer(
 
     connection.execute(
         "INSERT OR REPLACE INTO assets (
-            asset_id, project_id, group_id, transfer_id, group_role, group_rank, media_kind, format,
+            asset_id, project_id, group_id, transfer_id, group_role, media_kind, format,
             original_filename, final_filename, normalized_stem, original_path, original_parent_path,
             final_location_kind, final_location_payload, size_bytes, capture_at_ms, received_at_ms,
             published_at_ms, source_identity, username, remote_addr, duplicate_key
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             record.transfer_id,
             project_id,
             group_id,
             record.transfer_id,
             group_role,
-            group_rank,
             media_kind(format),
             format_name(format),
             original_filename(&record.original_path),
@@ -3277,7 +4830,7 @@ fn insert_asset_for_transfer(
             final_location.as_ref().map(StoredObjectLocation::kind),
             final_location_payload,
             record.size_bytes as i64,
-            Option::<i64>::None,
+            capture_at_ms,
             published_at_ms,
             published_at_ms,
             source_identity.clone(),
@@ -3296,7 +4849,18 @@ fn refresh_group_rollup(
 ) -> std::result::Result<(), rusqlite::Error> {
     let primary_asset_id: Option<String> = connection
         .query_row(
-            "SELECT asset_id FROM assets WHERE group_id = ?1 ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC LIMIT 1",
+            "SELECT asset_id
+             FROM assets
+             WHERE group_id = ?1
+             ORDER BY CASE group_role
+                        WHEN 'jpeg' THEN 0
+                        WHEN 'raw' THEN 1
+                        WHEN 'video' THEN 2
+                        ELSE 3
+                      END ASC,
+                      published_at_ms ASC,
+                      asset_id ASC
+             LIMIT 1",
             params![group_id],
             |row| row.get(0),
         )
@@ -3304,7 +4868,7 @@ fn refresh_group_rollup(
     let preview_asset_id: Option<String> = connection
         .query_row(
             "SELECT asset_id FROM assets WHERE group_id = ?1 AND group_role = 'jpeg'
-             ORDER BY group_rank ASC, published_at_ms ASC, asset_id ASC LIMIT 1",
+             ORDER BY published_at_ms ASC, asset_id ASC LIMIT 1",
             params![group_id],
             |row| row.get(0),
         )
@@ -3319,6 +4883,8 @@ fn refresh_group_rollup(
              has_raw = EXISTS(SELECT 1 FROM assets WHERE group_id = ?1 AND group_role = 'raw'),
              has_jpeg = EXISTS(SELECT 1 FROM assets WHERE group_id = ?1 AND group_role = 'jpeg'),
              has_video = EXISTS(SELECT 1 FROM assets WHERE group_id = ?1 AND group_role = 'video'),
+             first_capture_at_ms = (SELECT MIN(capture_at_ms) FROM assets WHERE group_id = ?1),
+             last_capture_at_ms = (SELECT MAX(capture_at_ms) FROM assets WHERE group_id = ?1),
              first_received_at_ms = (SELECT MIN(received_at_ms) FROM assets WHERE group_id = ?1),
              last_received_at_ms = (SELECT MAX(received_at_ms) FROM assets WHERE group_id = ?1),
              updated_at_ms = ?4
@@ -3419,33 +4985,32 @@ fn received_asset_from_row(row: &Row<'_>) -> std::result::Result<ReceivedAsset, 
 }
 
 fn stored_asset_from_row(row: &Row<'_>) -> std::result::Result<StoredAsset, rusqlite::Error> {
-    let media_kind: String = row.get(6)?;
-    let format: String = row.get(7)?;
-    let final_location_payload: Option<String> = row.get(13)?;
+    let media_kind: String = row.get(5)?;
+    let format: String = row.get(6)?;
+    let final_location_payload: Option<String> = row.get(12)?;
     Ok(StoredAsset {
         asset_id: row.get(0)?,
         project_id: row.get(1)?,
         group_id: row.get(2)?,
         transfer_id: row.get(3)?,
         group_role: row.get(4)?,
-        group_rank: row.get(5)?,
         media_kind,
         format: parse_format(&format),
-        original_filename: row.get(8)?,
-        final_filename: row.get(9)?,
-        normalized_stem: row.get(10)?,
-        original_path: row.get(11)?,
-        original_parent_path: row.get(12)?,
+        original_filename: row.get(7)?,
+        final_filename: row.get(8)?,
+        normalized_stem: row.get(9)?,
+        original_path: row.get(10)?,
+        original_parent_path: row.get(11)?,
         final_location: parse_location(final_location_payload)?,
-        size_bytes: row.get::<_, i64>(14)? as u64,
-        capture_at_ms: row.get(15)?,
-        received_at_ms: row.get(16)?,
-        published_at_ms: row.get(17)?,
-        source_identity: row.get(18)?,
-        username: row.get(19)?,
-        remote_addr: row.get(20)?,
-        duplicate_index: row.get::<_, Option<i64>>(21)?.map(|value| value as usize),
-        duplicate_count: row.get::<_, Option<i64>>(22)?.map(|value| value as usize),
+        size_bytes: row.get::<_, i64>(13)? as u64,
+        capture_at_ms: row.get(14)?,
+        received_at_ms: row.get(15)?,
+        published_at_ms: row.get(16)?,
+        source_identity: row.get(17)?,
+        username: row.get(18)?,
+        remote_addr: row.get(19)?,
+        duplicate_index: row.get::<_, Option<i64>>(20)?.map(|value| value as usize),
+        duplicate_count: row.get::<_, Option<i64>>(21)?.map(|value| value as usize),
     })
 }
 
@@ -3764,6 +5329,333 @@ fn quality_score_from_row(row: &Row<'_>) -> std::result::Result<QualityScore, ru
     })
 }
 
+fn save_technical_assessment_for_connection(
+    connection: &Connection,
+    assessment: TechnicalAssessment,
+) -> std::result::Result<TechnicalAssessment, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO technical_assessments (
+            asset_group_id, assessor_version, status, gate_status, defect_flags_json,
+            preview_source, analyzed_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(asset_group_id, assessor_version) DO UPDATE SET
+            status = excluded.status,
+            gate_status = excluded.gate_status,
+            defect_flags_json = excluded.defect_flags_json,
+            preview_source = excluded.preview_source,
+            analyzed_at_ms = excluded.analyzed_at_ms",
+        params![
+            assessment.asset_group_id,
+            assessment.assessor_version,
+            assessment.status.as_str(),
+            assessment.gate_status.as_str(),
+            technical_defect_flags_json(&assessment.defect_flags)?,
+            assessment.preview_source,
+            assessment.analyzed_at_ms,
+        ],
+    )?;
+    technical_assessment_by_key(
+        connection,
+        &assessment.asset_group_id,
+        &assessment.assessor_version,
+    )?
+    .ok_or_else(|| sqlite_data_error("technical assessment not found"))
+}
+
+fn technical_assessment_by_key(
+    connection: &Connection,
+    asset_group_id: &str,
+    assessor_version: &str,
+) -> std::result::Result<Option<TechnicalAssessment>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT asset_group_id, assessor_version, status, gate_status, defect_flags_json,
+                    preview_source, analyzed_at_ms
+             FROM technical_assessments
+             WHERE asset_group_id = ?1 AND assessor_version = ?2",
+            params![asset_group_id, assessor_version],
+            technical_assessment_from_row,
+        )
+        .optional()
+}
+
+fn technical_assessments_for_asset_group_ids(
+    connection: &Connection,
+    asset_group_ids: &[String],
+    assessor_version: &str,
+) -> std::result::Result<Vec<TechnicalAssessment>, rusqlite::Error> {
+    let mut assessments = Vec::new();
+    for asset_group_id in asset_group_ids {
+        if let Some(assessment) =
+            technical_assessment_by_key(connection, asset_group_id, assessor_version)?
+        {
+            assessments.push(assessment);
+        }
+    }
+    Ok(assessments)
+}
+
+fn technical_assessment_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<TechnicalAssessment, rusqlite::Error> {
+    let status: String = row.get(2)?;
+    let gate_status: String = row.get(3)?;
+    Ok(TechnicalAssessment {
+        asset_group_id: row.get(0)?,
+        assessor_version: row.get(1)?,
+        status: TechnicalAssessmentStatus::from_str(&status),
+        gate_status: TechnicalGateStatus::from_str(&gate_status),
+        defect_flags: technical_defect_flags_from_json(row.get::<_, String>(4)?)?,
+        preview_source: row.get(5)?,
+        analyzed_at_ms: row.get(6)?,
+    })
+}
+
+fn save_model_evaluation_for_connection(
+    connection: &Connection,
+    evaluation: ModelEvaluation,
+) -> std::result::Result<ModelEvaluation, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO model_evaluations (
+            evaluation_id, run_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
+            status, score, tier, selectable, summary, strengths_json, weaknesses_json,
+            technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+            created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+         ON CONFLICT(evaluation_id) DO UPDATE SET
+            run_id = excluded.run_id,
+            project_id = excluded.project_id,
+            asset_group_id = excluded.asset_group_id,
+            evaluator_kind = excluded.evaluator_kind,
+            evaluator_version = excluded.evaluator_version,
+            status = excluded.status,
+            score = excluded.score,
+            tier = excluded.tier,
+            selectable = excluded.selectable,
+            summary = excluded.summary,
+            strengths_json = excluded.strengths_json,
+            weaknesses_json = excluded.weaknesses_json,
+            technical_warnings_json = excluded.technical_warnings_json,
+            prompt_profile_id = excluded.prompt_profile_id,
+            prompt_version_id = excluded.prompt_version_id,
+            prompt_hash = excluded.prompt_hash,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            evaluation.evaluation_id,
+            evaluation.run_id,
+            evaluation.project_id,
+            evaluation.asset_group_id,
+            evaluation.evaluator_kind.as_str(),
+            evaluation.evaluator_version,
+            evaluation.status.as_str(),
+            evaluation.score,
+            evaluation.tier.as_str(),
+            evaluation.selectable,
+            evaluation.summary,
+            string_vec_json(&evaluation.strengths)?,
+            string_vec_json(&evaluation.weaknesses)?,
+            string_vec_json(&evaluation.technical_warnings)?,
+            evaluation.prompt_profile_id,
+            evaluation.prompt_version_id,
+            evaluation.prompt_hash,
+            evaluation.created_at_ms,
+            evaluation.updated_at_ms,
+        ],
+    )?;
+    model_evaluation_by_id(connection, &evaluation.evaluation_id)?
+        .ok_or_else(|| sqlite_data_error("model evaluation not found"))
+}
+
+fn model_evaluation_by_id(
+    connection: &Connection,
+    evaluation_id: &str,
+) -> std::result::Result<Option<ModelEvaluation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
+                    run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
+                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    created_at_ms, updated_at_ms
+             FROM model_evaluations
+             WHERE evaluation_id = ?1",
+            params![evaluation_id],
+            model_evaluation_from_row,
+        )
+        .optional()
+}
+
+fn latest_model_evaluation_for_asset_group(
+    connection: &Connection,
+    asset_group_id: &str,
+    evaluator_version: &str,
+) -> std::result::Result<Option<ModelEvaluation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
+                    run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
+                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    created_at_ms, updated_at_ms
+             FROM model_evaluations
+             WHERE asset_group_id = ?1 AND evaluator_version = ?2
+             ORDER BY updated_at_ms DESC, evaluation_id DESC
+             LIMIT 1",
+            params![asset_group_id, evaluator_version],
+            model_evaluation_from_row,
+        )
+        .optional()
+}
+
+fn model_evaluations_for_asset_group_ids(
+    connection: &Connection,
+    asset_group_ids: &[String],
+    evaluator_version: &str,
+) -> std::result::Result<Vec<ModelEvaluation>, rusqlite::Error> {
+    let mut evaluations = Vec::new();
+    for asset_group_id in asset_group_ids {
+        if let Some(evaluation) =
+            latest_model_evaluation_for_asset_group(connection, asset_group_id, evaluator_version)?
+        {
+            evaluations.push(evaluation);
+        }
+    }
+    Ok(evaluations)
+}
+
+fn model_evaluation_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<ModelEvaluation, rusqlite::Error> {
+    let evaluator_kind: String = row.get(3)?;
+    let status: String = row.get(6)?;
+    let tier: String = row.get(8)?;
+    Ok(ModelEvaluation {
+        evaluation_id: row.get(0)?,
+        run_id: row.get(5)?,
+        project_id: row.get(1)?,
+        asset_group_id: row.get(2)?,
+        evaluator_kind: ModelEvaluatorKind::from_str(&evaluator_kind),
+        evaluator_version: row.get(4)?,
+        status: ModelEvaluationStatus::from_str(&status),
+        score: row.get(7)?,
+        tier: ModelEvaluationTier::from_str(&tier),
+        selectable: row.get::<_, bool>(9)?,
+        summary: row.get(10)?,
+        strengths: string_vec_from_json(row.get::<_, String>(11)?)?,
+        weaknesses: string_vec_from_json(row.get::<_, String>(12)?)?,
+        technical_warnings: string_vec_from_json(row.get::<_, String>(13)?)?,
+        prompt_profile_id: row.get(14)?,
+        prompt_version_id: row.get(15)?,
+        prompt_hash: row.get(16)?,
+        created_at_ms: row.get(17)?,
+        updated_at_ms: row.get(18)?,
+    })
+}
+
+fn save_scoped_selection_recommendation_for_connection(
+    connection: &Connection,
+    recommendation: ScopedSelectionRecommendation,
+) -> std::result::Result<ScopedSelectionRecommendation, rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO scoped_selection_recommendations (
+            recommendation_id, run_id, scope, project_id, subject_id, selected_asset_group_ids_json,
+            candidate_asset_group_ids_json, rejected_asset_group_ids_json, source, status,
+            confidence, reason, created_at_ms, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(recommendation_id) DO UPDATE SET
+            run_id = excluded.run_id,
+            scope = excluded.scope,
+            project_id = excluded.project_id,
+            subject_id = excluded.subject_id,
+            selected_asset_group_ids_json = excluded.selected_asset_group_ids_json,
+            candidate_asset_group_ids_json = excluded.candidate_asset_group_ids_json,
+            rejected_asset_group_ids_json = excluded.rejected_asset_group_ids_json,
+            source = excluded.source,
+            status = excluded.status,
+            confidence = excluded.confidence,
+            reason = excluded.reason,
+            updated_at_ms = excluded.updated_at_ms",
+        params![
+            recommendation.recommendation_id,
+            recommendation.run_id,
+            recommendation.scope.as_str(),
+            recommendation.project_id,
+            recommendation.subject_id,
+            string_vec_json(&recommendation.selected_asset_group_ids)?,
+            string_vec_json(&recommendation.candidate_asset_group_ids)?,
+            string_vec_json(&recommendation.rejected_asset_group_ids)?,
+            recommendation.source.as_str(),
+            recommendation.status.as_str(),
+            recommendation.confidence,
+            recommendation.reason,
+            recommendation.created_at_ms,
+            recommendation.updated_at_ms,
+        ],
+    )?;
+    scoped_selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
+        .ok_or_else(|| sqlite_data_error("scoped selection recommendation not found"))
+}
+
+fn latest_scoped_selection_recommendation_for_connection(
+    connection: &Connection,
+    project_id: &str,
+    scope: SelectionRecommendationScope,
+    subject_id: &str,
+) -> std::result::Result<Option<ScopedSelectionRecommendation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
+                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
+                    status, confidence, reason, created_at_ms, updated_at_ms
+             FROM scoped_selection_recommendations
+             WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3
+             ORDER BY updated_at_ms DESC, recommendation_id DESC
+             LIMIT 1",
+            params![project_id, scope.as_str(), subject_id],
+            scoped_selection_recommendation_from_row,
+        )
+        .optional()
+}
+
+fn scoped_selection_recommendation_by_id(
+    connection: &Connection,
+    recommendation_id: &str,
+) -> std::result::Result<Option<ScopedSelectionRecommendation>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
+                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
+                    status, confidence, reason, created_at_ms, updated_at_ms
+             FROM scoped_selection_recommendations
+             WHERE recommendation_id = ?1",
+            params![recommendation_id],
+            scoped_selection_recommendation_from_row,
+        )
+        .optional()
+}
+
+fn scoped_selection_recommendation_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<ScopedSelectionRecommendation, rusqlite::Error> {
+    let scope: String = row.get(1)?;
+    let source: String = row.get(8)?;
+    let status: String = row.get(9)?;
+    Ok(ScopedSelectionRecommendation {
+        recommendation_id: row.get(0)?,
+        run_id: row.get(5)?,
+        scope: SelectionRecommendationScope::from_str(&scope),
+        project_id: row.get(2)?,
+        subject_id: row.get(3)?,
+        selected_asset_group_ids: string_vec_from_json(row.get::<_, String>(4)?)?,
+        candidate_asset_group_ids: string_vec_from_json(row.get::<_, String>(6)?)?,
+        rejected_asset_group_ids: string_vec_from_json(row.get::<_, String>(7)?)?,
+        source: SelectionSource::from_str(&source),
+        status: SelectionRecommendationStatus::from_str(&status),
+        confidence: row.get(10)?,
+        reason: row.get(11)?,
+        created_at_ms: row.get(12)?,
+        updated_at_ms: row.get(13)?,
+    })
+}
+
 fn save_selection_recommendation_for_connection(
     connection: &Connection,
     recommendation: SelectionRecommendation,
@@ -3900,6 +5792,42 @@ fn enqueue_detect_burst_job_for_connection(
     )
 }
 
+fn enqueue_portrait_subject_assessment_job_for_connection(
+    connection: &Connection,
+    project_id: &str,
+    asset_group_id: &str,
+) -> std::result::Result<AnalysisJob, rusqlite::Error> {
+    let mut job = NewAnalysisJob::new(
+        project_id,
+        AnalysisJobType::AssessPortraitSubject,
+        AnalysisEntityType::AssetGroup,
+        asset_group_id,
+        &format!("subject:portrait:{project_id}:{asset_group_id}"),
+    );
+    job.priority = 15;
+    enqueue_analysis_job_for_connection(connection, job)
+}
+
+fn should_schedule_subject_assessment_for_project(
+    connection: &Connection,
+    project_id: &str,
+) -> std::result::Result<bool, rusqlite::Error> {
+    let scene_profile = connection
+        .query_row(
+            "SELECT scene_profile
+             FROM project_evaluation_settings
+             WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(scene_profile
+        .as_deref()
+        .map(SceneProfile::from_str)
+        .unwrap_or(SceneProfile::General)
+        == SceneProfile::Portrait)
+}
+
 fn enqueue_analysis_job_for_connection(
     connection: &Connection,
     job: NewAnalysisJob,
@@ -4026,6 +5954,18 @@ fn signal_score_from_json(value: String) -> std::result::Result<SignalScore, rus
     serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
 }
 
+fn technical_defect_flags_json(
+    value: &[TechnicalDefectFlag],
+) -> std::result::Result<String, rusqlite::Error> {
+    serde_json::to_string(value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn technical_defect_flags_from_json(
+    value: String,
+) -> std::result::Result<Vec<TechnicalDefectFlag>, rusqlite::Error> {
+    serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
 fn string_vec_json(value: &[String]) -> std::result::Result<String, rusqlite::Error> {
     serde_json::to_string(value).map_err(|error| sqlite_data_error(error.to_string()))
 }
@@ -4109,10 +6049,17 @@ fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQu
         .as_ref()
         .map(|expected| {
             group
-                .quality
+                .model_status
                 .as_ref()
-                .map(|quality| quality.analysis_status.eq_ignore_ascii_case(expected))
-                .unwrap_or(false)
+                .is_some_and(|status| status.eq_ignore_ascii_case(expected))
+                || group
+                    .technical_status
+                    .as_ref()
+                    .is_some_and(|status| status.eq_ignore_ascii_case(expected))
+                || group
+                    .quality
+                    .as_ref()
+                    .is_some_and(|quality| quality.analysis_status.eq_ignore_ascii_case(expected))
         })
         .unwrap_or(true);
     let recommendation_matches = query
@@ -4142,8 +6089,58 @@ fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQu
                 .unwrap_or(false)
         })
         .unwrap_or(true);
+    let favorite_matches = query
+        .favorite
+        .map(|expected| group.user_marks.favorite == expected)
+        .unwrap_or(true);
+    let marked_matches = query
+        .marked
+        .map(|expected| group.user_marks.marked == expected)
+        .unwrap_or(true);
+    let queue_matches = query
+        .review_queue
+        .as_ref()
+        .map(|queue| asset_group_matches_model_queue(group, queue))
+        .unwrap_or(true);
 
-    status_matches && recommendation_matches && min_matches && max_matches
+    status_matches
+        && recommendation_matches
+        && min_matches
+        && max_matches
+        && favorite_matches
+        && marked_matches
+        && queue_matches
+}
+
+fn asset_group_matches_model_queue(group: &ReceivedAssetGroup, queue: &str) -> bool {
+    match normalized_review_queue_key(queue).as_str() {
+        "all" => true,
+        "model_selects" => group.is_model_select,
+        "unconfirmed_best"
+        | "needs_review"
+        | "low_score_candidates"
+        | "near_duplicates"
+        | "unsupported"
+        | "pending"
+        | "user_overridden" => true,
+        "favorites" => group.is_favorite,
+        "flagged" => group.is_flagged,
+        "quality_risk" => {
+            matches!(
+                group.technical_gate_status.as_deref(),
+                Some("warn" | "reject" | "needs_review" | "unsupported")
+            ) || matches!(group.model_tier.as_deref(), Some("weak" | "reject"))
+        }
+        "pending_analysis" => {
+            group.model_status.is_none()
+                || matches!(group.model_status.as_deref(), Some("pending" | "running"))
+                || matches!(
+                    group.technical_status.as_deref(),
+                    Some("pending" | "analyzing")
+                )
+        }
+        _ => true,
+    }
 }
 
 fn representative_group_id_for_review_unit(
@@ -4186,8 +6183,14 @@ fn sort_asset_groups_for_query(groups: &mut [ReceivedAssetGroup], sort: AssetGro
             groups.sort_by(|left, right| {
                 let left_score = group_best_score(left);
                 let right_score = group_best_score(right);
-                let left_own_score = left.quality.as_ref().map(|quality| quality.overall);
-                let right_own_score = right.quality.as_ref().map(|quality| quality.overall);
+                let left_own_score = left
+                    .model_score
+                    .map(|score| score as f64)
+                    .or_else(|| left.quality.as_ref().map(|quality| quality.overall));
+                let right_own_score = right
+                    .model_score
+                    .map(|score| score as f64)
+                    .or_else(|| right.quality.as_ref().map(|quality| quality.overall));
                 score_sort_key(right_score)
                     .cmp(&score_sort_key(left_score))
                     .then_with(|| {
@@ -4207,6 +6210,7 @@ fn group_best_score(group: &ReceivedAssetGroup) -> Option<f64> {
         .burst
         .as_ref()
         .and_then(|burst| burst.best_score)
+        .or_else(|| group.model_score.map(|score| score as f64))
         .or_else(|| group.quality.as_ref().map(|quality| quality.overall))
 }
 
@@ -4463,15 +6467,6 @@ fn group_role(format: ObjectFormat) -> &'static str {
         "video"
     } else {
         "other"
-    }
-}
-
-fn group_rank(format: ObjectFormat) -> i64 {
-    match group_role(format) {
-        "jpeg" => 0,
-        "raw" => 1,
-        "video" => 2,
-        _ => 3,
     }
 }
 
