@@ -3,35 +3,32 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AnalysisJobType {
     DetectBurstForAssetGroup,
-    ScoreAssetGroup,
     AssessAssetGroupTechnicalQuality,
     AssessPortraitSubject,
     EvaluateAssetGroupWithModel,
     RecommendBurstGroup,
-    RecommendProjectSelects,
+    GenerateProjectRecommendation,
 }
 
 impl AnalysisJobType {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::DetectBurstForAssetGroup => "detect_burst_for_asset_group",
-            Self::ScoreAssetGroup => "score_asset_group",
             Self::AssessAssetGroupTechnicalQuality => "assess_asset_group_technical_quality",
             Self::AssessPortraitSubject => "assess_portrait_subject",
             Self::EvaluateAssetGroupWithModel => "evaluate_asset_group_with_model",
             Self::RecommendBurstGroup => "recommend_burst_group",
-            Self::RecommendProjectSelects => "recommend_project_selects",
+            Self::GenerateProjectRecommendation => "generate_project_recommendation",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value {
-            "score_asset_group" => Self::ScoreAssetGroup,
             "assess_asset_group_technical_quality" => Self::AssessAssetGroupTechnicalQuality,
             "assess_portrait_subject" => Self::AssessPortraitSubject,
             "evaluate_asset_group_with_model" => Self::EvaluateAssetGroupWithModel,
             "recommend_burst_group" => Self::RecommendBurstGroup,
-            "recommend_project_selects" => Self::RecommendProjectSelects,
+            "generate_project_recommendation" => Self::GenerateProjectRecommendation,
             _ => Self::DetectBurstForAssetGroup,
         }
     }

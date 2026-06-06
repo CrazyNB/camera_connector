@@ -874,7 +874,6 @@ fn completed_transfer(
         status: TransferStatus::Completed,
         original_path: original_path.to_string(),
         final_filename: final_filename.clone(),
-        final_path: None,
         final_location: Some(StoredObjectLocation::local_path(final_filename)),
         size_bytes: 100,
         username: Some("z5".to_string()),

@@ -390,7 +390,6 @@ impl russh_sftp::server::Handler for SftpSession {
             status: TransferStatus::Completed,
             original_path: upload.original_path,
             final_filename: progress.filename,
-            final_path: progress.output_path,
             final_location: progress.output_location,
             size_bytes: progress.bytes_written,
             username: self.username.clone(),

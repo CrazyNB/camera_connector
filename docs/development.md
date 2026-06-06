@@ -36,7 +36,7 @@ The script runs:
   - `serve-sftp`
   - `receiver-status`
   - `receive-file`
-  - `inbox`
+  - `assets`
   - `dashboard`
   - `transfers`
 
@@ -96,21 +96,21 @@ target\debug\camera-connector.exe project move-group --from project-wrong --grou
 Validate local ingest without a camera:
 
 ```powershell
-target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 --output C:\Users\hxn\Pictures\CameraConnector --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --source ftp --source-name "Studio Camera"
+target\debug\camera-connector.exe receive-file --input C:\path\to\IMG_1234.CR3 --output C:\Users\hxn\Pictures\CameraConnector --project-id project-... --state C:\Users\hxn\AppData\Roaming\CameraConnector\state --source ftp --source-name "Studio Camera"
 ```
 
-`receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the active project in SQLite. If the state directory has no active project, the operation fails and the caller must create/select a project first.
+`receive-file` writes the flat completed file, appends transfer metadata in the state directory, and indexes the completed file under the explicit project id in SQLite. The caller must create/select a project before importing and pass that project id to the command.
 
 List project assets and RAW/JPEG groups from SQLite:
 
 ```powershell
-target\debug\camera-connector.exe inbox --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --summary --username z5 --limit 50
+target\debug\camera-connector.exe assets --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --summary --username z5 --limit 50
 ```
 
 List the receiver folder directly for low-level diagnostics:
 
 ```powershell
-target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\Pictures\CameraConnector --source ftp
+target\debug\camera-connector.exe assets --diagnostic --path C:\Users\hxn\Pictures\CameraConnector --source ftp
 ```
 
 List project transfer records from SQLite and filter by status, source name, original camera path, final filename, remote IP, or transfer id:
@@ -134,16 +134,16 @@ target\debug\camera-connector.exe transfers --diagnostic --state C:\Users\hxn\Ap
 For transfer-log diagnostics that cannot scan a real output folder, build groups from the audit log:
 
 ```powershell
-target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
+target\debug\camera-connector.exe assets --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --source-name "Z5_2" --original-path DCIM --format nef
 ```
 
 Use `--offset` and `--limit` with `--from-transfers` when paging diagnostic audit views:
 
 ```powershell
-target\debug\camera-connector.exe inbox --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
+target\debug\camera-connector.exe assets --diagnostic --path C:\Users\hxn\AppData\Roaming\CameraConnector\state --from-transfers --summary --username z5 --offset 0 --limit 50
 ```
 
-Manage the active shooting project before importing or reviewing assets:
+Manage the active shooting project before importing or browsing assets:
 
 ```powershell
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json create --name "Client Shoot"
@@ -155,7 +155,7 @@ target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\
 target\debug\camera-connector.exe project --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json restore --id project-...
 ```
 
-Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project rename` updates the display name and slug without changing the project id or active selection; `project active` returns the current active project and errors when no project has been selected. Archiving keeps project data queryable but clears it as the active import target until it is restored and selected again. There is no default Inbox fallback; imports must be attached to an explicit user-created project.
+Project data is stored in the receiver state directory configured by `receiver-settings`. `project create` creates the project and makes it active; `project rename` updates the display name and slug without changing the project id or active selection; `project active` returns the current active project and errors when no project has been selected. Archiving keeps project data queryable but clears it as the active import target until it is restored and selected again. There is no default system project fallback; imports must be attached to an explicit user-created project.
 
 Read the project-scoped dashboard model in one command:
 
@@ -171,13 +171,13 @@ Use JSON output for UI shells or automation:
 target\debug\camera-connector.exe dashboard --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --limit 50 --json
 ```
 
-The completed file folder remains flat for predictable export paths. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path, login username, project id, storage location, and grouping metadata live in the state directory. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `camera-connector.sqlite3`, `transfer-log.jsonl`, and `sftp-host-key` belong in the state directory, not the upload inbox. Connected-device state, receiver runtime status, and account configuration are stored in SQLite.
+The completed file folder remains flat for predictable export paths. If a camera uploads to `/DCIM/100CANON/IMG_1234.CR3`, the desktop completed file is `C:\Users\hxn\Pictures\CameraConnector\IMG_1234.CR3`; the original path, login username, project id, storage location, and grouping metadata live in the state directory. Transfer rows also print `location_kind` and `location` so future Android/iOS adapters can report MediaStore, document-provider, or Photos identifiers without pretending they are desktop paths. Receiver metadata files such as `camera-connector.sqlite3`, `transfer-log.jsonl`, and `sftp-host-key` belong in the state directory, not the upload output directory. Connected-device state, receiver runtime status, and account configuration are stored in SQLite.
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 
 Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The config file stores receiver defaults such as protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, and source name. Camera accounts are stored in the SQLite state database. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `project`, `dashboard`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
 
-The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, receiver lifecycle, transfer logs, connected devices, flat inbox handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call `CameraConnectorService`, `CameraConnectorRuntime`, or lower-level core APIs, and print results.
+The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, receiver lifecycle, transfer logs, connected devices, flat completed-file handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call `CameraConnectorService`, `CameraConnectorRuntime`, or lower-level core APIs, and print results.
 
 Duplicate uploads are preserved with numbered filenames such as `IMG_1234 (1).CR3`; existing completed files are not overwritten.
 

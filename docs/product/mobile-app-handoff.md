@@ -45,6 +45,13 @@ Receiver controls belong inside the active project workspace. Account management
 | Accounts | `set_account`, `remove_account`, dashboard `accounts` | Password is write-only during setup; account is global identity |
 | Start/Stop Receiver | `CameraConnectorRuntime::start_receiver`, `stop_receiver`, `status` | Mobile shell owns foreground/background lifecycle; receiver starts from the active project workspace |
 | Photos | project dashboard `assets` or `project_asset_group_page_with_query` | Tap preview opens group detail; long press enters bulk selection |
+| Technical gate | `technical_assessments` / provider-aware analysis drain | Local CV risk context only; not a product-facing final score |
+| Model provider profiles | `loadModelProviderSettings`, `loadModelProviderSettingsList`, `saveModelProviderSettings`, `deleteModelProviderSettings` | Global app config; projects select a profile instead of storing provider secrets |
+| Prompt profiles | `loadPromptProfiles`, `forkPromptProfile`, `savePromptProfileVersion` | User-editable prompt text is only the editable part of a locked model request/response contract |
+| Project evaluation settings | `loadProjectEvaluationSettings`, `saveProjectEvaluationSettings` | Project-scoped enablement for automatic model evaluation and burst recommendation |
+| Manual model evaluation | detail refresh action and bulk/long-press evaluation action | No separate enablement setting; still requires provider capability |
+| Model recommendation | `generateProjectRecommendation`, burst-stable analysis jobs | Burst recommendation can be automatic per project; project recommendation is manual-only |
+| User marks | asset-group user mark APIs through dashboard/action gateway | Favorite and mark are human choices and never overwrite model recommendation rows |
 | Transfer/Publish status | `project_transfers`, `project_transfer_summary_with_query`, `project_recent_failed_transfers`, `publish_queue_summary`, publish retry release/drain APIs | Receiver status shows compact health and retry affordances; Settings diagnostics shows rows and errors |
 | Settings diagnostics | dashboard `accounts`, `devices`, `transfers`, receiver status | Account is identity; IP is mutable connection state; transfer/publish records are operational diagnostics |
 
@@ -54,7 +61,7 @@ The core already separates storage concepts:
 
 - Config: app settings and accounts.
 - State/logs: transfer log, connected devices, receiver status, SFTP host key.
-- Output/inbox: completed camera assets and in-progress temp writes only.
+- Output location: completed camera assets and in-progress temp writes only.
 
 Mobile implementations should preserve this separation.
 
@@ -130,6 +137,16 @@ Photos:
 - Grid tiles display previews and compact group metadata.
 - Tap the preview opens group detail.
 - Long press enters selection mode for bulk movement.
+- Burst groups aggregate to one tile. The tile cover uses the model-selected
+  member when available; detail can show the group as a carousel and a compact
+  overview.
+- Collection filters are query semantics: All, Model Selects, Favorites, Marked,
+  Technical Risk, Pending Analysis.
+- Model score/reason, technical risk, favorite, and mark must be visually
+  distinct. Favorite/mark actions are human choices; model-selected state is
+  algorithm output.
+- If provider capability is missing, model actions show a provider setup state.
+  Uploads and local technical gate results still appear normally.
 
 Settings diagnostics:
 
@@ -143,6 +160,24 @@ Accounts:
 - IP address is latest connection metadata.
 - Password value is never shown after saving.
 
+Model provider settings:
+
+- Provider profiles are global app configuration, not project data.
+- Each profile can store URL, provider kind, model name, send mode, batch size,
+  and API key in app-private config storage.
+- Projects choose a profile by id; changing a global profile list must not
+  silently rewrite existing project settings.
+- Deleting a profile makes dependent project model actions unconfigured until
+  the user selects another profile.
+
+Prompt settings:
+
+- Prompt profiles are global or project-scoped, named by style tags, and
+  versioned.
+- The editable prompt body is only part of the final prompt. Image payload
+  contract, JSON schema, safety constraints, and output parsing rules stay
+  locked in the system prompt/request builder.
+
 ## 8. Acceptance Checklist
 
 - Global navigation has Projects, Accounts, and Settings.
@@ -155,6 +190,12 @@ Accounts:
 - The app can operate with no direct filesystem path for output objects.
 - Failed transfer diagnostics are visible without inspecting raw logs.
 - Config/state/output locations remain separate.
+- Model provider URL, model name, and API key can be created, updated, deleted,
+  and selected through Settings.
+- Project configuration can select a provider profile and prompt profile without
+  copying API keys into project data.
+- Missing provider/API key state disables model work but does not block upload,
+  thumbnails, grouping, publishing, or local CV.
 
 ## 9. Remaining Validation Decisions
 

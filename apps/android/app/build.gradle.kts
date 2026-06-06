@@ -8,7 +8,7 @@ val useNativeCore = providers.gradleProperty("cameraConnector.useNativeCore")
     .orElse(false)
 val nativeCoreFallbackToPreview = providers.gradleProperty("cameraConnector.nativeCoreFallbackToPreview")
     .map { it.toBoolean() }
-    .orElse(true)
+    .orElse(false)
 
 android {
     namespace = "com.cameraconnector.app"

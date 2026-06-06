@@ -9,7 +9,10 @@ use crate::{
     StoredObjectLocation,
 };
 
-pub fn scan_inbox(root: impl AsRef<Path>, source: ImportSource) -> Result<Vec<ReceivedAsset>> {
+pub fn scan_received_assets(
+    root: impl AsRef<Path>,
+    source: ImportSource,
+) -> Result<Vec<ReceivedAsset>> {
     let root = root.as_ref();
     let mut assets = Vec::new();
     collect_assets(root, root, source, &mut assets)?;
@@ -22,11 +25,11 @@ pub fn scan_inbox(root: impl AsRef<Path>, source: ImportSource) -> Result<Vec<Re
     Ok(assets)
 }
 
-pub fn scan_inbox_groups(
+pub fn scan_received_asset_groups(
     root: impl AsRef<Path>,
     source: ImportSource,
 ) -> Result<Vec<ReceivedAssetGroup>> {
-    scan_inbox(root, source).map(group_received_assets)
+    scan_received_assets(root, source).map(group_received_assets)
 }
 
 fn collect_assets(

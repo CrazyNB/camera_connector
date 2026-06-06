@@ -103,9 +103,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
@@ -143,7 +143,7 @@ internal fun AccountsScreen(
         item {
             Text("账号管理", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(4.dp))
-            Text("相机账号和连接状态", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("\u76f8\u673a\u8d26\u53f7\u548c\u8fde\u63a5\u72b6\u6001", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         actionError?.let { message ->
@@ -158,7 +158,7 @@ internal fun AccountsScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "还没有账号。请为相机配置登录用户名和密码。",
+                        "\u8fd8\u6ca1\u6709\u8d26\u53f7\u3002\u8bf7\u4e3a\u76f8\u673a\u914d\u7f6e\u767b\u5f55\u7528\u6237\u540d\u548c\u5bc6\u7801\u3002",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -213,7 +213,7 @@ internal fun AccountDetailScreen(
         item {
             HeaderWithBack(
                 title = if (isNew) "新增账号" else "账号详情",
-                subtitle = if (locked) "连接中的账号不可编辑或删除" else "用户名、密码、设备名称",
+                subtitle = if (locked) "\u8fde\u63a5\u4e2d\u7684\u8d26\u53f7\u4e0d\u53ef\u7f16\u8f91\u6216\u5220\u9664" else "\u7528\u6237\u540d\u3001\u5bc6\u7801\u3001\u8bbe\u5907\u540d",
                 onBack = onBack,
             )
         }
@@ -230,20 +230,20 @@ internal fun AccountDetailScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("连接状态", style = MaterialTheme.typography.titleMedium)
+                        Text("\u8fde\u63a5\u72b6\u6001", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ElementTag(
-                                text = if (it.online) "在线" else "未连接",
+                                text = if (it.online) "\u5728\u7ebf" else "\u672a\u8fde\u63a5",
                                 color = if (it.online) ElementSuccess else ElementInfo,
                             )
-                            ElementTag("连接数 ${it.activeConnections}", ElementBlue)
+                            ElementTag("连接 ${it.activeConnections}", ElementBlue)
                         }
                         Spacer(Modifier.height(8.dp))
                         Text("最近来源：${formatEndpoint(it)}")
                         it.lastSeenAtMs?.let { value -> Text("最近在线：${formatEpochMillisForDisplay(value)}") }
                         it.lastDisconnectedAtMs?.let { value ->
-                            Text("最近断开：${formatEpochMillisForDisplay(value)}")
+                            Text("最近断开 ${formatEpochMillisForDisplay(value)}")
                         }
                     }
                 }
@@ -257,7 +257,7 @@ internal fun AccountDetailScreen(
                         value = username,
                         onValueChange = { username = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("用户名") },
+                        label = { Text("\u7528\u6237\u540d") },
                         singleLine = true,
                         enabled = actionsEnabled && !locked && isNew,
                     )
@@ -282,7 +282,7 @@ internal fun AccountDetailScreen(
                     )
                     if (locked) {
                         Spacer(Modifier.height(8.dp))
-                        Text("请先等待相机断开或停止接收服务，再修改该账号。")
+                        Text("\u8bf7\u5148\u7b49\u5f85\u76f8\u673a\u65ad\u5f00\u6216\u505c\u6b62\u63a5\u6536\u670d\u52a1\uff0c\u518d\u4fee\u6539\u8be5\u8d26\u53f7\u3002")
                     }
                     Spacer(Modifier.height(16.dp))
                     Button(

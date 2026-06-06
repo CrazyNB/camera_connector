@@ -104,9 +104,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
@@ -181,7 +181,7 @@ internal fun ProjectScopeCard(
                 ) {
                     Icon(
                         Icons.Outlined.KeyboardArrowUp,
-                        contentDescription = "收起启动页",
+                        contentDescription = "\u6536\u8d77\u542f\u52a8\u9875",
                         tint = ElementBlue,
                     )
                 }

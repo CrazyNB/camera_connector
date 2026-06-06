@@ -24,7 +24,6 @@ fn push_receiver_config_requires_active_project_for_storage_recording() {
         status: TransferStatus::Completed,
         original_path: "IMG_0001.JPG".to_string(),
         final_filename: "IMG_0001.JPG".to_string(),
-        final_path: Some(output_dir.path().join("IMG_0001.JPG")),
         final_location: None,
         size_bytes: 3,
         username: None,

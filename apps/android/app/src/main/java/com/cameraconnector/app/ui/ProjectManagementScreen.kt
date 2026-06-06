@@ -103,9 +103,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
@@ -154,7 +154,7 @@ internal fun ProjectManagementScreen(
                 Text("项目管理", style = MaterialTheme.typography.headlineMedium)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "启动后默认进入，用户选择或新建项目",
+                    "\u542f\u52a8\u540e\u9ed8\u8ba4\u8fdb\u5165\uff0c\u7528\u6237\u9009\u62e9\u6216\u65b0\u5efa\u9879\u76ee\u3002",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -177,7 +177,7 @@ internal fun ProjectManagementScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "还没有拍摄项目，请先新建项目。",
+                        "\u8fd8\u6ca1\u6709\u62cd\u6444\u9879\u76ee\uff0c\u8bf7\u5148\u65b0\u5efa\u9879\u76ee\u3002",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -250,7 +250,7 @@ internal fun ProjectManagementScreen(
                                 enabled = actionsEnabled && cleanProjectName.isNotBlank(),
                                 shape = elementShape,
                             ) {
-                                Text("创建并进入")
+                                Text("\u521b\u5efa\u5e76\u8fdb\u5165")
                             }
                         }
                     }
@@ -279,7 +279,7 @@ internal fun ProjectGlobalStatusCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("全局状态", style = MaterialTheme.typography.titleMedium)
+            Text("\u5168\u5c40\u72b6\u6001", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ProjectInlineMetric(
                     value = projectState.projects.size.toString(),
@@ -295,7 +295,7 @@ internal fun ProjectGlobalStatusCard(
                 )
                 ProjectInlineMetric(
                     value = dashboard.publishQueue.pendingCount.toString(),
-                    label = "待发布",
+                    label = "\u5f85\u53d1\u5e03",
                     accentColor = ElementWarning,
                     modifier = Modifier.weight(1f),
                 )
@@ -309,7 +309,7 @@ internal fun ProjectGlobalStatusCard(
                 value = receiverEndpointLabel(dashboard.receiver, cameraConnectHost),
             )
             ProjectStatusLine(
-                label = "接收状态",
+                label = "\u63a5\u6536\u72b6\u6001",
                 value = receiverPhaseLabel(dashboard.receiver.phase),
             )
         }

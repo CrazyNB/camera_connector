@@ -5,11 +5,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
@@ -47,8 +49,8 @@ data class PhotoMetadata(
         focalLength?.let { "焦距" to it },
         exposureBias?.let { "曝光补偿" to it },
         dimensions?.let { "像素尺寸" to it },
-        whiteBalance?.let { "白平衡" to it },
-        flash?.let { "闪光灯" to it },
+        whiteBalance?.let { "\u767d\u5e73\u8861" to it },
+        flash?.let { "\u95ea\u5149\u706f" to it },
         colorSpace?.let { "色彩空间" to it },
         orientation?.let { "方向" to it },
     )
@@ -243,6 +245,7 @@ fun loadPreviewSampleJson(
     val scale = (targetMax.toFloat() / maxOf(sourceWidth, sourceHeight).toFloat()).coerceAtMost(1f)
     val sampleWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
     val sampleHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
+    val imageDataUrl = bitmapJpegDataUrl(bitmap)
     val luma = JSONArray()
     for (y in 0 until sampleHeight) {
         val sourceY = (y * sourceHeight / sampleHeight).coerceIn(0, sourceHeight - 1)
@@ -255,6 +258,7 @@ fun loadPreviewSampleJson(
         .put("width", sampleWidth)
         .put("height", sampleHeight)
         .put("luma", luma)
+        .put("image_data_url", imageDataUrl ?: JSONObject.NULL)
         .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         .toString()
 }
@@ -264,8 +268,16 @@ private fun unsupportedPreviewSampleJson(location: String?): String =
         .put("width", 0)
         .put("height", 0)
         .put("luma", JSONArray())
+        .put("image_data_url", JSONObject.NULL)
         .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         .toString()
+
+private fun bitmapJpegDataUrl(bitmap: Bitmap): String? =
+    runCatching {
+        val output = ByteArrayOutputStream()
+        check(bitmap.compress(Bitmap.CompressFormat.JPEG, MODEL_EVALUATION_PREVIEW_JPEG_QUALITY, output))
+        "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+    }.getOrNull()
 
 private fun pixelLuma(pixel: Int): Int {
     val red = pixel shr 16 and 0xff
@@ -303,7 +315,7 @@ fun loadPhotoMetadata(context: Context, location: String?): PhotoMetadata? {
                     if (focal35mm.isNullOrBlank()) {
                         focalText
                     } else {
-                        "$focalText（等效 ${focal35mm} mm）"
+                        "$focalText\uff08\u7b49\u6548 ${focal35mm} mm\uff09"
                     }
                 },
                 exposureBias = readSignedDoubleAttribute(exif, ExifInterface.TAG_EXPOSURE_BIAS_VALUE)?.let {
@@ -522,13 +534,13 @@ private fun formatWhiteBalance(value: Int): String? = when (value) {
 
 private fun formatFlash(value: Int): String? = when {
     value < 0 -> null
-    value and 0x1 == 0x1 -> "已闪光"
-    else -> "未闪光"
+    value and 0x1 == 0x1 -> "\u5df2\u95ea\u5149"
+    else -> "\u672a\u95ea\u5149"
 }
 
 private fun formatColorSpace(value: Int): String? = when (value) {
     1 -> "sRGB"
-    0xffff -> "未校准"
+    0xffff -> "\u672a\u6821\u51c6"
     else -> null
 }
 
@@ -1055,6 +1067,7 @@ internal fun isJpegPreviewLocation(location: String?): Boolean {
 private const val PREVIEW_MAX_DIMENSION_PX = 512
 private const val PREVIEW_DISPLAY_MAX_DIMENSION_PX = 2560
 private const val PREVIEW_SCORE_SAMPLE_MAX_DIMENSION_PX = 160
+private const val MODEL_EVALUATION_PREVIEW_JPEG_QUALITY = 82
 private const val PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = 100
 private const val PREVIEW_THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 32 * 1024 * 1024
 private const val PERSISTENT_THUMBNAIL_JPEG_QUALITY = 86

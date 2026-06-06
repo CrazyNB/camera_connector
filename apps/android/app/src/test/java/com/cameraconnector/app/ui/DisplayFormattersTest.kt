@@ -1,10 +1,10 @@
 package com.cameraconnector.app.ui
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import com.cameraconnector.app.core.PublishQueueState
 import java.time.Instant
 import java.time.ZoneId
-import com.cameraconnector.app.core.PublishQueueState
+import org.junit.Assert.assertEquals
+import org.junit.Test
 
 class DisplayFormattersTest {
     @Test

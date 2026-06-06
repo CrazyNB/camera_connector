@@ -31,20 +31,20 @@ impl ModelProviderKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelSendMode {
     PreviewOnly,
-    ReviewImage,
+    DetailImage,
 }
 
 impl ModelSendMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PreviewOnly => "preview_only",
-            Self::ReviewImage => "review_image",
+            Self::DetailImage => "detail_image",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value {
-            "review_image" => Self::ReviewImage,
+            "detail_image" => Self::DetailImage,
             _ => Self::PreviewOnly,
         }
     }
@@ -259,6 +259,31 @@ pub struct PromptProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptProfileContent {
+    pub shared_preference: String,
+    pub evaluation_instruction: Option<String>,
+    pub burst_selection_instruction: Option<String>,
+    pub project_selection_instruction: Option<String>,
+}
+
+impl PromptProfileContent {
+    pub fn new(shared_preference: impl Into<String>) -> Self {
+        Self {
+            shared_preference: shared_preference.into(),
+            evaluation_instruction: None,
+            burst_selection_instruction: None,
+            project_selection_instruction: None,
+        }
+    }
+}
+
+impl Default for PromptProfileContent {
+    fn default() -> Self {
+        Self::new("")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptProfileVersion {
     pub prompt_version_id: String,
     pub prompt_profile_id: String,
@@ -276,6 +301,7 @@ pub struct ProjectEvaluationSettings {
     pub auto_burst_recommendation_enabled: bool,
     pub project_recommendation_mode: ProjectRecommendationMode,
     pub prompt_profile_id: Option<String>,
+    pub model_provider_settings_id: Option<String>,
     pub scene_profile: SceneProfile,
     pub cv_policy: CvPolicy,
     pub allow_risky_model_selects: bool,
@@ -293,6 +319,7 @@ impl ProjectEvaluationSettings {
             auto_burst_recommendation_enabled: true,
             project_recommendation_mode: ProjectRecommendationMode::Manual,
             prompt_profile_id: None,
+            model_provider_settings_id: None,
             scene_profile: SceneProfile::General,
             cv_policy: CvPolicy::Standard,
             allow_risky_model_selects: false,

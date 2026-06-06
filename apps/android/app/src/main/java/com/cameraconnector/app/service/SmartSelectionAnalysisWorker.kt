@@ -2,39 +2,48 @@ package com.cameraconnector.app.service
 
 import android.content.Context
 import android.util.Log
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
 import com.cameraconnector.app.core.NativeMobileCore
 import com.cameraconnector.app.core.PhotoSortMode
-import com.cameraconnector.app.core.mapInboxAssets
+import com.cameraconnector.app.core.mapProjectAssets
 import com.cameraconnector.app.media.loadPreviewSampleJson
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class SmartSelectionDrainResult(
-    val scoredCount: Int,
+    val assessedCount: Int,
     val recommendedCount: Int,
     val failedCount: Int,
 )
 
 interface SmartSelectionCore {
     fun activeProject(): JSONObject?
-    fun modelProviderSettings(): JSONObject
+    fun modelProviderSettingsList(): JSONArray
     fun projectEvaluationSettings(projectId: String): JSONObject
     fun projectAssetGroupPageJson(
         projectId: String,
-        query: InboxAssetQuery,
+        query: ProjectAssetQuery,
         offset: Int,
         limit: Int,
     ): JSONObject
-    fun scoreAssetGroupPreviewWithProviderConfigured(
+    fun assessAssetGroupPreviewWithProviderConfigured(
         assetGroupId: String,
         sampleJson: String,
-        scorerVersion: String = "local-v1",
+        assessorVersion: String = "technical-v1",
         providerConfigured: Boolean,
     ): JSONObject
     fun drainAnalysisJobsWithProviderConfigured(
         limit: Int = 32,
         providerConfigured: Boolean,
+    ): JSONObject
+    fun recommendBurstGroupWithCandidateVisuals(
+        burstGroupId: String,
+        candidateVisuals: JSONArray,
+    ): JSONObject
+    fun evaluateAssetGroupsWithModelInputs(
+        projectId: String,
+        inputs: JSONArray,
     ): JSONObject
     fun generateProjectRecommendation(projectId: String): JSONObject
 }
@@ -43,24 +52,24 @@ class NativeSmartSelectionCore(
     private val core: NativeMobileCore,
 ) : SmartSelectionCore {
     override fun activeProject(): JSONObject? = core.activeProject()
-    override fun modelProviderSettings(): JSONObject = core.modelProviderSettings()
+    override fun modelProviderSettingsList(): JSONArray = core.modelProviderSettingsList()
     override fun projectEvaluationSettings(projectId: String): JSONObject = core.projectEvaluationSettings(projectId)
     override fun projectAssetGroupPageJson(
         projectId: String,
-        query: InboxAssetQuery,
+        query: ProjectAssetQuery,
         offset: Int,
         limit: Int,
     ): JSONObject = core.projectAssetGroupPageJson(projectId, query, offset, limit)
 
-    override fun scoreAssetGroupPreviewWithProviderConfigured(
+    override fun assessAssetGroupPreviewWithProviderConfigured(
         assetGroupId: String,
         sampleJson: String,
-        scorerVersion: String,
+        assessorVersion: String,
         providerConfigured: Boolean,
-    ): JSONObject = core.scoreAssetGroupPreviewWithProviderConfigured(
+    ): JSONObject = core.assessAssetGroupPreviewWithProviderConfigured(
         assetGroupId = assetGroupId,
         sampleJson = sampleJson,
-        scorerVersion = scorerVersion,
+        assessorVersion = assessorVersion,
         providerConfigured = providerConfigured,
     )
 
@@ -68,6 +77,26 @@ class NativeSmartSelectionCore(
         limit: Int,
         providerConfigured: Boolean,
     ): JSONObject = core.drainAnalysisJobsWithProviderConfigured(limit, providerConfigured)
+
+    override fun recommendBurstGroupWithCandidateVisuals(
+        burstGroupId: String,
+        candidateVisuals: JSONArray,
+    ): JSONObject = core.recommendBurstGroupWithCandidateVisuals(burstGroupId, candidateVisuals)
+
+    override fun evaluateAssetGroupsWithModelInputs(
+        projectId: String,
+        inputs: JSONArray,
+    ): JSONObject =
+        core.evaluateAssetGroupsWithModelInputs(
+            projectId = projectId,
+            inputs = (0 until inputs.length()).map { index ->
+                val input = inputs.getJSONObject(index)
+                com.cameraconnector.app.core.ModelEvaluationPreviewInput(
+                    assetGroupId = input.getString("asset_group_id"),
+                    sampleJson = input.getJSONObject("sample").toString(),
+                )
+            },
+        )
 
     override fun generateProjectRecommendation(projectId: String): JSONObject =
         core.generateProjectRecommendation(projectId)
@@ -85,92 +114,269 @@ class SmartSelectionAnalysisWorker(
         core: NativeMobileCore,
     ) : this(context, NativeSmartSelectionCore(core))
 
-    fun drainOnce(maxScores: Int = DEFAULT_MAX_SCORES): SmartSelectionDrainResult {
+    fun drainOnce(maxAssessments: Int = DEFAULT_MAX_ASSESSMENTS): SmartSelectionDrainResult {
         val projectId = core.activeProject()
             ?.optString("project_id")
             ?.takeIf { it.isNotBlank() }
-            ?: return SmartSelectionDrainResult(scoredCount = 0, recommendedCount = 0, failedCount = 0)
-        core.projectEvaluationSettings(projectId)
-        val providerConfigured = core.modelProviderSettings().optBoolean("configured", false)
-        val assets = mapInboxAssets(
+            ?: return SmartSelectionDrainResult(assessedCount = 0, recommendedCount = 0, failedCount = 0)
+        val projectSettings = core.projectEvaluationSettings(projectId)
+        val providerConfigured = providerConfiguredForProject(
+            projectSettings = projectSettings,
+            providerOptions = core.modelProviderSettingsList(),
+        )
+        val visualBurstRecommendationEnabled =
+            shouldRunVisualBurstRecommendation(projectSettings, providerConfigured)
+        val uploadAutoEvaluationEnabled =
+            shouldRunUploadAutoEvaluation(projectSettings, providerConfigured)
+        val assets = mapProjectAssets(
             core.projectAssetGroupPageJson(
                 projectId = projectId,
-                query = InboxAssetQuery(sort = PhotoSortMode.LatestReceived),
+                query = ProjectAssetQuery(sort = PhotoSortMode.LatestReceived),
                 offset = 0,
                 limit = QUERY_LIMIT,
             ),
         )
-        var scoredCount = 0
+        var assessedCount = 0
         var failedCount = 0
+        val sampleJsonByGroupId = mutableMapOf<String, String>()
+        val assessedGroupIds = mutableSetOf<String>()
+        val touchedBurstIds = mutableSetOf<String>()
 
         for (asset in assets) {
-            if (scoredCount >= maxScores) {
+            if (assessedCount >= maxAssessments) {
                 break
             }
-            if (!asset.needsLocalScore()) {
+            if (!asset.needsLocalAssessment()) {
                 continue
             }
             runCatching {
                 val sampleJson = previewSampleLoader(context, asset.previewLocation)
-                core.scoreAssetGroupPreviewWithProviderConfigured(
+                sampleJsonByGroupId[asset.id] = sampleJson
+                val deferBurstModelEvaluation =
+                    visualBurstRecommendationEnabled &&
+                        asset.burst?.burstGroupId?.isNotBlank() == true
+                core.assessAssetGroupPreviewWithProviderConfigured(
                     assetGroupId = asset.id,
                     sampleJson = sampleJson,
-                    providerConfigured = providerConfigured,
+                    providerConfigured = providerConfigured && !deferBurstModelEvaluation,
                 )
-                scoredCount += 1
+                assessedGroupIds += asset.id
+                asset.burst?.burstGroupId?.takeIf { it.isNotBlank() }?.let(touchedBurstIds::add)
+                assessedCount += 1
             }.onFailure { error ->
                 failedCount += 1
-                Log.w(LOG_TAG, "smart selection scoring failed group=${asset.id}", error)
+                Log.w(LOG_TAG, "smart selection assessment failed group=${asset.id}", error)
             }
         }
 
         var recommendedCount = 0
-        if (scoredCount > 0) {
-            runCatching {
-                recommendedCount = core.drainAnalysisJobsWithProviderConfigured(
-                    providerConfigured = providerConfigured,
-                ).optInt("completed_count")
-            }.onFailure { error ->
-                failedCount += 1
-                Log.w(LOG_TAG, "smart selection analysis queue drain failed", error)
+        runCatching {
+            recommendedCount = core.drainAnalysisJobsWithProviderConfigured(
+                providerConfigured = providerConfigured,
+            ).optInt("completed_count")
+        }.onFailure { error ->
+            failedCount += 1
+            Log.w(LOG_TAG, "smart selection analysis queue drain failed", error)
+        }
+
+        if (visualBurstRecommendationEnabled) {
+            val assetsByBurst = assets
+                .mapNotNull { asset ->
+                    asset.burst?.burstGroupId
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { burstGroupId -> burstGroupId to asset }
+                }
+                .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+            for (burstGroupId in touchedBurstIds) {
+                val members = assetsByBurst[burstGroupId].orEmpty()
+                if (members.size < 2) {
+                    continue
+                }
+                runCatching {
+                    val candidateVisuals = burstCandidateVisuals(
+                        members = members,
+                        sampleJsonByGroupId = sampleJsonByGroupId,
+                        context = context,
+                        previewSampleLoader = previewSampleLoader,
+                    )
+                    if (candidateVisuals.length() >= 2) {
+                        val recommendation = core.recommendBurstGroupWithCandidateVisuals(
+                            burstGroupId,
+                            candidateVisuals,
+                        )
+                        if (
+                            uploadAutoEvaluationEnabled &&
+                            recommendation.optString("status").equals("pending", ignoreCase = true)
+                        ) {
+                            val topCandidateIds = recommendationCandidateIds(recommendation)
+                            val evaluationInputs = modelEvaluationInputsForIds(
+                                candidateIds = topCandidateIds,
+                                members = members,
+                                sampleJsonByGroupId = sampleJsonByGroupId,
+                                context = context,
+                                previewSampleLoader = previewSampleLoader,
+                            )
+                            if (evaluationInputs.length() > 0) {
+                                core.evaluateAssetGroupsWithModelInputs(projectId, evaluationInputs)
+                                val finalVisuals = burstCandidateVisuals(
+                                    members = members.filter { it.id in topCandidateIds.toSet() },
+                                    sampleJsonByGroupId = sampleJsonByGroupId,
+                                    context = context,
+                                    previewSampleLoader = previewSampleLoader,
+                                )
+                                if (finalVisuals.length() > 0) {
+                                    core.recommendBurstGroupWithCandidateVisuals(burstGroupId, finalVisuals)
+                                }
+                            }
+                        }
+                        recommendedCount += 1
+                    }
+                }.onFailure { error ->
+                    failedCount += 1
+                    Log.w(LOG_TAG, "smart selection visual burst recommendation failed burst=$burstGroupId", error)
+                }
             }
         }
 
         return SmartSelectionDrainResult(
-            scoredCount = scoredCount,
+            assessedCount = assessedCount,
             recommendedCount = recommendedCount,
             failedCount = failedCount,
         )
     }
 
     private companion object {
-        const val DEFAULT_MAX_SCORES = 12
+        const val DEFAULT_MAX_ASSESSMENTS = 12
         const val QUERY_LIMIT = 128
         const val LOG_TAG = "SmartSelectionAnalysis"
     }
 }
 
-private fun InboxAsset.needsLocalScore(): Boolean {
+private fun shouldRunVisualBurstRecommendation(
+    projectSettings: JSONObject,
+    providerConfigured: Boolean,
+): Boolean =
+    providerConfigured &&
+        projectSettings.optBoolean("model_evaluation_enabled", false) &&
+        projectSettings.optBoolean("auto_burst_recommendation_enabled", true)
+
+private fun shouldRunUploadAutoEvaluation(
+    projectSettings: JSONObject,
+    providerConfigured: Boolean,
+): Boolean =
+    providerConfigured &&
+        projectSettings.optBoolean("model_evaluation_enabled", false) &&
+        projectSettings.optBoolean("auto_evaluate_on_upload", false)
+
+private fun burstCandidateVisuals(
+    members: List<ProjectAsset>,
+    sampleJsonByGroupId: MutableMap<String, String>,
+    context: Context?,
+    previewSampleLoader: (Context?, String?) -> String,
+): JSONArray {
+    val candidateVisuals = JSONArray()
+    for (member in members) {
+        val sampleJson = sampleJsonByGroupId.getOrPut(member.id) {
+            previewSampleLoader(context, member.previewLocation)
+        }
+        val imageDataUrl = imageDataUrlFromSample(sampleJson) ?: continue
+        candidateVisuals.put(
+            JSONObject()
+                .put("asset_group_id", member.id)
+                .put("image_data_url", imageDataUrl),
+        )
+    }
+    return candidateVisuals
+}
+
+private fun imageDataUrlFromSample(sampleJson: String): String? =
+    runCatching {
+        JSONObject(sampleJson)
+            .optString("image_data_url")
+            .takeIf { it.isNotBlank() && it != "null" }
+    }.getOrNull()
+
+private fun recommendationCandidateIds(recommendation: JSONObject): List<String> {
+    val ids = mutableListOf<String>()
+    fun append(arrayName: String) {
+        val array = recommendation.optJSONArray(arrayName) ?: return
+        for (index in 0 until array.length()) {
+            array.optString(index).takeIf { it.isNotBlank() }?.let(ids::add)
+        }
+    }
+    append("selected_asset_group_ids")
+    append("candidate_asset_group_ids")
+    return ids.distinct()
+}
+
+private fun modelEvaluationInputsForIds(
+    candidateIds: List<String>,
+    members: List<ProjectAsset>,
+    sampleJsonByGroupId: MutableMap<String, String>,
+    context: Context?,
+    previewSampleLoader: (Context?, String?) -> String,
+): JSONArray {
+    val memberById = members.associateBy { it.id }
+    val inputs = JSONArray()
+    for (candidateId in candidateIds.distinct()) {
+        val member = memberById[candidateId] ?: continue
+        val sampleJson = sampleJsonByGroupId.getOrPut(member.id) {
+            previewSampleLoader(context, member.previewLocation)
+        }
+        inputs.put(
+            JSONObject()
+                .put("asset_group_id", member.id)
+                .put("sample", JSONObject(sampleJson)),
+        )
+    }
+    return inputs
+}
+
+fun providerConfiguredForProject(
+    projectSettings: JSONObject,
+    providerOptions: JSONArray,
+): Boolean {
+    val selectedId = projectSettings.optString("model_provider_settings_id")
+        .takeIf { it.isNotBlank() && it != "null" }
+    if (selectedId != null) {
+        for (index in 0 until providerOptions.length()) {
+            val option = providerOptions.optJSONObject(index) ?: continue
+            val settingsId = option.optString("settings_id").ifBlank { "global" }
+            if (settingsId == selectedId) {
+                return option.isReadyModelProvider()
+            }
+        }
+        return false
+    }
+    return false
+}
+
+private fun JSONObject.isReadyModelProvider(): Boolean {
+    if (!optBoolean("configured", false)) {
+        return false
+    }
+    return when (optString("provider_kind").lowercase()) {
+        "openai", "custom" -> optBoolean("api_key_configured", false)
+        "imported" -> true
+        else -> false
+    }
+}
+
+private fun ProjectAsset.needsLocalAssessment(): Boolean {
     val currentModelStatus = this.modelStatus?.lowercase()
     val technicalStatus = this.technicalGateStatus?.lowercase()
-    val legacyStatus = quality?.analysisStatus?.lowercase()
     if (currentModelStatus == "ready" || currentModelStatus == "skipped") {
         return false
     }
     if (
-        technicalStatus in listOf("pass", "warn", "needs_review", "reject", "unsupported") &&
+        technicalStatus in listOf("pass", "warn", "inconclusive", "reject", "unsupported") &&
         currentModelStatus != null
     ) {
         return currentModelStatus == "pending" ||
             currentModelStatus == "running" ||
             currentModelStatus == "failed"
     }
-    return legacyStatus == null ||
-        legacyStatus == "pending" ||
-        legacyStatus == "analyzing" ||
-        legacyStatus == "stale" ||
-        legacyStatus == "failed" ||
-        currentModelStatus == null ||
+    return currentModelStatus == null ||
         currentModelStatus == "pending" ||
         currentModelStatus == "running" ||
         currentModelStatus == "failed"

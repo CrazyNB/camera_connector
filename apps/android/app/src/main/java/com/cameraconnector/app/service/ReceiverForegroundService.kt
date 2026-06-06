@@ -62,7 +62,7 @@ class ReceiverForegroundService : Service() {
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf(startId)
                     } else {
-                        startForeground(NOTIFICATION_ID, notification("接收服务运行中"))
+                        startForeground(NOTIFICATION_ID, notification("\u63a5\u6536\u670d\u52a1\u8fd0\u884c\u4e2d"))
                     }
                 }
                 START_NOT_STICKY
@@ -151,13 +151,13 @@ class ReceiverForegroundService : Service() {
                     }
                     if (
                         smartSelection != null &&
-                        (smartSelection.scoredCount > 0 ||
+                        (smartSelection.assessedCount > 0 ||
                             smartSelection.recommendedCount > 0 ||
                             smartSelection.failedCount > 0)
                     ) {
                         Log.i(
                             LOG_TAG,
-                            "smart selection drained scored=${smartSelection.scoredCount} recommended=${smartSelection.recommendedCount} failed=${smartSelection.failedCount}",
+                            "smart selection drained assessed=${smartSelection.assessedCount} recommended=${smartSelection.recommendedCount} failed=${smartSelection.failedCount}",
                         )
                     }
                 }.onFailure { error ->
@@ -180,7 +180,7 @@ class ReceiverForegroundService : Service() {
         }.onSuccess { result ->
             Log.i(
                 LOG_TAG,
-                "publish retry drained completed=${result.first.completedCount} failed=${result.first.failedCount} analysis=${result.second.optInt("completed_count")} smart_scored=${result.third.scoredCount} smart_recommended=${result.third.recommendedCount}",
+                "publish retry drained completed=${result.first.completedCount} failed=${result.first.failedCount} analysis=${result.second.optInt("completed_count")} smart_assessed=${result.third.assessedCount} smart_recommended=${result.third.recommendedCount}",
             )
         }.onFailure { error ->
             Log.e(LOG_TAG, "publish retry drain failed", error)
@@ -191,10 +191,10 @@ class ReceiverForegroundService : Service() {
     }
 
     private fun createPublishWorker(core: NativeMobileCore): AndroidPublishWorker {
-        val outputDir = File(filesDir, "inbox").also { it.mkdirs() }
+        val outputDir = File(filesDir, "output").also { it.mkdirs() }
         val storageGateway = AndroidStorageGateway(this)
         val publishTarget = ResolvingPublishTarget {
-            val target = storageGateway.selectedInboxUri()
+            val target = storageGateway.selectedOutputUri()
                 ?.let { uri -> SafPublishTarget(AndroidDocumentTreeStore(this, uri)) }
                 ?: FilePublishTarget(outputDir)
             ThumbnailingPublishTarget(this, target)
@@ -207,11 +207,16 @@ class ReceiverForegroundService : Service() {
 
     private fun drainAnalysisJobsWithProviderState(core: NativeMobileCore): JSONObject {
         val smartSelectionCore = NativeSmartSelectionCore(core)
-        smartSelectionCore.activeProject()
+        val projectSettings = smartSelectionCore.activeProject()
             ?.optString("project_id")
             ?.takeIf { it.isNotBlank() }
             ?.let { projectId -> smartSelectionCore.projectEvaluationSettings(projectId) }
-        val providerConfigured = smartSelectionCore.modelProviderSettings().optBoolean("configured", false)
+        val providerConfigured = projectSettings?.let { settings ->
+            providerConfiguredForProject(
+                projectSettings = settings,
+                providerOptions = smartSelectionCore.modelProviderSettingsList(),
+            )
+        } ?: false
         return smartSelectionCore.drainAnalysisJobsWithProviderConfigured(providerConfigured = providerConfigured)
     }
 
@@ -223,7 +228,7 @@ class ReceiverForegroundService : Service() {
     private fun notification(message: String) =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("相机连接器")
+            .setContentTitle("\u76f8\u673a\u8fde\u63a5\u5668")
             .setContentText(message)
             .setContentIntent(openAppPendingIntent())
             .setOngoing(true)
@@ -257,7 +262,7 @@ class ReceiverForegroundService : Service() {
 
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "接收服务状态",
+            "\u63a5\u6536\u670d\u52a1\u72b6\u6001",
             NotificationManager.IMPORTANCE_LOW,
         )
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

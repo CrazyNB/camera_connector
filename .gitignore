@@ -1,4 +1,5 @@
 /target/
+.superpowers/
 **/*.tmp
 *.log
 apps/android/.gradle/

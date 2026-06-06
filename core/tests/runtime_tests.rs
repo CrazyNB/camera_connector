@@ -196,6 +196,41 @@ fn read_receiver_runtime_status_marks_dead_running_listener_stopped() {
 }
 
 #[test]
+fn read_receiver_runtime_status_marks_dead_stopping_listener_stopped() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral port should bind");
+    let local_addr = listener
+        .local_addr()
+        .expect("listener address should exist");
+    drop(listener);
+
+    write_receiver_runtime_status(
+        temp_dir.path(),
+        &ReceiverRuntimeStatus {
+            phase: ReceiverRuntimePhase::Stopping,
+            protocol: Some(PushProtocol::Ftp),
+            auth_mode: ReceiverAuthMode::Anonymous,
+            local_addr: Some(local_addr),
+            output_dir: Some(temp_dir.path().to_path_buf()),
+            state_dir: Some(temp_dir.path().to_path_buf()),
+            account_count: 0,
+            message: None,
+        },
+    )
+    .expect("runtime status should write");
+
+    let status = read_receiver_runtime_status(temp_dir.path())
+        .expect("runtime status should read")
+        .expect("runtime status should exist");
+
+    assert_eq!(status.phase, ReceiverRuntimePhase::Stopped);
+    assert_eq!(
+        status.message.as_deref(),
+        Some("receiver process is not listening")
+    );
+}
+
+#[test]
 fn receiver_runtime_status_is_stored_in_sqlite() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
 

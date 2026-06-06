@@ -4,7 +4,7 @@ Record every real-camera push test here. Unknown is acceptable until a real smok
 
 | Vendor | Model | Firmware | Network Mode | FTP Push | SFTP Push | Passive FTP | RAW | JPEG | Video | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Pass | Pass | Pass | Pass | FTP receiver `192.168.137.1:2121`; anonymous login; flat inbox validated with RAW+JPEG batch and MOV upload |
+| Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Pass | Pass | Pass | Pass | FTP receiver `192.168.137.1:2121`; anonymous login; flat output validated with RAW+JPEG batch and MOV upload |
 | Canon | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 | Sony | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
 | Fujifilm | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Needs push test |
@@ -67,7 +67,7 @@ RAW+JPEG grouping:
 SAF publish:
 Project photos visibility:
 Photo detail visibility:
-Project inbox visibility:
+Project photo visibility:
 Transfer record visibility:
 Publish queue recovery:
 Diagnostics path:
@@ -92,7 +92,7 @@ Port: 2121
 Authentication: anonymous
 Passive mode: Pass
 Camera folder setting: default/root
-Local storage policy: flat inbox, original path kept in transfer log
+Local storage policy: flat output, original path kept in transfer log
 JPEG upload: Pass, DSC_2463.JPG, DSC_2465.JPG, DSC_2466.JPG, DSC_2467.JPG
 RAW upload: Pass, DSC_2463.NEF, DSC_2465.NEF, DSC_2466.NEF, DSC_2467.NEF
 Video upload: Not tested
@@ -101,7 +101,7 @@ Observed FTP commands: passive FTP upload via receiver implementation
 Notes: Files landed in C:\Users\hxn\Pictures\CameraConnector while control connection remained established.
 ```
 
-## 2026-05-21 Nikon Z5_2 FTP Push Batch And Flat Inbox
+## 2026-05-21 Nikon Z5_2 FTP Push Batch And Flat Output
 
 ```text
 Date: 2026-05-21
@@ -119,8 +119,8 @@ Authentication: anonymous
 Passive mode: Pass
 Camera folder setting: root plus BB
 Local storage policy: Pass; 0 local subdirectories created; BB/* original paths recorded in transfer-log.jsonl
-JPEG upload: Pass, 86 JPG files in receiver inbox
-RAW upload: Pass, 86 NEF files in receiver inbox
+JPEG upload: Pass, 86 JPG files in receiver output
+RAW upload: Pass, 86 NEF files in receiver output
 Video upload: Pass, DSC_2553.MOV, 207,961,609 bytes
 Large file stability: Pass for 173 completed transfer records totaling 2,824,918,361 bytes
 Observed FTP commands: passive FTP upload via receiver implementation

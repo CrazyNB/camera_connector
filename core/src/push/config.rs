@@ -112,12 +112,14 @@ pub struct CameraConnectorConfig {
     pub accounts: BTreeMap<String, ReceiverAccountConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_project_id: Option<String>,
-    #[serde(default)]
-    pub model_provider: ModelProviderSettingsConfig,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_providers: Vec<ModelProviderSettingsConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelProviderSettingsConfig {
+    #[serde(default = "default_model_provider_settings_id")]
+    pub settings_id: String,
     #[serde(default)]
     pub provider_kind: String,
     #[serde(default)]
@@ -145,6 +147,7 @@ pub struct ModelProviderSettingsConfig {
 impl Default for ModelProviderSettingsConfig {
     fn default() -> Self {
         Self {
+            settings_id: default_model_provider_settings_id(),
             provider_kind: "none".to_string(),
             provider_label: String::new(),
             base_url: String::new(),
@@ -158,6 +161,10 @@ impl Default for ModelProviderSettingsConfig {
             updated_at_ms: 0,
         }
     }
+}
+
+fn default_model_provider_settings_id() -> String {
+    "global".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

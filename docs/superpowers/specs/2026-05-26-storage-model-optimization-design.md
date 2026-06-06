@@ -16,7 +16,7 @@ The current core already has the right product rules:
 - Transfer records keep original camera paths and virtual display paths.
 - `StoredObjectLocation` can represent `local_path`, `document_uri`, `media_uri`, and `photo_asset`.
 - Android can persist a selected SAF directory label, but native smoke imports still write to app-private storage.
-- The current flat inbox is good for one shoot, but multiple shooting projects become hard to distinguish without a first-class project model.
+- The current flat output folder is good for one shoot, but multiple shooting projects become hard to distinguish without a first-class project model.
 
 The original gap was that `LocalFileSink` acted as the real write path. That assumed final storage behaved like a local filesystem with seek, rename, path-based existence checks, and direct scanning. Those assumptions do not hold uniformly for SAF, MediaStore, Photos, or remote object stores, so the optimized path stages receiver writes before final object publishing.
 
@@ -49,7 +49,7 @@ These product rules must not change:
 - Duplicate uploads are preserved without overwriting earlier completed files.
 - RAW/JPEG/video grouping is based on normalized filename stem.
 - Transfer rows expose display source, username, remote address, virtual display path, size, and failure text.
-- Receiver metadata lives outside the user-facing inbox.
+- Receiver metadata lives outside the user-facing output location.
 - The final storage location can stay flat while projects and virtual paths provide user-facing organization.
 
 ## Target Components
@@ -112,7 +112,7 @@ Responsibilities:
 - Create, update, archive, and list projects.
 - Track the active project used by every new import.
 - Require an explicit selected user project before receiving uploads.
-- Provide the required dashboard and inbox scope for viewing assets.
+- Provide the required project dashboard and project asset scope for viewing assets.
 - Provide project-level output preferences when needed.
 - Support manual reassignment of assets or groups from one project to another.
 - Keep project organization independent from physical storage paths.
@@ -130,7 +130,6 @@ Project
   updated_at_ms
   archived_at_ms
   default_output_target_id
-  default_strategy_profile_id
 ```
 
 Projects are long-lived user containers such as "2026-05 Wedding", "Studio Product Shoot", or "Weekend Street Walk". They should appear in the UI as the first-level organization above imports and asset groups. Uploaded photos must not exist outside a project.
@@ -158,7 +157,7 @@ Responsibilities:
 - Materialize completed transfer records into asset rows.
 - Support dashboard pagination, filtering, grouping, duplicates, and facet counts.
 - Support project filters as first-class query dimensions.
-- Require project-scoped dashboard and inbox queries for asset grids.
+- Require project-scoped dashboard and asset queries for asset grids.
 - Avoid rebuilding every asset group from the full transfer log on each poll.
 - Keep `transfer-log.jsonl` as the audit trail.
 
@@ -175,7 +174,7 @@ Core tables:
 - `connected_devices`
 - `receiver_status`
 
-There is intentionally no `import_sessions` table. A receive/import event is represented by project-scoped `transfers`, `assets`, and `asset_groups`; every uploaded photo must belong to a project before it appears in user-facing views.
+There is intentionally no import_sessions table. A receive/import event is represented by project-scoped `transfers`, `assets`, and `asset_groups`; every uploaded photo must belong to a project before it appears in user-facing views.
 
 Asset model:
 
@@ -186,7 +185,6 @@ assets
   group_id
   transfer_id
   group_role
-  group_rank
   media_kind
   format
   original_filename
@@ -237,9 +235,9 @@ asset_groups
 Later feature tables:
 
 - `burst_groups`
-- `quality_scores`
+- `technical_assessments`
+- `model_evaluations`
 - `selection_recommendations`
-- `strategy_profiles`
 
 ## Data Model Direction
 
@@ -346,8 +344,8 @@ This milestone should land the durable architecture in one pass:
 - Continue writing `transfer-log.jsonl` as an audit log.
 - Record `final_location` for all new records, including local paths.
 - Add cleanup for stale incomplete temp files.
-- Make dashboard and inbox queries project-scoped.
-- Require an explicit user-created project before imports. If no active project exists, receiving/upload indexing fails with a clear "create and select a project first" error instead of creating a system Inbox fallback.
+- Make dashboard and asset queries project-scoped.
+- Require an explicit user-created project before imports. If no active project exists, receiving/upload indexing fails with a clear "create and select a project first" error instead of creating a system project fallback.
 
 ### Platform checkpoints
 
@@ -367,9 +365,9 @@ After the foundation schema exists, platform capabilities can be enabled behind 
 The same SQLite foundation should leave room for later analysis features:
 
 - Burst groups.
-- Quality scores.
+- Technical assessments and model evaluations.
 - Selection recommendations.
-- Strategy profiles.
+- User marks and model recommendation settings.
 
 ## Testing Strategy
 
@@ -382,7 +380,7 @@ Unit tests:
 - Asset index grouping, paging, filters, and duplicate counts.
 - Project creation, archive, and reassignment.
 - Receiver start behavior when no active project exists.
-- Dashboard and inbox queries requiring a project id.
+- Dashboard and asset queries requiring a project id.
 - Moving assets or groups between projects.
 
 Integration tests:
@@ -422,7 +420,7 @@ The storage model optimization is accepted when:
 - A completed upload whose final publish fails remains recoverable and retryable.
 - Users can create/select projects and start imports into the active project.
 - Every uploaded asset is associated with a project.
-- Dashboard and inbox asset views require a selected project.
+- Dashboard and project asset views require a selected project.
 - Android exposes the active project in the main views and provides a project switch/create path.
 - Dashboard behavior remains familiar while adding project filters.
 

@@ -81,7 +81,7 @@ RAW+JPEG grouping:
 SAF publish:
 Project photos visibility:
 Photo detail visibility:
-Project inbox visibility:
+Project asset visibility:
 Transfer record visibility:
 Publish queue recovery:
 Diagnostics path: $OutputDir

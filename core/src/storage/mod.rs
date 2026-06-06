@@ -9,20 +9,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::media_metadata::extract_capture_time_ms;
 use crate::{
-    group_received_assets, normalized_review_queue_key, review_unit_flags, AnalysisEntityType,
-    AnalysisJob, AnalysisJobStatus, AnalysisJobType, AssetFacetCount, AssetGroupPage,
-    AssetGroupQuery, AssetGroupSort, AssetGroupSummary, AssetUserMarks, BurstGroup,
-    ConnectedDevice, CvPolicy, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger,
-    EvaluationRunType, ImportSource, ImporterError, ModelEvaluation, ModelEvaluationStatus,
-    ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind, NewAnalysisJob, ObjectFormat,
-    ProjectEvaluationSettings, ProjectRecommendationMode, PromptProfile, PromptProfileVersion,
-    PromptScope, PushProtocol, QualityAnalysisStatus, QualityScore, ReceivedAsset,
-    ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetQualitySummary,
+    group_received_assets, AnalysisEntityType, AnalysisJob, AnalysisJobStatus, AnalysisJobType,
+    AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSort, AssetGroupSummary,
+    AssetUserMarks, BurstGroup, BurstGroupingProfile, ConnectedDevice, CvPolicy, EvaluationRun,
+    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource, ImporterError,
+    ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind,
+    ModelProviderKind, NewAnalysisJob, ObjectFormat, ProjectEvaluationSettings,
+    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
+    PromptScope, PushProtocol, ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup,
     ReceivedAssetTechnicalDefectSummary, ReceiverAccountConfig, ReceiverAuthMode,
-    ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, ReviewQueueSummary, SceneProfile,
-    ScopedSelectionRecommendation, SelectionRecommendation, SelectionRecommendationScope,
-    SelectionRecommendationStatus, SelectionSource, SignalScore, StoredObjectLocation,
-    StrategyProfile, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, SceneProfile, SelectionRecommendation,
+    SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
+    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus,
     TechnicalDefectFlag, TechnicalGateStatus, TransferRecord, TransferStatus,
 };
 
@@ -47,7 +45,6 @@ pub struct Project {
     pub updated_at_ms: i64,
     pub archived_at_ms: Option<i64>,
     pub default_output_target_id: Option<String>,
-    pub default_strategy_profile_id: Option<String>,
 }
 
 impl Project {
@@ -275,7 +272,6 @@ impl SqliteStore {
         let store = Self { db_path: path };
         store.with_connection(|connection| {
             initialize_schema(connection)?;
-            seed_builtin_strategy_profiles(connection)?;
             seed_builtin_prompt_profiles(connection)
         })?;
         Ok(store)
@@ -298,14 +294,13 @@ impl SqliteStore {
             updated_at_ms: now,
             archived_at_ms: None,
             default_output_target_id: None,
-            default_strategy_profile_id: None,
         };
         self.with_connection(|connection| {
             connection.execute(
                 "INSERT INTO projects (
                     project_id, name, slug, status, created_at_ms, updated_at_ms,
-                    archived_at_ms, default_output_target_id, default_strategy_profile_id
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    archived_at_ms, default_output_target_id
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     project.project_id,
                     project.name,
@@ -315,7 +310,6 @@ impl SqliteStore {
                     project.updated_at_ms,
                     project.archived_at_ms,
                     project.default_output_target_id,
-                    project.default_strategy_profile_id,
                 ],
             )?;
             save_project_evaluation_settings_for_connection(
@@ -330,7 +324,7 @@ impl SqliteStore {
         self.with_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
-                        archived_at_ms, default_output_target_id, default_strategy_profile_id
+                        archived_at_ms, default_output_target_id
                  FROM projects
                  ORDER BY updated_at_ms DESC, name ASC",
             )?;
@@ -759,7 +753,6 @@ impl SqliteStore {
                         )?;
                     }
                 }
-                refresh_duplicate_info(&transaction, project_id)?;
             }
             transaction.commit()?;
             Ok(())
@@ -785,7 +778,6 @@ impl SqliteStore {
                         if let Some(group_id) = group.group_id.clone() {
                             group.burst =
                                 burst_summary_for_asset_group(connection, project_id, &group_id)?;
-                            group.quality = quality_summary_for_asset_group(connection, &group_id)?;
                             apply_technical_summary(connection, &group_id, &mut group)?;
                             apply_model_evaluation_summary(connection, &group_id, &mut group)?;
                             group.is_model_select = is_model_selected_asset_group(
@@ -1030,47 +1022,6 @@ impl SqliteStore {
         })
     }
 
-    pub fn save_strategy_profile(&self, profile: StrategyProfile) -> Result<StrategyProfile> {
-        self.with_connection(|connection| save_strategy_profile_for_connection(connection, profile))
-    }
-
-    pub fn strategy_profiles(&self) -> Result<Vec<StrategyProfile>> {
-        self.with_connection(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT profile_id, name, built_in, strategy_version, burst_window_ms,
-                        min_group_size, weights_json, thresholds_json, actions_json, llm_json,
-                        updated_at_ms
-                 FROM strategy_profiles
-                 ORDER BY built_in DESC,
-                    CASE profile_id
-                        WHEN 'general' THEN 0
-                        WHEN 'conservative' THEN 1
-                        WHEN 'portrait' THEN 2
-                        WHEN 'action' THEN 3
-                        WHEN 'landscape' THEN 4
-                        ELSE 100
-                    END,
-                    name ASC",
-            )?;
-            let rows = statement.query_map([], strategy_profile_from_row)?;
-            collect_rows(rows)
-        })
-    }
-
-    pub fn save_quality_score(&self, score: QualityScore) -> Result<QualityScore> {
-        self.with_connection(|connection| save_quality_score_for_connection(connection, score))
-    }
-
-    pub fn quality_score(
-        &self,
-        asset_group_id: &str,
-        scorer_version: &str,
-    ) -> Result<Option<QualityScore>> {
-        self.with_connection(|connection| {
-            quality_score_by_key(connection, asset_group_id, scorer_version)
-        })
-    }
-
     pub fn save_technical_assessment(
         &self,
         assessment: TechnicalAssessment,
@@ -1106,28 +1057,6 @@ impl SqliteStore {
         })
     }
 
-    pub fn save_scoped_selection_recommendation(
-        &self,
-        recommendation: ScopedSelectionRecommendation,
-    ) -> Result<ScopedSelectionRecommendation> {
-        self.with_connection(|connection| {
-            save_scoped_selection_recommendation_for_connection(connection, recommendation)
-        })
-    }
-
-    pub fn latest_scoped_selection_recommendation(
-        &self,
-        project_id: &str,
-        scope: SelectionRecommendationScope,
-        subject_id: &str,
-    ) -> Result<Option<ScopedSelectionRecommendation>> {
-        self.with_connection(|connection| {
-            latest_scoped_selection_recommendation_for_connection(
-                connection, project_id, scope, subject_id,
-            )
-        })
-    }
-
     pub fn save_selection_recommendation(
         &self,
         recommendation: SelectionRecommendation,
@@ -1139,43 +1068,14 @@ impl SqliteStore {
 
     pub fn latest_selection_recommendation(
         &self,
-        burst_group_id: &str,
-        strategy_profile_id: &str,
+        project_id: &str,
+        scope: SelectionRecommendationScope,
+        subject_id: &str,
     ) -> Result<Option<SelectionRecommendation>> {
         self.with_connection(|connection| {
             latest_selection_recommendation_for_connection(
-                connection,
-                burst_group_id,
-                strategy_profile_id,
+                connection, project_id, scope, subject_id,
             )
-        })
-    }
-
-    pub fn update_latest_selection_recommendation_status(
-        &self,
-        burst_group_id: &str,
-        strategy_profile_id: &str,
-        status: SelectionRecommendationStatus,
-    ) -> Result<SelectionRecommendation> {
-        self.with_connection(|connection| {
-            let recommendation = latest_selection_recommendation_for_connection(
-                connection,
-                burst_group_id,
-                strategy_profile_id,
-            )?
-            .ok_or_else(|| sqlite_data_error("selection recommendation not found"))?;
-            connection.execute(
-                "UPDATE selection_recommendations
-                 SET status = ?1, updated_at_ms = ?2
-                 WHERE recommendation_id = ?3",
-                params![
-                    status.as_str(),
-                    current_time_ms(),
-                    recommendation.recommendation_id
-                ],
-            )?;
-            selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
-                .ok_or_else(|| sqlite_data_error("selection recommendation not found"))
         })
     }
 
@@ -1233,273 +1133,11 @@ impl SqliteStore {
         })
     }
 
-    pub fn quality_scores_for_asset_groups(
-        &self,
-        asset_group_ids: &[String],
-        scorer_version: &str,
-    ) -> Result<Vec<QualityScore>> {
-        self.with_connection(|connection| {
-            quality_scores_for_asset_group_ids(connection, asset_group_ids, scorer_version)
-        })
-    }
-
-    pub fn review_queue_summary(
-        &self,
-        project_id: &str,
-        strategy_profile_id: Option<&str>,
-    ) -> Result<ReviewQueueSummary> {
-        self.with_connection(|connection| {
-            let requested_profile_id = strategy_profile_id
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("general");
-            let profile = strategy_profile_by_id(connection, requested_profile_id)?
-                .unwrap_or_else(StrategyProfile::general);
-            let mut summary =
-                ReviewQueueSummary::empty(project_id.to_string(), profile.profile_id.clone());
-            let mut seen_burst_ids = BTreeSet::new();
-
-            for group in stored_asset_groups_for_project(connection, project_id)? {
-                if let Some(burst_summary) =
-                    burst_summary_for_asset_group(connection, project_id, &group.group_id)?
-                {
-                    if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
-                        continue;
-                    }
-                    let Some(burst) = burst_group_by_id(connection, &burst_summary.burst_group_id)?
-                    else {
-                        continue;
-                    };
-                    let scores = quality_scores_for_asset_group_ids(
-                        connection,
-                        &burst.member_group_ids,
-                        "local-v1",
-                    )?;
-                    let recommendation = latest_selection_recommendation_for_connection(
-                        connection,
-                        &burst.burst_group_id,
-                        &profile.profile_id,
-                    )?;
-                    summary.add_unit(
-                        recommendation.as_ref(),
-                        &scores,
-                        &profile,
-                        burst.user_override_state.as_deref(),
-                        recommendation.is_none()
-                            && SelectionRecommendationStatus::from_str(
-                                &burst.recommendation_status,
-                            ) == SelectionRecommendationStatus::Pending,
-                    );
-                } else {
-                    let scores = quality_scores_for_asset_group_ids(
-                        connection,
-                        std::slice::from_ref(&group.group_id),
-                        "local-v1",
-                    )?;
-                    summary.add_unit(None, &scores, &profile, None, false);
-                }
-            }
-
-            Ok(summary)
-        })
-    }
-
-    pub fn review_queue_asset_group_page(
-        &self,
-        project_id: &str,
-        query: AssetGroupQuery,
-        offset: usize,
-        limit: usize,
-    ) -> Result<AssetGroupPage> {
-        self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
-            let requested_profile_id = query
-                .strategy_profile_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("general");
-            let profile = strategy_profile_by_id(connection, requested_profile_id)?
-                .unwrap_or_else(StrategyProfile::general);
-            let queue = normalized_review_queue_key(query.review_queue.as_deref().unwrap_or("all"));
-            let mut seen_burst_ids = BTreeSet::new();
-            let mut groups = Vec::new();
-
-            for stored_group in stored_asset_groups_for_project(connection, project_id)? {
-                if let Some(burst_summary) =
-                    burst_summary_for_asset_group(connection, project_id, &stored_group.group_id)?
-                {
-                    if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
-                        continue;
-                    }
-                    let Some(burst) = burst_group_by_id(connection, &burst_summary.burst_group_id)?
-                    else {
-                        continue;
-                    };
-                    let scores = quality_scores_for_asset_group_ids(
-                        connection,
-                        &burst.member_group_ids,
-                        "local-v1",
-                    )?;
-                    let recommendation = latest_selection_recommendation_for_connection(
-                        connection,
-                        &burst.burst_group_id,
-                        &profile.profile_id,
-                    )?;
-                    if !review_unit_flags(
-                        recommendation.as_ref(),
-                        &scores,
-                        &profile,
-                        burst.user_override_state.as_deref(),
-                        recommendation.is_none()
-                            && SelectionRecommendationStatus::from_str(
-                                &burst.recommendation_status,
-                            ) == SelectionRecommendationStatus::Pending,
-                    )
-                    .matches_queue(&queue)
-                    {
-                        continue;
-                    }
-                    let Some(representative_group_id) = representative_group_id_for_review_unit(
-                        &burst,
-                        recommendation.as_ref(),
-                        &scores,
-                    ) else {
-                        continue;
-                    };
-                    if let Some(group) = received_asset_group_for_group_id(
-                        connection,
-                        project_id,
-                        &representative_group_id,
-                    )? {
-                        if asset_group_matches(&group, &query)
-                            && asset_group_matches_analysis(&group, &query)
-                        {
-                            groups.push(group);
-                        }
-                    }
-                } else {
-                    let scores = quality_scores_for_asset_group_ids(
-                        connection,
-                        std::slice::from_ref(&stored_group.group_id),
-                        "local-v1",
-                    )?;
-                    if !review_unit_flags(None, &scores, &profile, None, false)
-                        .matches_queue(&queue)
-                    {
-                        continue;
-                    }
-                    if let Some(group) = received_asset_group_for_group_id(
-                        connection,
-                        project_id,
-                        &stored_group.group_id,
-                    )? {
-                        if asset_group_matches(&group, &query)
-                            && asset_group_matches_analysis(&group, &query)
-                        {
-                            groups.push(group);
-                        }
-                    }
-                }
-            }
-
-            sort_asset_groups_for_query(&mut groups, AssetGroupSort::GroupBestScore);
-            let total_groups = groups.len();
-            let summary = summarize_asset_groups(&groups);
-            let page_groups = groups
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect::<Vec<_>>();
-
-            Ok(AssetGroupPage {
-                groups: page_groups,
-                summary,
-                offset,
-                limit,
-                total_groups,
-                has_more: offset.saturating_add(limit) < total_groups,
-            })
-        })
-    }
-
-    pub fn selects_asset_group_page(
-        &self,
-        project_id: &str,
-        strategy_profile_id: Option<&str>,
-        offset: usize,
-        limit: usize,
-    ) -> Result<AssetGroupPage> {
-        self.with_connection(|connection| {
-            ensure_project_exists(connection, project_id)?;
-            let requested_profile_id = strategy_profile_id
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("general");
-            let profile = strategy_profile_by_id(connection, requested_profile_id)?
-                .unwrap_or_else(StrategyProfile::general);
-            let mut seen_burst_ids = BTreeSet::new();
-            let mut groups = Vec::new();
-
-            for stored_group in stored_asset_groups_for_project(connection, project_id)? {
-                let Some(burst_summary) =
-                    burst_summary_for_asset_group(connection, project_id, &stored_group.group_id)?
-                else {
-                    continue;
-                };
-                if !seen_burst_ids.insert(burst_summary.burst_group_id.clone()) {
-                    continue;
-                }
-                let Some(recommendation) = latest_selection_recommendation_for_connection(
-                    connection,
-                    &burst_summary.burst_group_id,
-                    &profile.profile_id,
-                )?
-                else {
-                    continue;
-                };
-                if !matches!(
-                    recommendation.status,
-                    SelectionRecommendationStatus::Accepted
-                        | SelectionRecommendationStatus::UserOverridden
-                ) {
-                    continue;
-                }
-                let Some(best_group_id) = recommendation.best_asset_group_id.as_deref() else {
-                    continue;
-                };
-                if let Some(group) =
-                    received_asset_group_for_group_id(connection, project_id, best_group_id)?
-                {
-                    groups.push(group);
-                }
-            }
-
-            sort_asset_groups_for_query(&mut groups, AssetGroupSort::GroupBestScore);
-            let total_groups = groups.len();
-            let summary = summarize_asset_groups(&groups);
-            let page_groups = groups
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect::<Vec<_>>();
-
-            Ok(AssetGroupPage {
-                groups: page_groups,
-                summary,
-                offset,
-                limit,
-                total_groups,
-                has_more: offset.saturating_add(limit) < total_groups,
-            })
-        })
-    }
-
     pub fn detect_bursts_for_asset_group(
         &self,
         project_id: &str,
         asset_group_id: &str,
-        profile: &StrategyProfile,
+        profile: &BurstGroupingProfile,
     ) -> Result<Vec<BurstGroup>> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
@@ -1528,8 +1166,8 @@ impl SqliteStore {
     pub fn refine_burst_group_by_visual_similarity(
         &self,
         burst_group_id: &str,
-        profile: &StrategyProfile,
-        scorer_version: &str,
+        profile: &BurstGroupingProfile,
+        assessor_version: &str,
     ) -> Result<Vec<BurstGroup>> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
@@ -1537,26 +1175,27 @@ impl SqliteStore {
                 transaction.commit()?;
                 return Ok(Vec::new());
             };
-            let scores = quality_scores_for_asset_group_ids(
+            let assessments = technical_assessments_for_asset_group_ids(
                 &transaction,
                 &burst.member_group_ids,
-                scorer_version,
+                assessor_version,
             )?;
-            let score_by_group_id = scores
+            let assessment_by_group_id = assessments
                 .iter()
-                .map(|score| (score.asset_group_id.as_str(), score))
+                .map(|assessment| (assessment.asset_group_id.as_str(), assessment))
                 .collect::<BTreeMap<_, _>>();
             let mut visual_hashes = Vec::new();
             for member_group_id in &burst.member_group_ids {
-                let Some(score) = score_by_group_id.get(member_group_id.as_str()) else {
+                let Some(assessment) = assessment_by_group_id.get(member_group_id.as_str()) else {
                     transaction.commit()?;
                     return Ok(vec![burst]);
                 };
-                if score.analysis_status != QualityAnalysisStatus::Ready {
+                if assessment.status != TechnicalAssessmentStatus::Ready {
                     transaction.commit()?;
                     return Ok(vec![burst]);
                 }
-                let Some(hash) = visual_hash_from_similarity_cluster(score) else {
+                let Some(hash) = visual_hash_from_signature(assessment.visual_signature.as_deref())
+                else {
                     transaction.commit()?;
                     return Ok(vec![burst]);
                 };
@@ -1586,8 +1225,13 @@ impl SqliteStore {
             }
 
             transaction.execute(
-                "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
-                params![burst_group_id],
+                "DELETE FROM selection_recommendations
+                 WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
+                params![
+                    burst.project_id,
+                    SelectionRecommendationScope::BurstGroup.as_str(),
+                    burst_group_id
+                ],
             )?;
             transaction.execute(
                 "DELETE FROM background_jobs
@@ -1629,7 +1273,7 @@ impl SqliteStore {
                     "burst-{}",
                     stable_key(&format!(
                         "{}\t{}\t{}",
-                        burst.project_id, profile.strategy_version, stable_members
+                        burst.project_id, profile.grouping_version, stable_members
                     ))
                 );
                 let started_at_ms = member_groups
@@ -1657,7 +1301,7 @@ impl SqliteStore {
                     recommendation_status: SelectionRecommendationStatus::Pending
                         .as_str()
                         .to_string(),
-                    user_override_state: None,
+                    manual_grouping_state: None,
                     created_at_ms: now,
                     updated_at_ms: now,
                 };
@@ -1910,14 +1554,12 @@ impl SqliteStore {
                     "publish queue item missing started time".to_string(),
                 )
             })?;
-            let final_path = final_location.as_local_path().map(Path::to_path_buf);
             let record = TransferRecord {
                 transfer_id: item.transfer_id,
                 protocol,
                 status: TransferStatus::Completed,
                 original_path,
                 final_filename: final_filename.to_string(),
-                final_path,
                 final_location: Some(final_location),
                 size_bytes: item.size_bytes,
                 username: item.username,
@@ -1936,7 +1578,6 @@ impl SqliteStore {
                     &asset_group_id,
                 )?;
             }
-            refresh_duplicate_info(&transaction, &item.project_id)?;
             let changed = transaction.execute(
                 "UPDATE publish_queue
                  SET state = ?1, last_error = NULL, next_attempt_at_ms = NULL, updated_at_ms = ?2
@@ -2223,7 +1864,7 @@ fn rebuild_burst_groups_for_project(
     connection: &Connection,
     project_id: &str,
     groups: Vec<StoredAssetGroup>,
-    profile: &StrategyProfile,
+    profile: &BurstGroupingProfile,
 ) -> std::result::Result<Vec<BurstGroup>, rusqlite::Error> {
     connection.execute(
         "DELETE FROM burst_group_members
@@ -2328,7 +1969,7 @@ fn rebuild_burst_groups_for_project(
             "burst-{}",
             stable_key(&format!(
                 "{project_id}\t{}\t{stable_members}",
-                profile.strategy_version
+                profile.grouping_version
             ))
         );
         let started_at_ms = run
@@ -2352,7 +1993,7 @@ fn rebuild_burst_groups_for_project(
             member_group_ids,
             grouping_version: 1,
             recommendation_status: SelectionRecommendationStatus::Pending.as_str().to_string(),
-            user_override_state: None,
+            manual_grouping_state: None,
             created_at_ms: now,
             updated_at_ms: now,
         };
@@ -2412,7 +2053,7 @@ fn rebuild_burst_groups_for_project(
             member_group_ids,
             grouping_version: 1,
             recommendation_status: SelectionRecommendationStatus::Pending.as_str().to_string(),
-            user_override_state: Some("merge".to_string()),
+            manual_grouping_state: Some("merge".to_string()),
             created_at_ms: now,
             updated_at_ms: now,
         };
@@ -2475,7 +2116,7 @@ fn manual_split_excluded_member_group_ids(
 ) -> std::result::Result<BTreeSet<String>, rusqlite::Error> {
     let mut statement = connection.prepare(
         "SELECT member_group_id
-         FROM burst_member_overrides
+         FROM burst_member_manual_edits
          WHERE project_id = ?1 AND action = 'split_exclude'",
     )?;
     let rows = statement.query_map(params![project_id], |row| row.get::<_, String>(0))?;
@@ -2487,21 +2128,21 @@ fn manual_merge_member_groups(
     project_id: &str,
 ) -> std::result::Result<BTreeMap<String, Vec<String>>, rusqlite::Error> {
     let mut statement = connection.prepare(
-        "SELECT override_group_id, member_group_id
-         FROM burst_member_overrides
+        "SELECT manual_group_id, member_group_id
+         FROM burst_member_manual_edits
          WHERE project_id = ?1
            AND action = 'merge_include'
-           AND override_group_id IS NOT NULL
-         ORDER BY override_group_id ASC, member_group_id ASC",
+           AND manual_group_id IS NOT NULL
+         ORDER BY manual_group_id ASC, member_group_id ASC",
     )?;
     let rows = statement.query_map(params![project_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
     let mut groups = BTreeMap::new();
     for row in rows {
-        let (override_group_id, member_group_id) = row?;
+        let (manual_group_id, member_group_id) = row?;
         groups
-            .entry(override_group_id)
+            .entry(manual_group_id)
             .or_insert_with(Vec::new)
             .push(member_group_id);
     }
@@ -2511,7 +2152,7 @@ fn manual_merge_member_groups(
 fn burst_candidates_are_adjacent(
     previous: &BurstCandidate,
     candidate: &BurstCandidate,
-    profile: &StrategyProfile,
+    profile: &BurstGroupingProfile,
 ) -> bool {
     if previous.source_identity != candidate.source_identity
         || previous.group.original_parent_path != candidate.group.original_parent_path
@@ -2538,8 +2179,8 @@ fn burst_candidates_are_adjacent(
         .unwrap_or(false)
 }
 
-fn visual_hash_from_similarity_cluster(score: &QualityScore) -> Option<u64> {
-    let value = score.similarity_cluster_id.as_deref()?;
+fn visual_hash_from_signature(value: Option<&str>) -> Option<u64> {
+    let value = value?;
     let hex = value.strip_prefix("ahash-v1:")?;
     u64::from_str_radix(hex, 16).ok()
 }
@@ -2548,8 +2189,8 @@ fn visual_hash_similarity(left: u64, right: u64) -> f64 {
     1.0 - ((left ^ right).count_ones() as f64 / 64.0)
 }
 
-fn visual_burst_continuity_threshold(profile: &StrategyProfile) -> f64 {
-    (profile.near_duplicate_similarity_above - 0.12).clamp(0.70, 0.90)
+fn visual_burst_continuity_threshold(profile: &BurstGroupingProfile) -> f64 {
+    profile.visual_continuity_threshold.clamp(0.70, 0.90)
 }
 
 fn insert_burst_group(
@@ -2559,7 +2200,7 @@ fn insert_burst_group(
     connection.execute(
         "INSERT INTO burst_groups (
             burst_group_id, project_id, source_identity, started_at_ms, ended_at_ms,
-            member_count, grouping_version, recommendation_status, user_override_state,
+            member_count, grouping_version, recommendation_status, manual_grouping_state,
             created_at_ms, updated_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
@@ -2571,7 +2212,7 @@ fn insert_burst_group(
             burst.member_count as i64,
             burst.grouping_version,
             burst.recommendation_status,
-            burst.user_override_state,
+            burst.manual_grouping_state,
             burst.created_at_ms,
             burst.updated_at_ms,
         ],
@@ -2594,21 +2235,7 @@ fn burst_summary_for_asset_group(
 ) -> std::result::Result<Option<ReceivedAssetBurstSummary>, rusqlite::Error> {
     let summary = connection
         .query_row(
-            "SELECT bg.burst_group_id, bg.member_count,
-                    COALESCE((
-                        SELECT recommendation.status
-                        FROM selection_recommendations recommendation
-                        WHERE recommendation.burst_group_id = bg.burst_group_id
-                        ORDER BY recommendation.updated_at_ms DESC, recommendation.recommendation_id DESC
-                        LIMIT 1
-                    ), bg.recommendation_status) AS recommendation_status,
-                    (
-                        SELECT recommendation.best_asset_group_id
-                        FROM selection_recommendations recommendation
-                        WHERE recommendation.burst_group_id = bg.burst_group_id
-                        ORDER BY recommendation.updated_at_ms DESC, recommendation.recommendation_id DESC
-                        LIMIT 1
-                    ) AS best_asset_group_id
+            "SELECT bg.burst_group_id, bg.member_count, bg.recommendation_status
              FROM burst_group_members bgm
              JOIN burst_groups bg ON bg.burst_group_id = bgm.burst_group_id
              WHERE bg.project_id = ?1 AND bgm.member_group_id = ?2
@@ -2620,7 +2247,7 @@ fn burst_summary_for_asset_group(
                     burst_group_id: row.get(0)?,
                     member_count: row.get::<_, i64>(1)? as usize,
                     recommendation_status: row.get(2)?,
-                    best_asset_group_id: row.get(3)?,
+                    best_asset_group_id: None,
                     best_score: None,
                 })
             },
@@ -2628,67 +2255,46 @@ fn burst_summary_for_asset_group(
         .optional()?;
     summary
         .map(|mut summary| {
-            if let Some(scoped) = latest_scoped_selection_recommendation_for_connection(
+            let mut selected_asset_group_id = None;
+            if let Some(recommendation) = latest_selection_recommendation_for_connection(
                 connection,
                 project_id,
                 SelectionRecommendationScope::BurstGroup,
                 &summary.burst_group_id,
             )? {
-                summary.recommendation_status = scoped.status.as_str().to_string();
-                summary.best_asset_group_id = scoped.selected_asset_group_ids.first().cloned();
+                summary.recommendation_status = recommendation.status.as_str().to_string();
+                selected_asset_group_id = recommendation.selected_asset_group_ids.first().cloned();
+                summary.best_asset_group_id = selected_asset_group_id.clone();
             }
-            let model_best_score =
-                burst_best_model_score_for_burst_group(connection, &summary.burst_group_id)?;
-            summary.best_score = if model_best_score.is_some() {
-                model_best_score
-            } else {
-                burst_best_score_for_burst_group(connection, &summary.burst_group_id)?
-            };
+            summary.best_score = selected_asset_group_id
+                .as_deref()
+                .map(|asset_group_id| burst_selected_model_score(connection, asset_group_id))
+                .transpose()?
+                .flatten();
             Ok(summary)
         })
         .transpose()
 }
 
-fn burst_best_model_score_for_burst_group(
+fn burst_selected_model_score(
     connection: &Connection,
-    burst_group_id: &str,
+    asset_group_id: &str,
 ) -> std::result::Result<Option<f64>, rusqlite::Error> {
     connection.query_row(
         "SELECT MAX(me.score)
          FROM model_evaluations me
-         JOIN burst_group_members bgm ON bgm.member_group_id = me.asset_group_id
-         WHERE bgm.burst_group_id = ?1
+         WHERE me.asset_group_id = ?1
            AND me.status = 'ready'
            AND me.updated_at_ms = (
                SELECT MAX(latest.updated_at_ms)
                FROM model_evaluations latest
                WHERE latest.asset_group_id = me.asset_group_id
            )",
-        params![burst_group_id],
+        params![asset_group_id],
         |row| {
             row.get::<_, Option<i64>>(0)
                 .map(|score| score.map(|value| value as f64))
         },
-    )
-}
-
-fn burst_best_score_for_burst_group(
-    connection: &Connection,
-    burst_group_id: &str,
-) -> std::result::Result<Option<f64>, rusqlite::Error> {
-    connection.query_row(
-        "SELECT MAX(qs.overall)
-         FROM quality_scores qs
-         JOIN burst_group_members bgm ON bgm.member_group_id = qs.asset_group_id
-         WHERE bgm.burst_group_id = ?1
-           AND qs.analysis_status = 'ready'
-           AND qs.analyzed_at_ms = (
-               SELECT MAX(latest.analyzed_at_ms)
-               FROM quality_scores latest
-               WHERE latest.asset_group_id = qs.asset_group_id
-           )",
-        params![burst_group_id],
-        |row| row.get::<_, Option<f64>>(0),
     )
 }
 
@@ -2699,7 +2305,7 @@ fn burst_group_by_id(
     let Some(mut burst) = connection
         .query_row(
             "SELECT burst_group_id, project_id, source_identity, started_at_ms, ended_at_ms,
-                    member_count, grouping_version, recommendation_status, user_override_state,
+                    member_count, grouping_version, recommendation_status, manual_grouping_state,
                     created_at_ms, updated_at_ms
              FROM burst_groups
              WHERE burst_group_id = ?1",
@@ -2715,7 +2321,7 @@ fn burst_group_by_id(
                     member_group_ids: Vec::new(),
                     grouping_version: row.get(6)?,
                     recommendation_status: row.get(7)?,
-                    user_override_state: row.get(8)?,
+                    manual_grouping_state: row.get(8)?,
                     created_at_ms: row.get(9)?,
                     updated_at_ms: row.get(10)?,
                 })
@@ -2770,12 +2376,17 @@ fn split_burst_member_for_connection(
     let now = current_time_ms();
 
     connection.execute(
-        "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
-        params![burst_group_id],
+        "DELETE FROM selection_recommendations
+         WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
+        params![
+            burst.project_id,
+            SelectionRecommendationScope::BurstGroup.as_str(),
+            burst_group_id
+        ],
     )?;
     connection.execute(
-        "INSERT OR REPLACE INTO burst_member_overrides (
-            project_id, member_group_id, action, override_group_id, created_at_ms
+        "INSERT OR REPLACE INTO burst_member_manual_edits (
+            project_id, member_group_id, action, manual_group_id, created_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             burst.project_id,
@@ -2814,7 +2425,7 @@ fn split_burst_member_for_connection(
          SET member_count = ?1,
              grouping_version = grouping_version + 1,
              recommendation_status = ?2,
-             user_override_state = ?3,
+             manual_grouping_state = ?3,
              updated_at_ms = ?4
          WHERE burst_group_id = ?5",
         params![
@@ -2877,13 +2488,23 @@ fn merge_burst_member_for_connection(
 
     let now = current_time_ms();
     connection.execute(
-        "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
-        params![target_burst.burst_group_id],
+        "DELETE FROM selection_recommendations
+         WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
+        params![
+            target_burst.project_id,
+            SelectionRecommendationScope::BurstGroup.as_str(),
+            target_burst.burst_group_id
+        ],
     )?;
     if let Some(source_burst) = source_burst.as_ref() {
         connection.execute(
-            "DELETE FROM selection_recommendations WHERE burst_group_id = ?1",
-            params![source_burst.burst_group_id],
+            "DELETE FROM selection_recommendations
+             WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
+            params![
+                source_burst.project_id,
+                SelectionRecommendationScope::BurstGroup.as_str(),
+                source_burst.burst_group_id
+            ],
         )?;
         connection.execute(
             "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
@@ -2915,14 +2536,14 @@ fn merge_burst_member_for_connection(
             member_groups.push(group);
         }
         connection.execute(
-            "DELETE FROM burst_member_overrides
+            "DELETE FROM burst_member_manual_edits
              WHERE project_id = ?1 AND member_group_id = ?2
                AND action IN ('split_exclude', 'merge_include')",
             params![target_burst.project_id, member_group_id],
         )?;
         connection.execute(
-            "INSERT INTO burst_member_overrides (
-                project_id, member_group_id, action, override_group_id, created_at_ms
+            "INSERT INTO burst_member_manual_edits (
+                project_id, member_group_id, action, manual_group_id, created_at_ms
              ) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 target_burst.project_id,
@@ -2952,7 +2573,7 @@ fn merge_burst_member_for_connection(
              member_count = ?4,
              grouping_version = grouping_version + 1,
              recommendation_status = ?5,
-             user_override_state = ?6,
+             manual_grouping_state = ?6,
              updated_at_ms = ?7
          WHERE burst_group_id = ?8",
         params![
@@ -2999,43 +2620,6 @@ fn push_unique_string(values: &mut Vec<String>, value: String) {
     }
 }
 
-fn quality_summary_for_asset_group(
-    connection: &Connection,
-    asset_group_id: &str,
-) -> std::result::Result<Option<ReceivedAssetQualitySummary>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
-                    capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
-                    shadow_clipping_json, composition_json, composition_confidence,
-                    similarity_cluster_id, overall, reasons_json, analyzed_at_ms
-             FROM quality_scores
-             WHERE asset_group_id = ?1
-             ORDER BY analyzed_at_ms DESC, scorer_version DESC
-             LIMIT 1",
-            params![asset_group_id],
-            quality_score_from_row,
-        )
-        .optional()
-        .map(|score| {
-            score.map(|score| ReceivedAssetQualitySummary {
-                overall: score.overall,
-                analysis_status: score.analysis_status.as_str().to_string(),
-                scorer_version: score.scorer_version,
-                primary_reason: score.reasons.first().cloned(),
-                sharpness: available_signal_value(score.sharpness),
-                exposure: available_signal_value(score.exposure),
-                highlight_clipping_penalty: available_signal_value(
-                    score.highlight_clipping_penalty,
-                ),
-                shadow_clipping_penalty: available_signal_value(score.shadow_clipping_penalty),
-                composition: available_signal_value(score.composition),
-                composition_confidence: Some(score.composition_confidence),
-                analyzed_at_ms: score.analyzed_at_ms,
-            })
-        })
-}
-
 fn apply_technical_summary(
     connection: &Connection,
     asset_group_id: &str,
@@ -3067,7 +2651,7 @@ fn latest_technical_assessment_for_asset_group(
     connection
         .query_row(
             "SELECT asset_group_id, assessor_version, status, gate_status, defect_flags_json,
-                    preview_source, analyzed_at_ms
+                    preview_source, visual_signature, analyzed_at_ms
              FROM technical_assessments
              WHERE asset_group_id = ?1
              ORDER BY analyzed_at_ms DESC, assessor_version DESC
@@ -3121,8 +2705,8 @@ fn is_model_selected_asset_group(
     asset_group_id: &str,
     burst_group_id: Option<&str>,
 ) -> std::result::Result<bool, rusqlite::Error> {
-    if scoped_recommendation_selects(
-        latest_scoped_selection_recommendation_for_connection(
+    if selection_recommendation_selects(
+        latest_selection_recommendation_for_connection(
             connection,
             project_id,
             SelectionRecommendationScope::Project,
@@ -3133,8 +2717,8 @@ fn is_model_selected_asset_group(
         return Ok(true);
     }
     if let Some(burst_group_id) = burst_group_id {
-        return Ok(scoped_recommendation_selects(
-            latest_scoped_selection_recommendation_for_connection(
+        return Ok(selection_recommendation_selects(
+            latest_selection_recommendation_for_connection(
                 connection,
                 project_id,
                 SelectionRecommendationScope::BurstGroup,
@@ -3146,8 +2730,8 @@ fn is_model_selected_asset_group(
     Ok(false)
 }
 
-fn scoped_recommendation_selects(
-    recommendation: Option<ScopedSelectionRecommendation>,
+fn selection_recommendation_selects(
+    recommendation: Option<SelectionRecommendation>,
     asset_group_id: &str,
 ) -> bool {
     recommendation
@@ -3159,10 +2743,6 @@ fn scoped_recommendation_selects(
                 .any(|selected| selected == asset_group_id)
         })
         .unwrap_or(false)
-}
-
-fn available_signal_value(score: SignalScore) -> Option<f64> {
-    score.available.then_some(score.value)
 }
 
 fn trailing_sequence_number(value: &str) -> Option<i64> {
@@ -3230,35 +2810,6 @@ fn received_assets_for_group(
     collect_rows(rows)
 }
 
-fn received_asset_group_for_group_id(
-    connection: &Connection,
-    project_id: &str,
-    group_id: &str,
-) -> std::result::Result<Option<ReceivedAssetGroup>, rusqlite::Error> {
-    let assets = received_assets_for_group(connection, project_id, group_id)?;
-    let Some(mut group) = group_received_assets(assets).into_iter().next() else {
-        return Ok(None);
-    };
-    group.group_id = Some(group_id.to_string());
-    group.burst = burst_summary_for_asset_group(connection, project_id, group_id)?;
-    group.quality = quality_summary_for_asset_group(connection, group_id)?;
-    apply_technical_summary(connection, group_id, &mut group)?;
-    apply_model_evaluation_summary(connection, group_id, &mut group)?;
-    group.is_model_select = is_model_selected_asset_group(
-        connection,
-        project_id,
-        group_id,
-        group
-            .burst
-            .as_ref()
-            .map(|burst| burst.burst_group_id.as_str()),
-    )?;
-    group.user_marks = user_marks_for_asset_group(connection, project_id, group_id)?;
-    group.is_favorite = group.user_marks.favorite;
-    group.is_flagged = group.user_marks.marked;
-    Ok(Some(group))
-}
-
 fn user_marks_for_asset_group(
     connection: &Connection,
     project_id: &str,
@@ -3282,6 +2833,16 @@ fn user_marks_for_asset_group(
 }
 
 fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlite::Error> {
+    connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
+        row.get::<_, String>(0)
+    })?;
+    connection.execute_batch(
+        "
+        PRAGMA synchronous = NORMAL;
+        PRAGMA wal_autocheckpoint = 1000;
+        ",
+    )?;
+    reset_incompatible_development_tables(connection)?;
     connection.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -3294,8 +2855,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             archived_at_ms INTEGER,
-            default_output_target_id TEXT,
-            default_strategy_profile_id TEXT
+            default_output_target_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS prompt_profiles (
@@ -3328,6 +2888,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             auto_burst_recommendation_enabled INTEGER NOT NULL,
             project_recommendation_mode TEXT NOT NULL,
             prompt_profile_id TEXT,
+            model_provider_settings_id TEXT,
             scene_profile TEXT NOT NULL,
             cv_policy TEXT NOT NULL,
             allow_risky_model_selects INTEGER NOT NULL,
@@ -3516,7 +3077,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             member_count INTEGER NOT NULL,
             grouping_version INTEGER NOT NULL,
             recommendation_status TEXT NOT NULL,
-            user_override_state TEXT,
+            manual_grouping_state TEXT,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL
         );
@@ -3527,11 +3088,11 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             PRIMARY KEY(burst_group_id, member_group_id)
         );
 
-        CREATE TABLE IF NOT EXISTS burst_member_overrides (
+        CREATE TABLE IF NOT EXISTS burst_member_manual_edits (
             project_id TEXT NOT NULL REFERENCES projects(project_id),
             member_group_id TEXT NOT NULL REFERENCES asset_groups(group_id),
             action TEXT NOT NULL,
-            override_group_id TEXT,
+            manual_group_id TEXT,
             created_at_ms INTEGER NOT NULL,
             PRIMARY KEY(project_id, member_group_id, action)
         );
@@ -3546,40 +3107,6 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             PRIMARY KEY(project_id, group_id)
         );
 
-        CREATE TABLE IF NOT EXISTS strategy_profiles (
-            profile_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            built_in INTEGER NOT NULL DEFAULT 0,
-            strategy_version TEXT NOT NULL,
-            burst_window_ms INTEGER NOT NULL,
-            min_group_size INTEGER NOT NULL,
-            weights_json TEXT NOT NULL,
-            thresholds_json TEXT NOT NULL,
-            actions_json TEXT NOT NULL,
-            llm_json TEXT NOT NULL,
-            updated_at_ms INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS quality_scores (
-            asset_group_id TEXT NOT NULL,
-            scorer_version TEXT NOT NULL,
-            preview_source TEXT,
-            analysis_status TEXT NOT NULL,
-            exif_status TEXT,
-            capture_time_ms INTEGER,
-            sharpness_json TEXT NOT NULL,
-            exposure_json TEXT NOT NULL,
-            highlight_clipping_json TEXT NOT NULL,
-            shadow_clipping_json TEXT NOT NULL,
-            composition_json TEXT NOT NULL,
-            composition_confidence REAL NOT NULL,
-            similarity_cluster_id TEXT,
-            overall REAL NOT NULL,
-            reasons_json TEXT NOT NULL,
-            analyzed_at_ms INTEGER NOT NULL,
-            PRIMARY KEY(asset_group_id, scorer_version)
-        );
-
         CREATE TABLE IF NOT EXISTS technical_assessments (
             asset_group_id TEXT NOT NULL,
             assessor_version TEXT NOT NULL,
@@ -3587,6 +3114,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             gate_status TEXT NOT NULL,
             defect_flags_json TEXT NOT NULL,
             preview_source TEXT,
+            visual_signature TEXT,
             analyzed_at_ms INTEGER NOT NULL,
             PRIMARY KEY(asset_group_id, assessor_version)
         );
@@ -3613,7 +3141,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             updated_at_ms INTEGER NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS scoped_selection_recommendations (
+        CREATE TABLE IF NOT EXISTS selection_recommendations (
             recommendation_id TEXT PRIMARY KEY,
             run_id TEXT,
             scope TEXT NOT NULL,
@@ -3626,26 +3154,6 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             status TEXT NOT NULL,
             confidence REAL NOT NULL,
             reason TEXT NOT NULL,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS selection_recommendations (
-            recommendation_id TEXT PRIMARY KEY,
-            burst_group_id TEXT NOT NULL,
-            strategy_profile_id TEXT NOT NULL,
-            scorer_version TEXT NOT NULL,
-            strategy_version TEXT NOT NULL,
-            grouping_version INTEGER NOT NULL,
-            best_asset_group_id TEXT,
-            alternate_asset_group_ids_json TEXT NOT NULL,
-            low_score_asset_group_ids_json TEXT NOT NULL,
-            near_duplicate_asset_group_ids_json TEXT NOT NULL,
-            source TEXT NOT NULL,
-            status TEXT NOT NULL,
-            confidence REAL NOT NULL,
-            reasons_json TEXT NOT NULL,
-            llm_review_id TEXT,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL
         );
@@ -3664,109 +3172,149 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
         CREATE INDEX IF NOT EXISTS idx_subject_assessments_group ON subject_assessments(project_id, asset_group_id, subject_type);
         CREATE INDEX IF NOT EXISTS idx_burst_groups_project ON burst_groups(project_id, updated_at_ms);
         CREATE INDEX IF NOT EXISTS idx_burst_members_group ON burst_group_members(member_group_id, burst_group_id);
-        CREATE INDEX IF NOT EXISTS idx_burst_member_overrides_project ON burst_member_overrides(project_id, action, member_group_id);
+        CREATE INDEX IF NOT EXISTS idx_burst_member_manual_edits_project ON burst_member_manual_edits(project_id, action, member_group_id);
         CREATE INDEX IF NOT EXISTS idx_asset_group_user_marks_project ON asset_group_user_marks(project_id, favorite, marked);
-        CREATE INDEX IF NOT EXISTS idx_quality_scores_group ON quality_scores(asset_group_id, scorer_version);
         CREATE INDEX IF NOT EXISTS idx_technical_assessments_status ON technical_assessments(status, gate_status);
         CREATE INDEX IF NOT EXISTS idx_model_evaluations_project ON model_evaluations(project_id, status, tier);
         CREATE INDEX IF NOT EXISTS idx_model_evaluations_asset_group ON model_evaluations(asset_group_id, evaluator_version);
-        CREATE INDEX IF NOT EXISTS idx_scoped_recommendations_scope ON scoped_selection_recommendations(project_id, scope, subject_id, status);
-        CREATE INDEX IF NOT EXISTS idx_recommendations_group ON selection_recommendations(burst_group_id, strategy_profile_id, status);
+        CREATE INDEX IF NOT EXISTS idx_recommendations_scope ON selection_recommendations(project_id, scope, subject_id, status);
         ",
     )?;
-    ensure_model_evaluation_dev_columns(connection)?;
     Ok(())
 }
 
-fn ensure_model_evaluation_dev_columns(
+fn reset_incompatible_development_tables(
     connection: &Connection,
 ) -> std::result::Result<(), rusqlite::Error> {
-    ensure_column(
+    reset_table_if_missing_columns(
+        connection,
+        "selection_recommendations",
+        &[
+            "recommendation_id",
+            "run_id",
+            "scope",
+            "project_id",
+            "subject_id",
+            "selected_asset_group_ids_json",
+            "candidate_asset_group_ids_json",
+            "rejected_asset_group_ids_json",
+            "source",
+            "status",
+            "confidence",
+            "reason",
+            "created_at_ms",
+            "updated_at_ms",
+        ],
+    )?;
+    reset_table_if_missing_columns(
         connection,
         "model_evaluations",
-        "run_id",
-        "TEXT",
-        "ALTER TABLE model_evaluations ADD COLUMN run_id TEXT NOT NULL DEFAULT ''",
+        &[
+            "evaluation_id",
+            "run_id",
+            "project_id",
+            "asset_group_id",
+            "evaluator_kind",
+            "evaluator_version",
+            "status",
+            "score",
+            "tier",
+            "selectable",
+            "summary",
+            "strengths_json",
+            "weaknesses_json",
+            "technical_warnings_json",
+            "prompt_profile_id",
+            "prompt_version_id",
+            "prompt_hash",
+            "created_at_ms",
+            "updated_at_ms",
+        ],
     )?;
-    ensure_column(
+    reset_table_if_missing_columns(
         connection,
-        "model_evaluations",
-        "prompt_profile_id",
-        "TEXT",
-        "ALTER TABLE model_evaluations ADD COLUMN prompt_profile_id TEXT",
+        "technical_assessments",
+        &[
+            "asset_group_id",
+            "assessor_version",
+            "status",
+            "gate_status",
+            "defect_flags_json",
+            "preview_source",
+            "visual_signature",
+            "analyzed_at_ms",
+        ],
     )?;
-    ensure_column(
+    reset_table_if_missing_columns(
         connection,
-        "model_evaluations",
-        "prompt_version_id",
-        "TEXT",
-        "ALTER TABLE model_evaluations ADD COLUMN prompt_version_id TEXT",
+        "evaluation_runs",
+        &[
+            "run_id",
+            "project_id",
+            "run_type",
+            "trigger",
+            "status",
+            "provider_kind",
+            "provider_model",
+            "prompt_profile_id",
+            "prompt_version_id",
+            "prompt_hash",
+            "settings_snapshot_json",
+            "error_message",
+            "started_at_ms",
+            "completed_at_ms",
+            "created_at_ms",
+        ],
     )?;
-    ensure_column(
+    reset_table_if_missing_columns(
         connection,
-        "model_evaluations",
-        "prompt_hash",
-        "TEXT",
-        "ALTER TABLE model_evaluations ADD COLUMN prompt_hash TEXT",
-    )?;
-    Ok(())
+        "project_evaluation_settings",
+        &[
+            "project_id",
+            "model_evaluation_enabled",
+            "auto_evaluate_on_upload",
+            "auto_burst_recommendation_enabled",
+            "project_recommendation_mode",
+            "prompt_profile_id",
+            "model_provider_settings_id",
+            "scene_profile",
+            "cv_policy",
+            "allow_risky_model_selects",
+            "max_image_side",
+            "batch_size",
+            "updated_at_ms",
+        ],
+    )
 }
 
-fn ensure_column(
+fn reset_table_if_missing_columns(
     connection: &Connection,
     table_name: &str,
-    column_name: &str,
-    expected_affinity: &str,
-    alter_sql: &str,
+    required_columns: &[&str],
 ) -> std::result::Result<(), rusqlite::Error> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
-    let columns = statement.query_map([], |row| {
-        Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-    })?;
-    for column in columns {
-        let (name, declared_type) = column?;
-        if name == column_name {
-            let affinity = sqlite_type_affinity(&declared_type);
-            if affinity != expected_affinity {
-                return Err(rusqlite::Error::InvalidParameterName(format!(
-                    "{table_name}.{column_name} must have {expected_affinity} affinity, found {declared_type}"
-                )));
-            }
-            return Ok(());
-        }
+    let columns = table_columns(connection, table_name)?;
+    if columns.is_empty()
+        || required_columns
+            .iter()
+            .all(|column| columns.contains(*column))
+    {
+        return Ok(());
     }
-    connection.execute(alter_sql, [])?;
+    connection.execute(&format!("DROP TABLE IF EXISTS {table_name}"), [])?;
     Ok(())
 }
 
-fn sqlite_type_affinity(declared_type: &str) -> &'static str {
-    let normalized = declared_type.trim().to_ascii_uppercase();
-    if normalized.contains("INT") {
-        "INTEGER"
-    } else if normalized.contains("CHAR")
-        || normalized.contains("CLOB")
-        || normalized.contains("TEXT")
-    {
-        "TEXT"
-    } else if normalized.contains("BLOB") || normalized.is_empty() {
-        "BLOB"
-    } else if normalized.contains("REAL")
-        || normalized.contains("FLOA")
-        || normalized.contains("DOUB")
-    {
-        "REAL"
-    } else {
-        "NUMERIC"
-    }
-}
-
-fn seed_builtin_strategy_profiles(
+fn table_columns(
     connection: &Connection,
-) -> std::result::Result<(), rusqlite::Error> {
-    for profile in StrategyProfile::built_in_profiles() {
-        save_strategy_profile_for_connection(connection, profile)?;
+    table_name: &str,
+) -> std::result::Result<BTreeSet<String>, rusqlite::Error> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut columns = BTreeSet::new();
+    for row in rows {
+        columns.insert(row?);
     }
-    Ok(())
+    Ok(columns)
 }
 
 fn seed_builtin_prompt_profiles(
@@ -3817,10 +3365,12 @@ fn seed_builtin_prompt_profiles(
                 updated_at_ms: 0,
             },
         )?;
+        let prompt_text = serde_json::to_string(&PromptProfileContent::new(prompt_text))
+            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         let version = PromptProfileVersion {
             prompt_version_id: version_id.clone(),
             prompt_profile_id: profile_id.to_string(),
-            prompt_text: prompt_text.to_string(),
+            prompt_text,
             output_schema_version: "model-evaluation-v1".to_string(),
             prompt_hash: prompt_hash.to_string(),
             created_at_ms: 0,
@@ -4080,8 +3630,8 @@ fn project_evaluation_settings_by_project_id(
         .query_row(
             "SELECT project_id, model_evaluation_enabled, auto_evaluate_on_upload,
                     auto_burst_recommendation_enabled, project_recommendation_mode,
-                    prompt_profile_id, scene_profile, cv_policy, allow_risky_model_selects,
-                    max_image_side, batch_size, updated_at_ms
+                    prompt_profile_id, model_provider_settings_id, scene_profile, cv_policy,
+                    allow_risky_model_selects, max_image_side, batch_size, updated_at_ms
              FROM project_evaluation_settings
              WHERE project_id = ?1",
             params![project_id],
@@ -4100,15 +3650,16 @@ fn save_project_evaluation_settings_for_connection(
         "INSERT INTO project_evaluation_settings (
             project_id, model_evaluation_enabled, auto_evaluate_on_upload,
             auto_burst_recommendation_enabled, project_recommendation_mode, prompt_profile_id,
-            scene_profile, cv_policy, allow_risky_model_selects, max_image_side, batch_size,
-            updated_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            model_provider_settings_id, scene_profile, cv_policy, allow_risky_model_selects,
+            max_image_side, batch_size, updated_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(project_id) DO UPDATE SET
             model_evaluation_enabled = excluded.model_evaluation_enabled,
             auto_evaluate_on_upload = excluded.auto_evaluate_on_upload,
             auto_burst_recommendation_enabled = excluded.auto_burst_recommendation_enabled,
             project_recommendation_mode = excluded.project_recommendation_mode,
             prompt_profile_id = excluded.prompt_profile_id,
+            model_provider_settings_id = excluded.model_provider_settings_id,
             scene_profile = excluded.scene_profile,
             cv_policy = excluded.cv_policy,
             allow_risky_model_selects = excluded.allow_risky_model_selects,
@@ -4122,6 +3673,7 @@ fn save_project_evaluation_settings_for_connection(
             settings.auto_burst_recommendation_enabled,
             settings.project_recommendation_mode.as_str(),
             settings.prompt_profile_id.as_deref(),
+            settings.model_provider_settings_id.as_deref(),
             settings.scene_profile.as_str(),
             settings.cv_policy.as_str(),
             settings.allow_risky_model_selects,
@@ -4189,8 +3741,8 @@ fn project_evaluation_settings_from_row(
     row: &Row<'_>,
 ) -> std::result::Result<ProjectEvaluationSettings, rusqlite::Error> {
     let project_recommendation_mode: String = row.get(4)?;
-    let scene_profile: String = row.get(6)?;
-    let cv_policy: String = row.get(7)?;
+    let scene_profile: String = row.get(7)?;
+    let cv_policy: String = row.get(8)?;
     Ok(ProjectEvaluationSettings {
         project_id: row.get(0)?,
         model_evaluation_enabled: row.get(1)?,
@@ -4200,12 +3752,13 @@ fn project_evaluation_settings_from_row(
             &project_recommendation_mode,
         ),
         prompt_profile_id: row.get(5)?,
+        model_provider_settings_id: row.get(6)?,
         scene_profile: SceneProfile::from_str(&scene_profile),
         cv_policy: CvPolicy::from_str(&cv_policy),
-        allow_risky_model_selects: row.get(8)?,
-        max_image_side: row.get(9)?,
-        batch_size: row.get(10)?,
-        updated_at_ms: row.get(11)?,
+        allow_risky_model_selects: row.get(9)?,
+        max_image_side: row.get(10)?,
+        batch_size: row.get(11)?,
+        updated_at_ms: row.get(12)?,
     })
 }
 
@@ -4714,7 +4267,7 @@ fn project_by_id(
     connection
         .query_row(
             "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
-                    archived_at_ms, default_output_target_id, default_strategy_profile_id
+                    archived_at_ms, default_output_target_id
              FROM projects
              WHERE project_id = ?1",
             params![project_id],
@@ -4788,6 +4341,14 @@ fn insert_asset_for_transfer(
         .and_then(|location| location.as_local_path())
         .and_then(extract_capture_time_ms);
     let duplicate_key = duplicate_key(record);
+    let previous_duplicate_key = connection
+        .query_row(
+            "SELECT duplicate_key FROM assets WHERE transfer_id = ?1",
+            params![record.transfer_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
 
     connection.execute(
         "INSERT INTO asset_groups (
@@ -4840,6 +4401,10 @@ fn insert_asset_for_transfer(
         ],
     )?;
     refresh_group_rollup(connection, &group_id)?;
+    refresh_duplicate_info_for_key(connection, project_id, previous_duplicate_key.as_deref())?;
+    if previous_duplicate_key.as_deref() != duplicate_key.as_deref() {
+        refresh_duplicate_info_for_key(connection, project_id, duplicate_key.as_deref())?;
+    }
     Ok(Some(group_id))
 }
 
@@ -4941,6 +4506,44 @@ fn refresh_duplicate_info(
     Ok(())
 }
 
+fn refresh_duplicate_info_for_key(
+    connection: &Connection,
+    project_id: &str,
+    duplicate_key: Option<&str>,
+) -> std::result::Result<(), rusqlite::Error> {
+    let Some(duplicate_key) = duplicate_key else {
+        return Ok(());
+    };
+    let mut assets = connection
+        .prepare(
+            "SELECT asset_id FROM assets
+             WHERE project_id = ?1 AND duplicate_key = ?2
+             ORDER BY published_at_ms ASC, asset_id ASC",
+        )?
+        .query_map(params![project_id, duplicate_key], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let count = assets.len() as i64;
+    if count <= 1 {
+        connection.execute(
+            "UPDATE assets
+             SET duplicate_index = NULL, duplicate_count = NULL
+             WHERE project_id = ?1 AND duplicate_key = ?2",
+            params![project_id, duplicate_key],
+        )?;
+        return Ok(());
+    }
+
+    for (index, asset_id) in assets.drain(..).enumerate() {
+        connection.execute(
+            "UPDATE assets SET duplicate_index = ?1, duplicate_count = ?2 WHERE asset_id = ?3",
+            params![index as i64 + 1, count, asset_id],
+        )?;
+    }
+    Ok(())
+}
+
 fn project_from_row(row: &Row<'_>) -> std::result::Result<Project, rusqlite::Error> {
     let status: String = row.get(3)?;
     Ok(Project {
@@ -4952,7 +4555,6 @@ fn project_from_row(row: &Row<'_>) -> std::result::Result<Project, rusqlite::Err
         updated_at_ms: row.get(5)?,
         archived_at_ms: row.get(6)?,
         default_output_target_id: row.get(7)?,
-        default_strategy_profile_id: row.get(8)?,
     })
 }
 
@@ -5048,7 +4650,6 @@ fn transfer_record_from_row(row: &Row<'_>) -> std::result::Result<TransferRecord
         status: parse_transfer_status(&status),
         original_path: row.get(3)?,
         final_filename: row.get(4)?,
-        final_path: None,
         final_location: parse_location(final_location_payload)?,
         size_bytes: row.get::<_, i64>(6)? as u64,
         username: row.get(7)?,
@@ -5084,251 +4685,6 @@ fn publish_item_from_row(row: &Row<'_>) -> std::result::Result<PublishQueueItem,
     })
 }
 
-fn save_strategy_profile_for_connection(
-    connection: &Connection,
-    profile: StrategyProfile,
-) -> std::result::Result<StrategyProfile, rusqlite::Error> {
-    let updated_at_ms = if profile.updated_at_ms == 0 {
-        current_time_ms()
-    } else {
-        profile.updated_at_ms
-    };
-    let thresholds_json = serde_json::to_string(&serde_json::json!({
-        "reject_if_sharpness_below": profile.reject_if_sharpness_below,
-        "flag_if_overall_below": profile.flag_if_overall_below,
-        "near_duplicate_similarity_above": profile.near_duplicate_similarity_above,
-        "max_llm_candidates_per_group": profile.max_llm_candidates_per_group,
-    }))
-    .map_err(|error| sqlite_data_error(error.to_string()))?;
-    let actions_json = serde_json::to_string(&serde_json::json!({
-        "auto_delete": profile.auto_delete,
-        "auto_hide_low_score": profile.auto_hide_low_score,
-        "mark_best": profile.mark_best,
-        "keep_raw_pairs": profile.keep_raw_pairs,
-    }))
-    .map_err(|error| sqlite_data_error(error.to_string()))?;
-    let llm_json = serde_json::to_string(&serde_json::json!({
-        "llm_enabled": profile.llm_enabled,
-    }))
-    .map_err(|error| sqlite_data_error(error.to_string()))?;
-    connection.execute(
-        "INSERT INTO strategy_profiles (
-            profile_id, name, built_in, strategy_version, burst_window_ms, min_group_size,
-            weights_json, thresholds_json, actions_json, llm_json, updated_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-         ON CONFLICT(profile_id) DO UPDATE SET
-            name = excluded.name,
-            built_in = excluded.built_in,
-            strategy_version = excluded.strategy_version,
-            burst_window_ms = excluded.burst_window_ms,
-            min_group_size = excluded.min_group_size,
-            weights_json = excluded.weights_json,
-            thresholds_json = excluded.thresholds_json,
-            actions_json = excluded.actions_json,
-            llm_json = excluded.llm_json,
-            updated_at_ms = excluded.updated_at_ms",
-        params![
-            profile.profile_id,
-            profile.name,
-            profile.built_in,
-            profile.strategy_version,
-            profile.burst_window_ms,
-            profile.min_group_size as i64,
-            serde_json::to_string(&profile.weights)
-                .map_err(|error| sqlite_data_error(error.to_string()))?,
-            thresholds_json,
-            actions_json,
-            llm_json,
-            updated_at_ms,
-        ],
-    )?;
-    strategy_profile_by_id(connection, &profile.profile_id)?
-        .ok_or_else(|| sqlite_data_error("strategy profile not found"))
-}
-
-fn strategy_profile_by_id(
-    connection: &Connection,
-    profile_id: &str,
-) -> std::result::Result<Option<StrategyProfile>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT profile_id, name, built_in, strategy_version, burst_window_ms,
-                    min_group_size, weights_json, thresholds_json, actions_json, llm_json,
-                    updated_at_ms
-             FROM strategy_profiles
-             WHERE profile_id = ?1",
-            params![profile_id],
-            strategy_profile_from_row,
-        )
-        .optional()
-}
-
-fn strategy_profile_from_row(
-    row: &Row<'_>,
-) -> std::result::Result<StrategyProfile, rusqlite::Error> {
-    let weights_json: String = row.get(6)?;
-    let thresholds_json: String = row.get(7)?;
-    let actions_json: String = row.get(8)?;
-    let llm_json: String = row.get(9)?;
-    let thresholds: serde_json::Value = serde_json::from_str(&thresholds_json)
-        .map_err(|error| sqlite_data_error(error.to_string()))?;
-    let actions: serde_json::Value = serde_json::from_str(&actions_json)
-        .map_err(|error| sqlite_data_error(error.to_string()))?;
-    let llm: serde_json::Value =
-        serde_json::from_str(&llm_json).map_err(|error| sqlite_data_error(error.to_string()))?;
-    Ok(StrategyProfile {
-        profile_id: row.get(0)?,
-        name: row.get(1)?,
-        built_in: row.get::<_, bool>(2)?,
-        strategy_version: row.get(3)?,
-        burst_window_ms: row.get(4)?,
-        min_group_size: row.get::<_, i64>(5)? as usize,
-        weights: serde_json::from_str(&weights_json)
-            .map_err(|error| sqlite_data_error(error.to_string()))?,
-        reject_if_sharpness_below: thresholds
-            .get("reject_if_sharpness_below")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.25),
-        flag_if_overall_below: thresholds
-            .get("flag_if_overall_below")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.4),
-        near_duplicate_similarity_above: thresholds
-            .get("near_duplicate_similarity_above")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.92),
-        max_llm_candidates_per_group: thresholds
-            .get("max_llm_candidates_per_group")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(5) as usize,
-        auto_delete: actions
-            .get("auto_delete")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        auto_hide_low_score: actions
-            .get("auto_hide_low_score")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        mark_best: actions
-            .get("mark_best")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(true),
-        keep_raw_pairs: actions
-            .get("keep_raw_pairs")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(true),
-        llm_enabled: llm
-            .get("llm_enabled")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-        updated_at_ms: row.get(10)?,
-    })
-}
-
-fn save_quality_score_for_connection(
-    connection: &Connection,
-    score: QualityScore,
-) -> std::result::Result<QualityScore, rusqlite::Error> {
-    connection.execute(
-        "INSERT INTO quality_scores (
-            asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
-            capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
-            shadow_clipping_json, composition_json, composition_confidence,
-            similarity_cluster_id, overall, reasons_json, analyzed_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-         ON CONFLICT(asset_group_id, scorer_version) DO UPDATE SET
-            preview_source = excluded.preview_source,
-            analysis_status = excluded.analysis_status,
-            exif_status = excluded.exif_status,
-            capture_time_ms = excluded.capture_time_ms,
-            sharpness_json = excluded.sharpness_json,
-            exposure_json = excluded.exposure_json,
-            highlight_clipping_json = excluded.highlight_clipping_json,
-            shadow_clipping_json = excluded.shadow_clipping_json,
-            composition_json = excluded.composition_json,
-            composition_confidence = excluded.composition_confidence,
-            similarity_cluster_id = excluded.similarity_cluster_id,
-            overall = excluded.overall,
-            reasons_json = excluded.reasons_json,
-            analyzed_at_ms = excluded.analyzed_at_ms",
-        params![
-            score.asset_group_id,
-            score.scorer_version,
-            score.preview_source,
-            score.analysis_status.as_str(),
-            score.exif_status,
-            score.capture_time_ms,
-            signal_score_json(score.sharpness)?,
-            signal_score_json(score.exposure)?,
-            signal_score_json(score.highlight_clipping_penalty)?,
-            signal_score_json(score.shadow_clipping_penalty)?,
-            signal_score_json(score.composition)?,
-            score.composition_confidence,
-            score.similarity_cluster_id,
-            score.overall,
-            string_vec_json(&score.reasons)?,
-            score.analyzed_at_ms,
-        ],
-    )?;
-    quality_score_by_key(connection, &score.asset_group_id, &score.scorer_version)?
-        .ok_or_else(|| sqlite_data_error("quality score not found"))
-}
-
-fn quality_score_by_key(
-    connection: &Connection,
-    asset_group_id: &str,
-    scorer_version: &str,
-) -> std::result::Result<Option<QualityScore>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT asset_group_id, scorer_version, preview_source, analysis_status, exif_status,
-                    capture_time_ms, sharpness_json, exposure_json, highlight_clipping_json,
-                    shadow_clipping_json, composition_json, composition_confidence,
-                    similarity_cluster_id, overall, reasons_json, analyzed_at_ms
-             FROM quality_scores
-             WHERE asset_group_id = ?1 AND scorer_version = ?2",
-            params![asset_group_id, scorer_version],
-            quality_score_from_row,
-        )
-        .optional()
-}
-
-fn quality_scores_for_asset_group_ids(
-    connection: &Connection,
-    asset_group_ids: &[String],
-    scorer_version: &str,
-) -> std::result::Result<Vec<QualityScore>, rusqlite::Error> {
-    let mut scores = Vec::new();
-    for asset_group_id in asset_group_ids {
-        if let Some(score) = quality_score_by_key(connection, asset_group_id, scorer_version)? {
-            scores.push(score);
-        }
-    }
-    Ok(scores)
-}
-
-fn quality_score_from_row(row: &Row<'_>) -> std::result::Result<QualityScore, rusqlite::Error> {
-    let analysis_status: String = row.get(3)?;
-    Ok(QualityScore {
-        asset_group_id: row.get(0)?,
-        scorer_version: row.get(1)?,
-        preview_source: row.get(2)?,
-        analysis_status: QualityAnalysisStatus::from_str(&analysis_status),
-        exif_status: row.get(4)?,
-        capture_time_ms: row.get(5)?,
-        sharpness: signal_score_from_json(row.get::<_, String>(6)?)?,
-        exposure: signal_score_from_json(row.get::<_, String>(7)?)?,
-        highlight_clipping_penalty: signal_score_from_json(row.get::<_, String>(8)?)?,
-        shadow_clipping_penalty: signal_score_from_json(row.get::<_, String>(9)?)?,
-        composition: signal_score_from_json(row.get::<_, String>(10)?)?,
-        composition_confidence: row.get(11)?,
-        similarity_cluster_id: row.get(12)?,
-        overall: row.get(13)?,
-        reasons: string_vec_from_json(row.get::<_, String>(14)?)?,
-        analyzed_at_ms: row.get(15)?,
-    })
-}
-
 fn save_technical_assessment_for_connection(
     connection: &Connection,
     assessment: TechnicalAssessment,
@@ -5336,13 +4692,14 @@ fn save_technical_assessment_for_connection(
     connection.execute(
         "INSERT INTO technical_assessments (
             asset_group_id, assessor_version, status, gate_status, defect_flags_json,
-            preview_source, analyzed_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            preview_source, visual_signature, analyzed_at_ms
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(asset_group_id, assessor_version) DO UPDATE SET
             status = excluded.status,
             gate_status = excluded.gate_status,
             defect_flags_json = excluded.defect_flags_json,
             preview_source = excluded.preview_source,
+            visual_signature = excluded.visual_signature,
             analyzed_at_ms = excluded.analyzed_at_ms",
         params![
             assessment.asset_group_id,
@@ -5351,6 +4708,7 @@ fn save_technical_assessment_for_connection(
             assessment.gate_status.as_str(),
             technical_defect_flags_json(&assessment.defect_flags)?,
             assessment.preview_source,
+            assessment.visual_signature,
             assessment.analyzed_at_ms,
         ],
     )?;
@@ -5370,7 +4728,7 @@ fn technical_assessment_by_key(
     connection
         .query_row(
             "SELECT asset_group_id, assessor_version, status, gate_status, defect_flags_json,
-                    preview_source, analyzed_at_ms
+                    preview_source, visual_signature, analyzed_at_ms
              FROM technical_assessments
              WHERE asset_group_id = ?1 AND assessor_version = ?2",
             params![asset_group_id, assessor_version],
@@ -5407,7 +4765,8 @@ fn technical_assessment_from_row(
         gate_status: TechnicalGateStatus::from_str(&gate_status),
         defect_flags: technical_defect_flags_from_json(row.get::<_, String>(4)?)?,
         preview_source: row.get(5)?,
-        analyzed_at_ms: row.get(6)?,
+        visual_signature: row.get(6)?,
+        analyzed_at_ms: row.get(7)?,
     })
 }
 
@@ -5550,12 +4909,12 @@ fn model_evaluation_from_row(
     })
 }
 
-fn save_scoped_selection_recommendation_for_connection(
+fn save_selection_recommendation_for_connection(
     connection: &Connection,
-    recommendation: ScopedSelectionRecommendation,
-) -> std::result::Result<ScopedSelectionRecommendation, rusqlite::Error> {
+    recommendation: SelectionRecommendation,
+) -> std::result::Result<SelectionRecommendation, rusqlite::Error> {
     connection.execute(
-        "INSERT INTO scoped_selection_recommendations (
+        "INSERT INTO selection_recommendations (
             recommendation_id, run_id, scope, project_id, subject_id, selected_asset_group_ids_json,
             candidate_asset_group_ids_json, rejected_asset_group_ids_json, source, status,
             confidence, reason, created_at_ms, updated_at_ms
@@ -5590,141 +4949,26 @@ fn save_scoped_selection_recommendation_for_connection(
             recommendation.updated_at_ms,
         ],
     )?;
-    scoped_selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
-        .ok_or_else(|| sqlite_data_error("scoped selection recommendation not found"))
-}
-
-fn latest_scoped_selection_recommendation_for_connection(
-    connection: &Connection,
-    project_id: &str,
-    scope: SelectionRecommendationScope,
-    subject_id: &str,
-) -> std::result::Result<Option<ScopedSelectionRecommendation>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
-                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
-                    status, confidence, reason, created_at_ms, updated_at_ms
-             FROM scoped_selection_recommendations
-             WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3
-             ORDER BY updated_at_ms DESC, recommendation_id DESC
-             LIMIT 1",
-            params![project_id, scope.as_str(), subject_id],
-            scoped_selection_recommendation_from_row,
-        )
-        .optional()
-}
-
-fn scoped_selection_recommendation_by_id(
-    connection: &Connection,
-    recommendation_id: &str,
-) -> std::result::Result<Option<ScopedSelectionRecommendation>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
-                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
-                    status, confidence, reason, created_at_ms, updated_at_ms
-             FROM scoped_selection_recommendations
-             WHERE recommendation_id = ?1",
-            params![recommendation_id],
-            scoped_selection_recommendation_from_row,
-        )
-        .optional()
-}
-
-fn scoped_selection_recommendation_from_row(
-    row: &Row<'_>,
-) -> std::result::Result<ScopedSelectionRecommendation, rusqlite::Error> {
-    let scope: String = row.get(1)?;
-    let source: String = row.get(8)?;
-    let status: String = row.get(9)?;
-    Ok(ScopedSelectionRecommendation {
-        recommendation_id: row.get(0)?,
-        run_id: row.get(5)?,
-        scope: SelectionRecommendationScope::from_str(&scope),
-        project_id: row.get(2)?,
-        subject_id: row.get(3)?,
-        selected_asset_group_ids: string_vec_from_json(row.get::<_, String>(4)?)?,
-        candidate_asset_group_ids: string_vec_from_json(row.get::<_, String>(6)?)?,
-        rejected_asset_group_ids: string_vec_from_json(row.get::<_, String>(7)?)?,
-        source: SelectionSource::from_str(&source),
-        status: SelectionRecommendationStatus::from_str(&status),
-        confidence: row.get(10)?,
-        reason: row.get(11)?,
-        created_at_ms: row.get(12)?,
-        updated_at_ms: row.get(13)?,
-    })
-}
-
-fn save_selection_recommendation_for_connection(
-    connection: &Connection,
-    recommendation: SelectionRecommendation,
-) -> std::result::Result<SelectionRecommendation, rusqlite::Error> {
-    connection.execute(
-        "INSERT INTO selection_recommendations (
-            recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
-            strategy_version, grouping_version, best_asset_group_id,
-            alternate_asset_group_ids_json, low_score_asset_group_ids_json,
-            near_duplicate_asset_group_ids_json, source, status, confidence, reasons_json,
-            llm_review_id, created_at_ms, updated_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
-         ON CONFLICT(recommendation_id) DO UPDATE SET
-            burst_group_id = excluded.burst_group_id,
-            strategy_profile_id = excluded.strategy_profile_id,
-            scorer_version = excluded.scorer_version,
-            strategy_version = excluded.strategy_version,
-            grouping_version = excluded.grouping_version,
-            best_asset_group_id = excluded.best_asset_group_id,
-            alternate_asset_group_ids_json = excluded.alternate_asset_group_ids_json,
-            low_score_asset_group_ids_json = excluded.low_score_asset_group_ids_json,
-            near_duplicate_asset_group_ids_json = excluded.near_duplicate_asset_group_ids_json,
-            source = excluded.source,
-            status = excluded.status,
-            confidence = excluded.confidence,
-            reasons_json = excluded.reasons_json,
-            llm_review_id = excluded.llm_review_id,
-            updated_at_ms = excluded.updated_at_ms",
-        params![
-            recommendation.recommendation_id,
-            recommendation.burst_group_id,
-            recommendation.strategy_profile_id,
-            recommendation.scorer_version,
-            recommendation.strategy_version,
-            recommendation.grouping_version,
-            recommendation.best_asset_group_id,
-            string_vec_json(&recommendation.alternate_asset_group_ids)?,
-            string_vec_json(&recommendation.low_score_asset_group_ids)?,
-            string_vec_json(&recommendation.near_duplicate_asset_group_ids)?,
-            recommendation.source.as_str(),
-            recommendation.status.as_str(),
-            recommendation.confidence,
-            string_vec_json(&recommendation.reasons)?,
-            recommendation.llm_review_id,
-            recommendation.created_at_ms,
-            recommendation.updated_at_ms,
-        ],
-    )?;
     selection_recommendation_by_id(connection, &recommendation.recommendation_id)?
         .ok_or_else(|| sqlite_data_error("selection recommendation not found"))
 }
 
 fn latest_selection_recommendation_for_connection(
     connection: &Connection,
-    burst_group_id: &str,
-    strategy_profile_id: &str,
+    project_id: &str,
+    scope: SelectionRecommendationScope,
+    subject_id: &str,
 ) -> std::result::Result<Option<SelectionRecommendation>, rusqlite::Error> {
     connection
         .query_row(
-            "SELECT recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
-                    strategy_version, grouping_version, best_asset_group_id,
-                    alternate_asset_group_ids_json, low_score_asset_group_ids_json,
-                    near_duplicate_asset_group_ids_json, source, status, confidence,
-                    reasons_json, llm_review_id, created_at_ms, updated_at_ms
+            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
+                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
+                    status, confidence, reason, created_at_ms, updated_at_ms
              FROM selection_recommendations
-             WHERE burst_group_id = ?1 AND strategy_profile_id = ?2
+             WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3
              ORDER BY updated_at_ms DESC, recommendation_id DESC
              LIMIT 1",
-            params![burst_group_id, strategy_profile_id],
+            params![project_id, scope.as_str(), subject_id],
             selection_recommendation_from_row,
         )
         .optional()
@@ -5736,11 +4980,9 @@ fn selection_recommendation_by_id(
 ) -> std::result::Result<Option<SelectionRecommendation>, rusqlite::Error> {
     connection
         .query_row(
-            "SELECT recommendation_id, burst_group_id, strategy_profile_id, scorer_version,
-                    strategy_version, grouping_version, best_asset_group_id,
-                    alternate_asset_group_ids_json, low_score_asset_group_ids_json,
-                    near_duplicate_asset_group_ids_json, source, status, confidence,
-                    reasons_json, llm_review_id, created_at_ms, updated_at_ms
+            "SELECT recommendation_id, scope, project_id, subject_id, selected_asset_group_ids_json,
+                    run_id, candidate_asset_group_ids_json, rejected_asset_group_ids_json, source,
+                    status, confidence, reason, created_at_ms, updated_at_ms
              FROM selection_recommendations
              WHERE recommendation_id = ?1",
             params![recommendation_id],
@@ -5752,26 +4994,25 @@ fn selection_recommendation_by_id(
 fn selection_recommendation_from_row(
     row: &Row<'_>,
 ) -> std::result::Result<SelectionRecommendation, rusqlite::Error> {
-    let source: String = row.get(10)?;
-    let status: String = row.get(11)?;
+    let scope: String = row.get(1)?;
+    let source: String = row.get(8)?;
+    let status: String = row.get(9)?;
     Ok(SelectionRecommendation {
         recommendation_id: row.get(0)?,
-        burst_group_id: row.get(1)?,
-        strategy_profile_id: row.get(2)?,
-        scorer_version: row.get(3)?,
-        strategy_version: row.get(4)?,
-        grouping_version: row.get(5)?,
-        best_asset_group_id: row.get(6)?,
-        alternate_asset_group_ids: string_vec_from_json(row.get::<_, String>(7)?)?,
-        low_score_asset_group_ids: string_vec_from_json(row.get::<_, String>(8)?)?,
-        near_duplicate_asset_group_ids: string_vec_from_json(row.get::<_, String>(9)?)?,
-        source: SelectionSource::from_str(&source),
+        run_id: row.get(5)?,
+        scope: SelectionRecommendationScope::from_str(&scope),
+        project_id: row.get(2)?,
+        subject_id: row.get(3)?,
+        selected_asset_group_ids: string_vec_from_json(row.get::<_, String>(4)?)?,
+        candidate_asset_group_ids: string_vec_from_json(row.get::<_, String>(6)?)?,
+        rejected_asset_group_ids: string_vec_from_json(row.get::<_, String>(7)?)?,
+        source: SelectionSource::from_str(&source)
+            .ok_or_else(|| sqlite_data_error(format!("unknown selection source: {source}")))?,
         status: SelectionRecommendationStatus::from_str(&status),
-        confidence: row.get(12)?,
-        reasons: string_vec_from_json(row.get::<_, String>(13)?)?,
-        llm_review_id: row.get(14)?,
-        created_at_ms: row.get(15)?,
-        updated_at_ms: row.get(16)?,
+        confidence: row.get(10)?,
+        reason: row.get(11)?,
+        created_at_ms: row.get(12)?,
+        updated_at_ms: row.get(13)?,
     })
 }
 
@@ -5946,14 +5187,6 @@ fn analysis_job_from_row(row: &Row<'_>) -> std::result::Result<AnalysisJob, rusq
     })
 }
 
-fn signal_score_json(value: SignalScore) -> std::result::Result<String, rusqlite::Error> {
-    serde_json::to_string(&value).map_err(|error| sqlite_data_error(error.to_string()))
-}
-
-fn signal_score_from_json(value: String) -> std::result::Result<SignalScore, rusqlite::Error> {
-    serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
-}
-
 fn technical_defect_flags_json(
     value: &[TechnicalDefectFlag],
 ) -> std::result::Result<String, rusqlite::Error> {
@@ -6043,52 +5276,6 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
 }
 
 fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> bool {
-    let score = group_best_score(group);
-    let status_matches = query
-        .analysis_status
-        .as_ref()
-        .map(|expected| {
-            group
-                .model_status
-                .as_ref()
-                .is_some_and(|status| status.eq_ignore_ascii_case(expected))
-                || group
-                    .technical_status
-                    .as_ref()
-                    .is_some_and(|status| status.eq_ignore_ascii_case(expected))
-                || group
-                    .quality
-                    .as_ref()
-                    .is_some_and(|quality| quality.analysis_status.eq_ignore_ascii_case(expected))
-        })
-        .unwrap_or(true);
-    let recommendation_matches = query
-        .recommendation_state
-        .as_ref()
-        .map(|expected| {
-            group
-                .burst
-                .as_ref()
-                .map(|burst| burst.recommendation_status.eq_ignore_ascii_case(expected))
-                .unwrap_or(false)
-        })
-        .unwrap_or(true);
-    let min_matches = query
-        .score_min
-        .map(|minimum| {
-            score
-                .map(|value| normalize_query_score(value) >= normalize_query_score(minimum))
-                .unwrap_or(false)
-        })
-        .unwrap_or(true);
-    let max_matches = query
-        .score_max
-        .map(|maximum| {
-            score
-                .map(|value| normalize_query_score(value) <= normalize_query_score(maximum))
-                .unwrap_or(false)
-        })
-        .unwrap_or(true);
     let favorite_matches = query
         .favorite
         .map(|expected| group.user_marks.favorite == expected)
@@ -6097,38 +5284,25 @@ fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQu
         .marked
         .map(|expected| group.user_marks.marked == expected)
         .unwrap_or(true);
-    let queue_matches = query
-        .review_queue
+    let collection_matches = query
+        .collection
         .as_ref()
-        .map(|queue| asset_group_matches_model_queue(group, queue))
+        .map(|collection| asset_group_matches_collection(group, collection))
         .unwrap_or(true);
 
-    status_matches
-        && recommendation_matches
-        && min_matches
-        && max_matches
-        && favorite_matches
-        && marked_matches
-        && queue_matches
+    favorite_matches && marked_matches && collection_matches
 }
 
-fn asset_group_matches_model_queue(group: &ReceivedAssetGroup, queue: &str) -> bool {
-    match normalized_review_queue_key(queue).as_str() {
+fn asset_group_matches_collection(group: &ReceivedAssetGroup, collection: &str) -> bool {
+    match normalized_asset_collection_key(collection).as_str() {
         "all" => true,
         "model_selects" => group.is_model_select,
-        "unconfirmed_best"
-        | "needs_review"
-        | "low_score_candidates"
-        | "near_duplicates"
-        | "unsupported"
-        | "pending"
-        | "user_overridden" => true,
         "favorites" => group.is_favorite,
-        "flagged" => group.is_flagged,
-        "quality_risk" => {
+        "marked" => group.is_flagged,
+        "technical_risk" => {
             matches!(
                 group.technical_gate_status.as_deref(),
-                Some("warn" | "reject" | "needs_review" | "unsupported")
+                Some("warn" | "reject" | "inconclusive" | "unsupported")
             ) || matches!(group.model_tier.as_deref(), Some("weak" | "reject"))
         }
         "pending_analysis" => {
@@ -6143,30 +5317,18 @@ fn asset_group_matches_model_queue(group: &ReceivedAssetGroup, queue: &str) -> b
     }
 }
 
-fn representative_group_id_for_review_unit(
-    burst: &BurstGroup,
-    recommendation: Option<&SelectionRecommendation>,
-    scores: &[QualityScore],
-) -> Option<String> {
-    recommendation
-        .and_then(|value| value.best_asset_group_id.as_ref())
-        .filter(|group_id| {
-            burst
-                .member_group_ids
-                .iter()
-                .any(|member| member == *group_id)
-        })
-        .cloned()
-        .or_else(|| {
-            scores
-                .iter()
-                .filter(|score| score.analysis_status == QualityAnalysisStatus::Ready)
-                .max_by(|left, right| {
-                    score_sort_key(Some(left.overall)).cmp(&score_sort_key(Some(right.overall)))
-                })
-                .map(|score| score.asset_group_id.clone())
-        })
-        .or_else(|| burst.member_group_ids.first().cloned())
+fn normalized_asset_collection_key(collection: &str) -> String {
+    match collection.trim().to_ascii_lowercase().as_str() {
+        "" | "all" => "all".to_string(),
+        "model_select" | "model_selects" | "algorithm_select" | "algorithm_selects" => {
+            "model_selects".to_string()
+        }
+        "favorite" | "favorites" => "favorites".to_string(),
+        "mark" | "marked" | "flag" | "flagged" => "marked".to_string(),
+        "technical_risk" | "risk" => "technical_risk".to_string(),
+        "pending_analysis" | "analysis_pending" => "pending_analysis".to_string(),
+        value => value.to_string(),
+    }
 }
 
 fn sort_asset_groups_for_query(groups: &mut [ReceivedAssetGroup], sort: AssetGroupSort) {
@@ -6179,18 +5341,12 @@ fn sort_asset_groups_for_query(groups: &mut [ReceivedAssetGroup], sort: AssetGro
                     .then_with(|| left.group_id.cmp(&right.group_id))
             });
         }
-        AssetGroupSort::GroupBestScore => {
+        AssetGroupSort::ModelScore => {
             groups.sort_by(|left, right| {
                 let left_score = group_best_score(left);
                 let right_score = group_best_score(right);
-                let left_own_score = left
-                    .model_score
-                    .map(|score| score as f64)
-                    .or_else(|| left.quality.as_ref().map(|quality| quality.overall));
-                let right_own_score = right
-                    .model_score
-                    .map(|score| score as f64)
-                    .or_else(|| right.quality.as_ref().map(|quality| quality.overall));
+                let left_own_score = left.model_score.map(|score| score as f64);
+                let right_own_score = right.model_score.map(|score| score as f64);
                 score_sort_key(right_score)
                     .cmp(&score_sort_key(left_score))
                     .then_with(|| {
@@ -6211,22 +5367,13 @@ fn group_best_score(group: &ReceivedAssetGroup) -> Option<f64> {
         .as_ref()
         .and_then(|burst| burst.best_score)
         .or_else(|| group.model_score.map(|score| score as f64))
-        .or_else(|| group.quality.as_ref().map(|quality| quality.overall))
 }
 
 fn score_sort_key(score: Option<f64>) -> i64 {
     score
         .filter(|value| value.is_finite())
-        .map(|value| (normalize_query_score(value) * 1_000_000.0).round() as i64)
+        .map(|value| (value * 1_000_000.0).round() as i64)
         .unwrap_or(i64::MIN)
-}
-
-fn normalize_query_score(value: f64) -> f64 {
-    if value > 1.0 {
-        value / 100.0
-    } else {
-        value
-    }
 }
 
 fn group_received_sort_time(group: &ReceivedAssetGroup) -> Option<i64> {

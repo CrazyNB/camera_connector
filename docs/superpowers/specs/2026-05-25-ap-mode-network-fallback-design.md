@@ -15,7 +15,7 @@ The current product route is push-based FTP/SFTP. AP mode still means the camera
 - Android gateway boundaries around native core calls.
 - A dashboard model that can show receiver status, connected devices, transfers, and failures.
 
-AP mode should extend the Android network orchestration around the existing receiver. It should not change transfer semantics, account handling, flat inbox behavior, transfer logs, or asset grouping.
+AP mode should extend the Android network orchestration around the existing receiver. It should not change transfer semantics, account handling, flat output behavior, transfer logs, or project asset grouping.
 
 ## Decision
 
@@ -109,7 +109,7 @@ The receiver should keep the existing runtime model but accept AP-mode overrides
 - `protocol`: reuse saved FTP/SFTP setting.
 - `port`: reuse saved AP-mode or receiver setting.
 - `state_dir`: app-private state.
-- `output_dir`: current app-private inbox until SAF/MediaStore write backend lands.
+- `output_dir`: current app-private output location until SAF/MediaStore write backend lands.
 
 The UI must show the exact camera-facing endpoint: protocol, Wi-Fi IP, port, username, password status, and storage label.
 
@@ -221,7 +221,7 @@ AP Mode v1 is accepted when:
 
 - The app can guide the user onto a camera AP and show the phone's camera-facing IP.
 - The receiver starts with a camera-facing endpoint that the camera can upload to.
-- FTP upload from a real camera AP completes and appears in the existing transfer log and inbox dashboard.
+- FTP upload from a real camera AP completes and appears in the existing transfer log and project dashboard.
 - The app detects whether cellular internet is available while connected to the camera AP.
 - Public app operations can be explicitly executed over cellular when cellular is available.
 - The UI distinguishes camera-transfer availability from internet availability.

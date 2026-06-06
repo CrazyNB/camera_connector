@@ -3,8 +3,8 @@ use std::fs;
 use std::path::Path;
 
 use camera_connector_core::{
-    PublishTransferMetadata, QualityAnalysisStatus, QualityScore, SignalScore, SqliteStore,
-    StoredObjectLocation, StrategyProfile,
+    BurstGroupingProfile, PublishTransferMetadata, SqliteStore, StoredObjectLocation,
+    TechnicalAssessment, TechnicalAssessmentStatus, TechnicalGateStatus,
 };
 
 #[test]
@@ -47,7 +47,7 @@ fn burst_grouping_without_capture_time_uses_filename_sequence() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
 
@@ -89,7 +89,7 @@ fn burst_grouping_without_capture_time_does_not_chain_by_received_time_only() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
 
@@ -143,7 +143,7 @@ fn burst_grouping_with_capture_time_does_not_chain_by_filename_sequence_only() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
     let page = store
@@ -200,7 +200,7 @@ fn visual_refinement_splits_time_candidate_burst_when_frame_signature_changes() 
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
     assert_eq!(initial_bursts.len(), 1);
@@ -212,29 +212,29 @@ fn visual_refinement_splits_time_candidate_burst_when_frame_signature_changes() 
         .collect::<Vec<_>>();
     ids_by_key.sort_by_key(|(key, _)| *key);
     store
-        .save_quality_score(quality_score_with_signature(
+        .save_technical_assessment(technical_assessment_with_signature(
             &ids_by_key[0].1,
             "ahash-v1:ffff0000ffff0000",
         ))
-        .expect("first score should save");
+        .expect("first assessment should save");
     store
-        .save_quality_score(quality_score_with_signature(
+        .save_technical_assessment(technical_assessment_with_signature(
             &ids_by_key[1].1,
             "ahash-v1:ffff0000ffff0000",
         ))
-        .expect("second score should save");
+        .expect("second assessment should save");
     store
-        .save_quality_score(quality_score_with_signature(
+        .save_technical_assessment(technical_assessment_with_signature(
             &ids_by_key[2].1,
             "ahash-v1:0000ffff0000ffff",
         ))
-        .expect("third score should save");
+        .expect("third assessment should save");
 
     let refined = store
         .refine_burst_group_by_visual_similarity(
             &initial_bursts[0].burst_group_id,
-            &StrategyProfile::general(),
-            "local-v1",
+            &BurstGroupingProfile::default(),
+            "technical-v1",
         )
         .expect("visual refinement should run");
     let page = store
@@ -290,7 +290,7 @@ fn burst_grouping_does_not_cross_source_identity() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
 
@@ -337,7 +337,7 @@ fn out_of_order_upload_merges_existing_burst_groups() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &late_group,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
 
@@ -391,7 +391,7 @@ fn manual_split_removes_member_from_existing_burst_group() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
     assert_eq!(bursts.len(), 1);
@@ -413,7 +413,7 @@ fn manual_split_removes_member_from_existing_burst_group() {
     assert_eq!(updated.member_count, 2);
     assert_eq!(updated.grouping_version, 2);
     assert_eq!(updated.recommendation_status, "pending");
-    assert_eq!(updated.user_override_state.as_deref(), Some("split"));
+    assert_eq!(updated.manual_grouping_state.as_deref(), Some("split"));
     assert!(!updated.member_group_ids.contains(&split_group_id));
     assert!(split_group.burst.is_none());
 }
@@ -464,7 +464,7 @@ fn manual_split_survives_later_burst_detection() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
     store
@@ -475,7 +475,7 @@ fn manual_split_survives_later_burst_detection() {
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("later detection should run");
     let page = store
@@ -550,7 +550,7 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("bursts should detect");
     assert_eq!(bursts.len(), 1);
@@ -574,7 +574,7 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
 
     assert_eq!(merged.member_count, 4);
     assert_eq!(merged.recommendation_status, "pending");
-    assert_eq!(merged.user_override_state.as_deref(), Some("merge"));
+    assert_eq!(merged.manual_grouping_state.as_deref(), Some("merge"));
     assert_eq!(
         store.burst_group(&source_burst_id).expect("source lookup"),
         None
@@ -584,7 +584,7 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
-            &StrategyProfile::general(),
+            &BurstGroupingProfile::default(),
         )
         .expect("later detection should run");
     let page = store
@@ -656,23 +656,15 @@ fn publish_jpeg_with_user(
         .expect("publish should complete");
 }
 
-fn quality_score_with_signature(group_id: &str, signature: &str) -> QualityScore {
-    QualityScore {
+fn technical_assessment_with_signature(group_id: &str, signature: &str) -> TechnicalAssessment {
+    TechnicalAssessment {
         asset_group_id: group_id.to_string(),
+        assessor_version: "technical-v1".to_string(),
+        status: TechnicalAssessmentStatus::Ready,
+        gate_status: TechnicalGateStatus::Pass,
+        defect_flags: Vec::new(),
         preview_source: Some("test".to_string()),
-        scorer_version: "local-v1".to_string(),
-        analysis_status: QualityAnalysisStatus::Ready,
-        exif_status: None,
-        capture_time_ms: None,
-        sharpness: SignalScore::ready(0.8),
-        exposure: SignalScore::ready(0.8),
-        highlight_clipping_penalty: SignalScore::ready(0.0),
-        shadow_clipping_penalty: SignalScore::ready(0.0),
-        composition: SignalScore::ready(0.8),
-        composition_confidence: 0.8,
-        similarity_cluster_id: Some(signature.to_string()),
-        overall: 0.8,
-        reasons: vec!["test score".to_string()],
+        visual_signature: Some(signature.to_string()),
         analyzed_at_ms: 1_000,
     }
 }

@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use super::PreviewSample;
-
 const DEFAULT_ASSESSOR_VERSION: &str = "technical-v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewSample {
+    pub width: usize,
+    pub height: usize,
+    pub luma: Vec<u8>,
+    pub preview_source: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TechnicalAssessmentStatus {
@@ -40,7 +46,7 @@ pub enum TechnicalGateStatus {
     Pass,
     Warn,
     Reject,
-    NeedsReview,
+    Inconclusive,
     Unsupported,
 }
 
@@ -50,7 +56,7 @@ impl TechnicalGateStatus {
             Self::Pass => "pass",
             Self::Warn => "warn",
             Self::Reject => "reject",
-            Self::NeedsReview => "needs_review",
+            Self::Inconclusive => "inconclusive",
             Self::Unsupported => "unsupported",
         }
     }
@@ -61,7 +67,7 @@ impl TechnicalGateStatus {
             "warn" => Self::Warn,
             "reject" => Self::Reject,
             "unsupported" => Self::Unsupported,
-            _ => Self::NeedsReview,
+            _ => Self::Inconclusive,
         }
     }
 }
@@ -145,6 +151,7 @@ pub struct TechnicalAssessment {
     pub gate_status: TechnicalGateStatus,
     pub defect_flags: Vec<TechnicalDefectFlag>,
     pub preview_source: Option<String>,
+    pub visual_signature: Option<String>,
     pub analyzed_at_ms: i64,
 }
 
@@ -176,10 +183,12 @@ pub fn assess_preview_sample(
                 reason: "unsupported preview sample".to_string(),
             }],
             preview_source: sample.preview_source,
+            visual_signature: None,
             analyzed_at_ms,
         };
     }
 
+    let visual_signature = average_hash_signature(&sample);
     let mut defect_flags = Vec::new();
     let edge_detail = edge_detail_score(&sample);
     let high_frequency = high_frequency_proxy(&sample);
@@ -230,8 +239,48 @@ pub fn assess_preview_sample(
         gate_status,
         defect_flags,
         preview_source: sample.preview_source,
+        visual_signature,
         analyzed_at_ms,
     }
+}
+
+fn average_hash_signature(sample: &PreviewSample) -> Option<String> {
+    if sample.width == 0
+        || sample.height == 0
+        || sample.luma.len() != sample.width.saturating_mul(sample.height)
+    {
+        return None;
+    }
+    let mut cells = [0_u32; 64];
+    let mut counts = [0_u32; 64];
+    for y in 0..sample.height {
+        let cell_y = y * 8 / sample.height;
+        for x in 0..sample.width {
+            let cell_x = x * 8 / sample.width;
+            let index = cell_y * 8 + cell_x;
+            cells[index] += sample.luma[y * sample.width + x] as u32;
+            counts[index] += 1;
+        }
+    }
+    let averages = cells
+        .into_iter()
+        .zip(counts)
+        .map(|(sum, count)| {
+            if count == 0 {
+                0.0
+            } else {
+                sum as f64 / count as f64
+            }
+        })
+        .collect::<Vec<_>>();
+    let mean = averages.iter().sum::<f64>() / averages.len() as f64;
+    let mut hash = 0_u64;
+    for (index, value) in averages.into_iter().enumerate() {
+        if value > mean {
+            hash |= 1_u64 << index;
+        }
+    }
+    Some(format!("ahash-v1:{hash:016x}"))
 }
 
 fn edge_detail_score(sample: &PreviewSample) -> f64 {

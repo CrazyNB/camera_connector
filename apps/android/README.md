@@ -6,7 +6,7 @@ The app is intentionally thin:
 
 - Kotlin + Jetpack Compose renders the product shell.
 - Android owns foreground service, notification, storage permission, and platform lifecycle.
-- The existing Rust core remains the source of truth for receiver behavior, transfer log, account state, and inbox grouping.
+- The existing Rust core remains the source of truth for receiver behavior, transfer log, account state, and project asset grouping.
 
 ## Current State
 
@@ -20,7 +20,7 @@ The Android source now has a native gateway boundary:
   profile list/fork/save, manual project recommendation, latest run status, and
   portrait subject assessment APIs.
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
-- `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/inbox` and `filesDir/state`.
+- `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/output` and `filesDir/state`.
 - `ReceiverForegroundService` owns native receiver start/stop while Android keeps the foreground notification alive.
 - `ReceiverForegroundService` also runs a publish queue worker that claims staged items from Rust and publishes them through the Android storage boundary; when the user has selected a document tree it publishes to SAF and records `document_uri`, otherwise it falls back to app-private file storage. The worker resolves the target for each publish so changing or reauthorizing the output directory can recover queued failures without restarting the receiver.
 - The foreground notification can reopen the app and exposes a Stop action so receiver shutdown is available outside the Compose UI.
@@ -30,7 +30,7 @@ The Android source now has a native gateway boundary:
 - Diagnostics are reachable from Settings and read native dashboard transfer counts plus recent failure rows, including virtual display paths and core error messages.
 - Account rows include current connection count, latest remote endpoint, and last seen/disconnected timestamps from the native dashboard.
 - The Receiver card shows native runtime phase, authentication mode, configured account count, and receiver diagnostic message.
-- The Output card launches Android's document tree picker and persists the selected inbox URI label; native imports use that selected SAF tree as the final publish target when it is available.
+- The Output card launches Android's document tree picker and persists the selected output URI label; native imports use that selected SAF tree as the final publish target when it is available.
 - The receiver panel and collapsed running status surface pending and failed publish queue counts from the Rust dashboard, so SAF permission loss or other retryable publish failures are visible in-app.
 - Publish queue failures remain visible through the receiver status and Settings diagnostics surface, alongside completed imports and failed receiver transfers.
 - Compose receiver/account actions catch native gateway exceptions and show a dismissible action error card instead of failing silently.
@@ -40,12 +40,19 @@ The Android source now has a native gateway boundary:
   state, project evaluation settings, prompt profiles and versions, manual
   project recommendation runs, latest run status, provider-aware drain/score
   gating, and subject assessment storage.
+- Model provider profiles are app-level config entries, not SQLite project
+  records. A profile contains provider kind, display label, base URL, model
+  name, send mode, batch size, and API key in app-private core config JSON; UI
+  read calls expose only configured state/key alias instead of echoing the key.
 - With no provider/API key configured, upload, thumbnails, grouping, publishing,
   and local technical CV continue. Model evaluation and project recommendation
   are skipped or disabled rather than faked; any explicit development stub result
   must be surfaced as `local_stub`.
+- Model semantics are split: local CV writes technical risk, model evaluation
+  writes photographic score/summary, `selection_recommendations` stores model
+  recommendations only, and favorite/mark state is the user's independent choice.
 - Project-level recommendation is manual-only. Upload/background drains do not
-  create project-scope Model Selects, and global provider defaults do not
+  create project-scope model recommendations, and global provider defaults do not
   silently rewrite existing project settings.
 - Prompt profiles are named, style-tagged, and versioned. Editing a built-in
   prompt forks it for the project before saving a new prompt version, and runs
@@ -55,7 +62,7 @@ The Android source now has a native gateway boundary:
   honor the storage/API contract in this slice.
 - The app opens on Project Management. Entering a project opens the photo-first project workspace: the receiver launch panel starts expanded while stopped, collapses into a compact running status after start, and the rest of the page is the project photo grid with compact tiles, JPEG previews from local paths or SAF document URIs, tap-to-detail, and long-press selection.
 
-The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation.
+The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds, but the preview gateway starts with no project, no account, and no fake receiver data. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation. Native gateway failures no longer fall back to preview unless `-PcameraConnector.nativeCoreFallbackToPreview=true` is passed explicitly.
 
 ## Local Build Prerequisites
 

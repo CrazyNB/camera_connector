@@ -23,8 +23,6 @@ pub struct TransferRecord {
     pub original_path: String,
     pub final_filename: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_path: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_location: Option<StoredObjectLocation>,
     pub size_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,18 +38,11 @@ pub struct TransferRecord {
 
 impl TransferRecord {
     pub fn resolved_final_location(&self) -> Option<StoredObjectLocation> {
-        self.final_location.clone().or_else(|| {
-            self.final_path
-                .clone()
-                .map(StoredObjectLocation::local_path)
-        })
+        self.final_location.clone()
     }
 
     pub fn final_location_kind(&self) -> Option<&'static str> {
-        self.final_location
-            .as_ref()
-            .map(StoredObjectLocation::kind)
-            .or_else(|| self.final_path.as_ref().map(|_| "local_path"))
+        self.final_location.as_ref().map(StoredObjectLocation::kind)
     }
 
     pub fn final_location_label(&self) -> Option<String> {

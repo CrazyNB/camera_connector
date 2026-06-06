@@ -103,9 +103,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
@@ -180,7 +180,7 @@ internal fun DiagnosticsScreen(
                 Text("诊断日志", style = MaterialTheme.typography.headlineMedium)
             }
             Spacer(Modifier.height(4.dp))
-            Text("连接、传输和发布状态", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u53d1\u5e03\u72b6\u6001", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -198,7 +198,7 @@ internal fun DiagnosticsScreen(
                 )
                 MetricCard(
                     value = dashboard.publishQueue.pendingCount.toString(),
-                    label = "队列待处理",
+                    label = "\u961f\u5217\u5f85\u5904\u7406",
                     accentColor = ElementWarning,
                     modifier = Modifier.weight(1f),
                 )
@@ -206,7 +206,7 @@ internal fun DiagnosticsScreen(
         }
         val recentTransfers = dashboard.transfers.take(6)
         if (recentTransfers.isEmpty()) {
-            item { Text("暂无诊断事件。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { Text("暂无诊断事件", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else {
             items(recentTransfers) { transfer ->
                 ElementCard(modifier = Modifier.fillMaxWidth()) {

@@ -54,6 +54,9 @@ flowchart TD
   K --> L["Receiver stages bytes, then publishes completed files"]
   K --> M["SQLite stores project, transfer, asset, group, and publish state"]
   L --> N["Project Photos shows grouped RAW/JPEG/video assets"]
+  N --> Q["Local CV records technical risks"]
+  Q --> R["Configured model evaluates photos/groups"]
+  R --> S["Model recommendations and user marks render separately"]
   M --> O["Receiver status summarizes transfer and publish health"]
   M --> P["Settings Diagnostics shows operational rows and errors"]
 ```
@@ -86,7 +89,7 @@ Content:
 - Project list with active and archived states.
 - Create project.
 - Select active project before starting or inspecting imports.
-- Explicit project selection before imports; the app does not create a default Inbox fallback.
+- Explicit project selection before imports; the app does not create a default system project fallback.
 
 ### Receiver Setup
 
@@ -133,6 +136,57 @@ Content:
 - Tag filters: source name, username, original path, transfer id, remote IP.
 - Virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF`.
 - Duplicate index/count for repeated imports from the same account/source and original camera path.
+- Collection filters: All, Model Selects, Favorites, Marked, Technical Risk,
+  Pending Analysis.
+- Burst groups aggregate into one card. The grid card shows a compact count and
+  cover preview; detail opens a carousel-style group view.
+- Technical gate is shown as risk context only, not as final photo score.
+- Model evaluation shows photographic score/tier/summary when configured.
+- Model recommendation, user favorite, and user mark use separate visual states.
+
+### Project Configuration
+
+Purpose: configure model behavior for the active project.
+
+Entry: project management card settings or project workspace settings action.
+
+Content:
+
+- Select model provider profile.
+- Enable/disable automatic model evaluation after upload.
+- Enable/disable automatic burst recommendation.
+- Keep project recommendation as a manual action.
+- Select scene profile: General, Portrait, Action, Landscape, Custom.
+- Select CV policy: Loose, Standard, Strict.
+- Select prompt profile/version.
+
+### Model Provider Settings
+
+Purpose: manage global model capability.
+
+Entry: Settings.
+
+Content:
+
+- List named provider profiles.
+- Create/update/delete provider profile.
+- Provider kind, display label, base URL, model name, send mode, batch size, and
+  API key.
+- Configured/unconfigured state.
+
+### Prompt Profiles
+
+Purpose: manage the editable part of model prompts.
+
+Entry: Settings secondary page.
+
+Content:
+
+- List prompt profiles with style tags.
+- Open profile detail.
+- Edit prompt body by creating a new version.
+- Built-in request/response protocol and output schema are locked by the app and
+  are not edited in this screen.
 
 ### Settings
 
@@ -142,6 +196,8 @@ Content:
 
 - Output directory selection.
 - Photo grid density.
+- Model provider profiles.
+- Prompt profile library.
 - Diagnostics entry.
 - App/runtime preferences that are not project-owned.
 

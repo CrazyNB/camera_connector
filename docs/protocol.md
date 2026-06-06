@@ -65,7 +65,7 @@ Not yet implemented:
 - System config, receiver state/logs, and uploaded assets are separate:
   - Config: receiver and product settings, stored in the app config path such as `%APPDATA%/CameraConnector/config.json`.
   - State/log directory: `camera-connector.sqlite3`, `transfer-log.jsonl`, `sftp-host-key`, and the `staging` directory.
-  - Output/inbox location: completed camera files only.
+  - Output location: completed camera files only.
 - The core records final save targets as `StoredObjectLocation`, not only as local filesystem paths:
   - Desktop: `local_path`.
   - Android: `media_uri` or `document_uri` through MediaStore/SAF.
@@ -73,7 +73,7 @@ Not yet implemented:
 - Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then publish contract.
 - Publish workers must claim a pending `publish_queue` item before writing to final storage; claiming moves `staged` items, or `failed` items whose `next_attempt_at_ms` is due, to `publishing` so retry workers do not publish the same staged bytes twice or hammer revoked storage permissions.
 - App shells may clear `next_attempt_at_ms` for failed rows in the active project after the user explicitly retries or reauthorizes storage; the next worker poll can then claim those rows immediately.
-- Every completed upload is indexed under a project in SQLite. The app shell must provide or select an active project before receiving files; the core no longer creates a default `Inbox` project. Dashboard and asset review views must name a project; audit-log diagnostics are separate from project views.
+- Every completed upload is indexed under a project in SQLite. The app shell must provide or select an active project before receiving files; the core no longer creates a default system project. Dashboard and asset browsing/detail views must name a project; audit-log diagnostics are separate from project views.
 - Never trust uploaded paths.
 - Remove traversal segments such as `..`.
 - Use only the final remote filename for local storage.
@@ -121,7 +121,7 @@ The receiver writes connected-device state to the SQLite `connected_devices` tab
 - first seen, last seen, and last disconnected timestamps.
 - source name resolved from the authenticated account when available.
 
-This table powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not an inbox asset.
+This table powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not a received asset.
 
 When the FTP or SFTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old sessions still exist, so the device view only returns to online after the camera opens a new connection.
 
@@ -138,7 +138,7 @@ The receiver writes runtime status to the SQLite `receiver_status` table in the 
 - `account_count`.
 - `message`: failure or diagnostic text.
 
-The status table is receiver metadata, not an inbox asset. Current receivers write it outside the inbox; inbox scans still ignore known metadata filenames defensively.
+The status table is receiver metadata, not a received asset. Current receivers write it outside the output location; received asset scans still ignore known metadata filenames defensively.
 
 Status readers should treat a stale `Running` row as stopped when the recorded listener is no longer reachable. This covers force-quit, crash, development smoke tests, and OS-level process termination where the receiver cannot run its normal shutdown path.
 

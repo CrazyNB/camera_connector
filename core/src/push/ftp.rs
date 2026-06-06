@@ -445,17 +445,12 @@ async fn handle_stor(
             return Err(error);
         }
     };
-    let final_path = progress
-        .output_path
-        .clone()
-        .ok_or_else(|| ImporterError::internal("completed transfer missing output path"))?;
     let record = TransferRecord {
         transfer_id,
         protocol: "ftp".to_string(),
         status: TransferStatus::Completed,
         original_path: upload_path,
         final_filename: progress.filename,
-        final_path: Some(final_path),
         final_location: progress.output_location,
         size_bytes: progress.bytes_written,
         username,

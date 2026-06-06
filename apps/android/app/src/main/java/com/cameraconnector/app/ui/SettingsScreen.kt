@@ -105,9 +105,9 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.core.EvaluationRunUi
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PromptProfileUi
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
@@ -139,14 +139,14 @@ internal fun SettingsScreen(
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
-    selectedInboxLabel: String?,
-    onChooseInboxDirectory: () -> Unit,
+    selectedOutputLabel: String?,
+    onChooseOutputDirectory: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onOpenPromptProfiles: () -> Unit,
+    onOpenModelProviders: () -> Unit,
     projectPhotoGridColumnCount: Int,
     onProjectPhotoGridColumnCountChange: (Int) -> Unit,
-    modelProviderSettings: ModelProviderSettingsUi = ModelProviderSettingsUi(),
-    onSaveModelProviderSettings: (ModelProviderSettingsUi) -> Unit = {},
+    modelProviderSettingsList: List<ModelProviderSettingsUi> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -174,7 +174,7 @@ internal fun SettingsScreen(
         item {
             SettingsMenuRow(
                 title = "诊断日志",
-                subtitle = "连接、传输和发布状态",
+                subtitle = "\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u53d1\u5e03\u72b6\u6001",
                 trailing = ">",
                 onClick = onOpenDiagnostics,
             )
@@ -194,7 +194,7 @@ internal fun SettingsScreen(
                         Text("项目照片网格", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "${projectPhotoGridColumnCount}列",
+                            "${projectPhotoGridColumnCount}\u5217",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -208,21 +208,27 @@ internal fun SettingsScreen(
         }
 
         item {
-            Text("智能优选", style = MaterialTheme.typography.titleMedium)
+            Text("\u667a\u80fd\u4f18\u9009", style = MaterialTheme.typography.titleMedium)
         }
         item {
+            val configuredCount = modelProviderSettingsList.count { it.configured && it.providerKind != "none" }
             SettingsMenuRow(
-                title = "提示词配置",
-                subtitle = "全局评价偏好，协议由系统锁定",
+                title = "模型服务",
+                subtitle = if (configuredCount > 0) {
+                    "已配置 ${configuredCount} 个，项目内选择使用"
+                } else {
+                    "未配置，项目智能评价需要模型服务"
+                },
                 trailing = ">",
-                onClick = onOpenPromptProfiles,
+                onClick = onOpenModelProviders,
             )
         }
         item {
-            ModelProviderSettingsCard(
-                settings = modelProviderSettings,
-                actionsEnabled = actionInFlight == null,
-                onSaveSettings = onSaveModelProviderSettings,
+            SettingsMenuRow(
+                title = "\u63d0\u793a\u8bcd\u914d\u7f6e",
+                subtitle = "全局评价偏好，协议由系统锁定",
+                trailing = ">",
+                onClick = onOpenPromptProfiles,
             )
         }
         if (notificationPermissionRequired && !notificationPermissionGranted) {
@@ -231,7 +237,7 @@ internal fun SettingsScreen(
                     Column(Modifier.padding(16.dp)) {
                         Text("通知权限", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
-                        Text("启动接收服务前需要允许通知。")
+                        Text("启动接收服务前需要允许通知权限")
                         Spacer(Modifier.height(12.dp))
                         Button(onClick = onRequestNotificationPermission) {
                             Text("允许通知")
@@ -246,10 +252,10 @@ internal fun SettingsScreen(
         }
         item {
             SettingsMenuRow(
-                title = "外部文件夹授权",
-                subtitle = selectedInboxLabel ?: "未授权",
+                title = "\u5916\u90e8\u6587\u4ef6\u5939\u6388\u6743",
+                subtitle = selectedOutputLabel ?: "\u672a\u6388\u6743",
                 trailing = ">",
-                onClick = onChooseInboxDirectory,
+                onClick = onChooseOutputDirectory,
             )
         }
         item {
@@ -265,12 +271,66 @@ internal fun SettingsScreen(
 }
 
 @Composable
+internal fun ModelProviderProfilesScreen(
+    modelProviderSettings: ModelProviderSettingsUi,
+    modelProviderSettingsList: List<ModelProviderSettingsUi>,
+    actionError: String?,
+    actionInFlight: String?,
+    onClearActionError: () -> Unit,
+    onBack: () -> Unit,
+    onSaveModelProviderSettings: (ModelProviderSettingsUi) -> Unit,
+    onDeleteModelProviderSettings: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("模型服务", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text("配置可复用的模型 API，项目只选择使用哪一个", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
+        actionError?.let { message ->
+            item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
+        }
+
+        actionInFlight?.let { action ->
+            item { ProcessingCard(action) }
+        }
+
+        item {
+            ModelProviderSettingsCard(
+                settings = modelProviderSettings,
+                settingsList = modelProviderSettingsList,
+                actionsEnabled = actionInFlight == null,
+                onSaveSettings = onSaveModelProviderSettings,
+                onDeleteSettings = onDeleteModelProviderSettings,
+            )
+        }
+    }
+}
+
+@Composable
 internal fun PromptProfilesScreen(
     promptProfiles: List<PromptProfileUi>,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onBack: () -> Unit,
+    onCreatePromptProfile: () -> Unit,
     onOpenPromptProfile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -288,9 +348,16 @@ internal fun PromptProfilesScreen(
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("提示词配置", style = MaterialTheme.typography.headlineSmall)
+                    Text("\u63d0\u793a\u8bcd\u914d\u7f6e", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(4.dp))
-                    Text("只编辑评价偏好，输入输出协议由系统锁定", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("\u53ea\u7f16\u8f91\u8bc4\u4ef7\u504f\u597d\uff0c\u8f93\u5165\u8f93\u51fa\u534f\u8bae\u7531\u7cfb\u7edf\u9501\u5b9a", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                OutlinedButton(
+                    onClick = onCreatePromptProfile,
+                    enabled = actionInFlight == null,
+                    shape = elementShape,
+                ) {
+                    Text("新建")
                 }
             }
         }
@@ -307,7 +374,7 @@ internal fun PromptProfilesScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "暂无提示词配置。",
+                        "\u6682\u65e0\u63d0\u793a\u8bcd\u914d\u7f6e",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -350,7 +417,7 @@ private fun PromptProfileRow(
                 Text(
                     listOf(
                         promptStyleTagsText(profile),
-                        if (profile.builtIn) "内置偏好，只能复制后编辑" else "自定义偏好，可编辑",
+                        if (profile.builtIn) "\u5185\u7f6e\u504f\u597d\uff0c\u53ea\u80fd\u590d\u5236\u540e\u7f16\u8f91" else "\u81ea\u5b9a\u4e49\u504f\u597d\uff0c\u53ef\u7f16\u8f91",
                     ).filter { it.isNotBlank() }.joinToString(" · "),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -371,16 +438,44 @@ internal fun PromptProfileEditorScreen(
     onClearActionError: () -> Unit,
     onBack: () -> Unit,
     onSave: (PromptProfileUi, String, String) -> Unit,
+    onCreate: (String, List<String>, String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val createMode = profile == null
+    val builtInProfile = profile?.builtIn == true
     var name by remember(profile?.promptProfileId) {
-        mutableStateOf(profile?.let(::promptProfileDisplayName)?.let { "自定义 $it" } ?: "")
+        mutableStateOf(
+            when {
+                createMode -> ""
+                builtInProfile -> profile.let(::promptProfileDisplayName).let { "自定义 $it" }
+                else -> profile.let(::promptProfileDisplayName)
+            },
+        )
     }
-    var promptText by remember(profile?.promptProfileId, profile?.activePromptText) {
-        mutableStateOf(profile?.activePromptText.orEmpty())
+    var styleTagsText by remember(profile?.promptProfileId) {
+        mutableStateOf(
+            profile?.styleTags
+                ?.filter { it.isNotBlank() }
+                ?.joinToString(" ") { promptStyleTagLabel(it) }
+                ?: "通用 均衡",
+        )
+    }
+    var sceneProfile by remember(profile?.promptProfileId) {
+        mutableStateOf(profile?.sceneProfile?.ifBlank { "general" } ?: "general")
+    }
+    var promptText by remember(profile?.promptProfileId, profile?.sharedPreference, profile?.activePromptText) {
+        mutableStateOf(profile?.sharedPreference ?: profile?.activePromptText.orEmpty())
     }
     val cleanName = name.trim()
     val cleanPrompt = promptText.trim()
+    val cleanStyleTags = parsePromptStyleTags(styleTagsText)
+    val actionsEnabled = actionInFlight == null
+    val canSubmit = actionsEnabled && cleanPrompt.isNotBlank() &&
+        when {
+            createMode -> cleanName.isNotBlank()
+            builtInProfile -> cleanName.isNotBlank()
+            else -> true
+        }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -393,13 +488,23 @@ internal fun PromptProfileEditorScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回提示词列表")
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "\u8fd4\u56de\u63d0\u793a\u8bcd\u5217\u8868")
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(profile?.let(::promptProfileDisplayName) ?: "编辑提示词", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        when {
+                            createMode -> "新建提示词"
+                            else -> profile.let(::promptProfileDisplayName)
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        if (profile?.builtIn == true) "内置评价偏好会复制为全局自定义偏好" else "保存后作为新的全局评价偏好版本",
+                        when {
+                            createMode -> "创建一套全局摄影偏好，项目内按需选择"
+                            builtInProfile -> "内置偏好会复制为全局自定义偏好"
+                            else -> "保存后成为这套全局偏好的新版本"
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -414,61 +519,139 @@ internal fun PromptProfileEditorScreen(
             item { ProcessingCard(action) }
         }
 
-        if (profile == null) {
+        if (createMode || builtInProfile) {
+            item {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(if (createMode) "提示词名称" else "复制后的名称") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = actionsEnabled,
+                    singleLine = true,
+                )
+            }
+        }
+
+        if (createMode) {
+            item {
+                OutlinedTextField(
+                    value = styleTagsText,
+                    onValueChange = { styleTagsText = it },
+                    label = { Text("风格标签") },
+                    supportingText = { Text("用空格或逗号分隔，例如：通用 均衡 人像") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = actionsEnabled,
+                    singleLine = true,
+                )
+            }
+            item {
+                OptionRow(
+                    title = "适用场景",
+                    values = listOf("general", "portrait", "action", "landscape", "custom"),
+                    selected = sceneProfile,
+                    enabled = actionsEnabled,
+                    labelForValue = ::sceneProfileLabel,
+                    onSelected = { sceneProfile = it },
+                )
+            }
+        } else {
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        "提示词不存在或已被移除。",
+                    Column(
                         modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text("提示词信息", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            listOf(
+                                profile.let(::promptStyleTagsText),
+                                sceneProfileLabel(profile.sceneProfile),
+                                if (builtInProfile) "内置" else "自定义",
+                            ).filter { it.isNotBlank() }.joinToString(" · "),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = promptText,
+                onValueChange = { promptText = it },
+                label = { Text("我的摄影评价偏好") },
+                supportingText = {
+                    Text("这里会同时影响单张评价、连拍组内优选和项目优选的审美偏好")
+                },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 10,
+                enabled = actionsEnabled,
+            )
+        }
+        item {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("系统锁定协议", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "系统提示词、评价任务说明、连拍优选任务说明、项目优选任务说明、输入输出 JSON Schema 由应用固定生成。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "第一版先开放摄影偏好，避免用户改坏结构化结果；后续再评估字段表单化自定义。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-        } else {
-            if (profile.builtIn) {
-                item {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("复制后的名称") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                }
-            }
-            item {
-                OutlinedTextField(
-                    value = promptText,
-                    onValueChange = { promptText = it },
-                    label = { Text("用户评价偏好") },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 10,
-                    enabled = actionInFlight == null,
+        }
+        item {
+            Button(
+                onClick = {
+                    if (createMode) {
+                        onCreate(
+                            cleanName,
+                            cleanStyleTags.ifEmpty { listOf("general", "balanced") },
+                            sceneProfile,
+                            cleanPrompt,
+                        )
+                    } else {
+                        onSave(profile, cleanName, cleanPrompt)
+                    }
+                },
+                enabled = canSubmit,
+                modifier = Modifier.fillMaxWidth(),
+                shape = elementShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = ElementBlue,
+                    contentColor = ElementOnAccent,
+                ),
+            ) {
+                Text(
+                    when {
+                        createMode -> "创建提示词"
+                        builtInProfile -> "复制并保存偏好"
+                        else -> "保存偏好版本"
+                    },
                 )
-            }
-            item {
-                Button(
-                    onClick = { onSave(profile, cleanName, cleanPrompt) },
-                    enabled = actionInFlight == null && cleanPrompt.isNotBlank() &&
-                        (!profile.builtIn || cleanName.isNotBlank()),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = elementShape,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ElementBlue,
-                        contentColor = ElementOnAccent,
-                    ),
-                ) {
-                    Text(if (profile.builtIn) "复制并保存偏好" else "保存偏好版本")
-                }
             }
         }
     }
 }
 
+private fun parsePromptStyleTags(value: String): List<String> =
+    value
+        .split(' ', '\n', '\t', ',', '，', '/', '、')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+
 @Composable
 internal fun ProjectSettingsScreen(
     project: ProjectSummary?,
     provider: ModelProviderSettingsUi,
+    providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
     promptProfiles: List<PromptProfileUi>,
     latestRun: EvaluationRunUi?,
@@ -499,7 +682,7 @@ internal fun ProjectSettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text(project?.name ?: "项目配置", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(4.dp))
-                    Text("项目智能、场景和优选策略", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("\u9879\u76ee\u667a\u80fd\u3001\u573a\u666f\u548c\u4f18\u9009\u7b56\u7565", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -516,7 +699,7 @@ internal fun ProjectSettingsScreen(
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        "项目不存在或已被移除。",
+                        "项目不存在或已被移除",
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -526,6 +709,7 @@ internal fun ProjectSettingsScreen(
             item {
                 ProjectIntelligenceSettingsCard(
                     provider = provider,
+                    providerOptions = providerOptions,
                     settings = projectSettings,
                     promptProfiles = promptProfiles,
                     latestRun = latestRun,
@@ -542,25 +726,61 @@ internal fun ProjectSettingsScreen(
 @Composable
 private fun ModelProviderSettingsCard(
     settings: ModelProviderSettingsUi,
+    settingsList: List<ModelProviderSettingsUi>,
     actionsEnabled: Boolean,
     onSaveSettings: (ModelProviderSettingsUi) -> Unit,
+    onDeleteSettings: (String) -> Unit,
 ) {
-    var providerKind by remember(settings.providerKind) { mutableStateOf(settings.providerKind.ifBlank { "none" }) }
-    var baseUrl by remember(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
-    var model by remember(settings.defaultModel) { mutableStateOf(settings.defaultModel) }
-    var apiKey by remember(settings.apiKeyConfigured) { mutableStateOf("") }
-    var sendMode by remember(settings.defaultSendMode) {
-        mutableStateOf(settings.defaultSendMode.ifBlank { "preview_only" })
+    val providerOptions = settingsList
+        .filter { it.configured || it.settingsId.isNotBlank() || it.defaultModel.isNotBlank() }
+        .distinctBy { it.settingsId }
+    var selectedSettingsId by remember(providerOptions.map { it.settingsId }.joinToString("|")) {
+        mutableStateOf(providerOptions.firstOrNull()?.settingsId ?: settings.settingsId)
     }
-    var batchSize by remember(settings.defaultBatchSize) {
-        mutableStateOf(providerBatchSizeValue(settings.defaultBatchSize))
+    var editingNewProfile by remember { mutableStateOf(providerOptions.isEmpty()) }
+    val selectedSettings = if (editingNewProfile) {
+        ModelProviderSettingsUi(
+            settingsId = "",
+            providerKind = "custom",
+            providerLabel = "\u81ea\u5b9a\u4e49",
+            defaultSendMode = settings.defaultSendMode.ifBlank { "preview_only" },
+            defaultBatchSize = providerBatchSizeValue(settings.defaultBatchSize),
+        )
+    } else {
+        providerOptions.firstOrNull { it.settingsId == selectedSettingsId } ?: settings
     }
-    val configuredText = if (settings.configured) "已配置" else "未配置"
+    var settingsName by remember(selectedSettings.settingsId, editingNewProfile) {
+        mutableStateOf(selectedSettings.settingsId.takeUnless { editingNewProfile }.orEmpty())
+    }
+    var providerKind by remember(selectedSettings.settingsId, selectedSettings.providerKind, editingNewProfile) {
+        mutableStateOf(selectedSettings.providerKind.ifBlank { "none" })
+    }
+    var baseUrl by remember(selectedSettings.settingsId, selectedSettings.baseUrl, editingNewProfile) {
+        mutableStateOf(selectedSettings.baseUrl)
+    }
+    var model by remember(selectedSettings.settingsId, selectedSettings.defaultModel, editingNewProfile) {
+        mutableStateOf(selectedSettings.defaultModel)
+    }
+    var apiKey by remember(selectedSettings.settingsId, selectedSettings.apiKeyConfigured, editingNewProfile) {
+        mutableStateOf("")
+    }
+    var sendMode by remember(selectedSettings.settingsId, selectedSettings.defaultSendMode, editingNewProfile) {
+        mutableStateOf(selectedSettings.defaultSendMode.ifBlank { "preview_only" })
+    }
+    var batchSize by remember(selectedSettings.settingsId, selectedSettings.defaultBatchSize, editingNewProfile) {
+        mutableStateOf(providerBatchSizeValue(selectedSettings.defaultBatchSize))
+    }
+    val configuredText = if (providerOptions.isEmpty()) "未配置" else "${providerOptions.size} 个配置"
     val normalizedProviderKind = providerKind.trim().lowercase().ifBlank { "none" }
-    val canSaveProvider = normalizedProviderKind == "none" ||
+    val cleanSettingsName = settingsName.trim()
+    val canSaveProvider = cleanSettingsName.isNotBlank() &&
+        normalizedProviderKind != "none" &&
         (baseUrl.trim().isNotBlank() &&
             model.trim().isNotBlank() &&
-            (apiKey.trim().isNotBlank() || settings.apiKeyConfigured || settings.keyAlias != null))
+            (apiKey.trim().isNotBlank() || selectedSettings.apiKeyConfigured || selectedSettings.keyAlias != null))
+    val canDeleteProvider = !editingNewProfile &&
+        selectedSettings.settingsId.isNotBlank() &&
+        providerOptions.any { it.settingsId == selectedSettings.settingsId }
 
     ElementCard(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -573,22 +793,46 @@ private fun ModelProviderSettingsCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("全局模型服务", style = MaterialTheme.typography.titleMedium)
+                    Text("模型配置", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "${modelProviderKindLabel(settings.providerKind, settings.providerLabel)} · $configuredText",
+                        "配置独立保存，项目只选择使用哪一个 · $configuredText",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                ElementTag(
-                    text = modelProviderKindLabel(providerKind, settings.providerLabel),
-                    color = if (settings.configured) ElementBlue else ElementBorder,
-                )
+                OutlinedButton(
+                    onClick = { editingNewProfile = true },
+                    enabled = actionsEnabled,
+                    shape = elementShape,
+                ) {
+                    Text("新建")
+                }
             }
+            if (providerOptions.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(providerOptions, key = { it.settingsId }) { option ->
+                        FilterChipButton(
+                            label = modelProviderOptionLabel(option),
+                            selected = !editingNewProfile && option.settingsId == selectedSettingsId,
+                            onClick = {
+                                editingNewProfile = false
+                                selectedSettingsId = option.settingsId
+                            },
+                        )
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = settingsName,
+                onValueChange = { settingsName = it },
+                label = { Text("配置名称") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("none", "openai", "custom").forEach { kind ->
+                listOf("openai", "custom").forEach { kind ->
                     FilterChipButton(
-                        label = modelProviderKindLabel(kind, settings.providerLabel),
+                        label = modelProviderKindLabel(kind, selectedSettings.providerLabel),
                         selected = normalizedProviderKind == kind,
                         onClick = {
                             providerKind = kind
@@ -602,9 +846,9 @@ private fun ModelProviderSettingsCard(
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
-                label = { Text("Base URL") },
+                label = { Text("服务地址") },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = normalizedProviderKind != "none",
+                enabled = true,
                 singleLine = true,
             )
             OutlinedTextField(
@@ -612,23 +856,23 @@ private fun ModelProviderSettingsCard(
                 onValueChange = { model = it },
                 label = { Text("模型名称") },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = normalizedProviderKind != "none",
+                enabled = true,
                 singleLine = true,
             )
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it },
-                label = { Text("API Key") },
+                label = { Text("API 密钥") },
                 supportingText = {
-                    Text(if (settings.apiKeyConfigured) "已保存密钥，留空不会覆盖" else "仅保存到本机配置，不回显明文")
+                    Text(if (selectedSettings.apiKeyConfigured) "已保存密钥，留空不会覆盖" else "仅保存到本机配置，不回显明文")
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = normalizedProviderKind != "none",
+                enabled = true,
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("preview_only", "review_image").forEach { mode ->
+                listOf("preview_only", "detail_image").forEach { mode ->
                     FilterChipButton(
                         label = modelSendModeLabel(mode),
                         selected = sendMode == mode,
@@ -641,7 +885,7 @@ private fun ModelProviderSettingsCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("批处理数量", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("\u6279\u5904\u7406\u6570\u91cf", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 BatchSizeToggle(
                     batchSize = batchSize,
                     onBatchSizeChange = { batchSize = it },
@@ -649,25 +893,37 @@ private fun ModelProviderSettingsCard(
             }
             Button(
                 onClick = {
-                    val providerEnabled = normalizedProviderKind != "none"
                     onSaveSettings(
-                        settings.copy(
+                        selectedSettings.copy(
+                            settingsId = cleanSettingsName,
                             providerKind = normalizedProviderKind,
-                            providerLabel = modelProviderKindLabel(normalizedProviderKind, settings.providerLabel),
-                            baseUrl = if (providerEnabled) baseUrl.trim() else "",
-                            defaultModel = if (providerEnabled) model.trim() else "",
+                            providerLabel = modelProviderKindLabel(normalizedProviderKind, selectedSettings.providerLabel),
+                            baseUrl = baseUrl.trim(),
+                            defaultModel = model.trim(),
                             defaultSendMode = sendMode,
                             defaultBatchSize = batchSize,
-                            configured = providerEnabled && canSaveProvider,
+                            configured = true,
                             apiKey = apiKey.trim().takeIf { it.isNotBlank() },
                         ),
                     )
+                    editingNewProfile = false
+                    selectedSettingsId = cleanSettingsName
                 },
                 enabled = actionsEnabled && canSaveProvider,
                 modifier = Modifier.fillMaxWidth(),
                 shape = elementShape,
             ) {
-                Text("保存模型服务配置")
+                Text(if (editingNewProfile) "创建模型配置" else "保存模型配置")
+            }
+            if (canDeleteProvider) {
+                OutlinedButton(
+                    onClick = { onDeleteSettings(selectedSettings.settingsId) },
+                    enabled = actionsEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = elementShape,
+                ) {
+                    Text("删除模型配置")
+                }
             }
         }
     }
@@ -675,9 +931,9 @@ private fun ModelProviderSettingsCard(
 
 private fun modelProviderKindLabel(kind: String, fallback: String): String =
     when (kind.trim().lowercase()) {
-        "", "none" -> "未配置"
+        "", "none" -> "\u672a\u914d\u7f6e"
         "openai" -> "OpenAI"
-        "custom" -> "自定义"
+        "custom" -> "\u81ea\u5b9a\u4e49"
         "mock", "local_stub" -> "本地占位"
         else -> fallback
             .takeUnless { it.equals("Model provider", ignoreCase = true) }
@@ -687,14 +943,22 @@ private fun modelProviderKindLabel(kind: String, fallback: String): String =
 
 private fun modelSendModeLabel(mode: String): String =
     when (mode.trim().lowercase()) {
-        "preview_only" -> "仅发送预览"
-        "review_image" -> "发送审阅图"
+        "preview_only" -> "\u4ec5\u53d1\u9001\u9884\u89c8"
+        "detail_image" -> "\u53d1\u9001\u5927\u56fe"
         else -> mode
     }
+
+private fun modelProviderOptionLabel(settings: ModelProviderSettingsUi): String =
+    listOf(settings.providerLabel, settings.defaultModel)
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.equals("Model provider", ignoreCase = true) }
+        .joinToString(" · ")
+        .ifBlank { settings.settingsId }
 
 @Composable
 private fun ProjectIntelligenceSettingsCard(
     provider: ModelProviderSettingsUi,
+    providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
     promptProfiles: List<PromptProfileUi>,
     latestRun: EvaluationRunUi?,
@@ -704,14 +968,19 @@ private fun ProjectIntelligenceSettingsCard(
     onConfigureModelProvider: () -> Unit,
 ) {
     val projectSettings = settings ?: ProjectEvaluationSettingsUi(projectId = "")
-    val intelligenceUi = projectIntelligenceSettingsUi(projectSettings, providerConfigured = provider.configured)
+    val selectedProviderId = projectSettings.modelProviderSettingsId
+    val modelOptions = providerOptions
+        .filter { it.configured && it.providerKind != "none" }
+        .distinctBy { it.settingsId }
+    val selectedProviderReady = modelProviderReadyForProject(projectSettings, modelOptions)
+    val intelligenceUi = projectIntelligenceSettingsUi(projectSettings, providerConfigured = selectedProviderReady)
     val selectablePromptProfiles = promptProfiles
         .filter { it.enabled && (it.scope.equals("global", ignoreCase = true) || it.projectId == null) }
         .ifEmpty { promptProfiles.filter { it.enabled } }
     val selectedPrompt = selectablePromptProfiles.firstOrNull { it.promptProfileId == projectSettings.promptProfileId }
         ?: selectablePromptProfiles.firstOrNull()
     val recommendationAction = manualProjectRecommendationActionUi(
-        provider = provider,
+        providerConfigured = selectedProviderReady,
         settings = projectSettings,
         actionInFlight = !actionsEnabled,
     )
@@ -745,37 +1014,61 @@ private fun ProjectIntelligenceSettingsCard(
                 )
             }
 
-            if (!provider.configured) {
+            if (!selectedProviderReady) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("模型服务未配置", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("\u6a21\u578b\u670d\u52a1\u672a\u914d\u7f6e", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(
                         onClick = onConfigureModelProvider,
                         enabled = actionsEnabled,
                         shape = elementShape,
                     ) {
-                        Text("去配置")
+                        Text("\u53bb\u914d\u7f6e")
+                    }
+                }
+            }
+
+            if (modelOptions.isNotEmpty()) {
+                Text("使用模型", style = MaterialTheme.typography.labelLarge)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChipButton(
+                            label = "未选择",
+                            selected = selectedProviderId.isNullOrBlank(),
+                            onClick = {
+                                onSaveSettings(projectSettings.copy(modelProviderSettingsId = null))
+                            },
+                        )
+                    }
+                    items(modelOptions, key = { it.settingsId }) { option ->
+                        FilterChipButton(
+                            label = modelProviderOptionLabel(option),
+                            selected = selectedProviderId == option.settingsId,
+                            onClick = {
+                                onSaveSettings(projectSettings.copy(modelProviderSettingsId = option.settingsId))
+                            },
+                        )
                     }
                 }
             }
 
             SettingsSwitchRow(
-                title = "上传后自动模型评价",
+                title = "\u4e0a\u4f20\u540e\u81ea\u52a8\u8bc4\u4ef7",
                 checked = projectSettings.autoEvaluateOnUpload,
-                enabled = actionsEnabled && provider.configured && projectSettings.modelEvaluationEnabled,
+                enabled = actionsEnabled && selectedProviderReady && projectSettings.modelEvaluationEnabled,
                 onCheckedChange = { onSaveSettings(projectSettings.copy(autoEvaluateOnUpload = it)) },
             )
             SettingsSwitchRow(
-                title = "连拍组自动优选",
+                title = "\u8fde\u62cd\u7ec4\u81ea\u52a8\u4f18\u9009",
                 checked = projectSettings.autoBurstRecommendationEnabled,
                 enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
                 onCheckedChange = { onSaveSettings(projectSettings.copy(autoBurstRecommendationEnabled = it)) },
             )
             SettingsSwitchRow(
-                title = "允许风险照片参与优选",
+                title = "\u5141\u8bb8\u98ce\u9669\u7167\u7247\u53c2\u4e0e\u4f18\u9009",
                 checked = projectSettings.allowRiskyModelSelects,
                 enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
                 onCheckedChange = { onSaveSettings(projectSettings.copy(allowRiskyModelSelects = it)) },
@@ -790,7 +1083,7 @@ private fun ProjectIntelligenceSettingsCard(
                 onSelected = { onSaveSettings(projectSettings.copy(sceneProfile = it)) },
             )
             OptionRow(
-                title = "CV 门控强度",
+                title = "技术门控强度",
                 values = listOf("loose", "standard", "strict"),
                 selected = projectSettings.cvPolicy,
                 enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
@@ -799,7 +1092,7 @@ private fun ProjectIntelligenceSettingsCard(
             )
 
             if (selectablePromptProfiles.isNotEmpty()) {
-                Text("评价提示词", style = MaterialTheme.typography.labelLarge)
+                Text("\u8bc4\u4ef7\u63d0\u793a\u8bcd", style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(selectablePromptProfiles, key = { it.promptProfileId }) { profile ->
                         FilterChipButton(

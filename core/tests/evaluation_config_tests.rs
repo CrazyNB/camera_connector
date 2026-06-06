@@ -8,6 +8,41 @@ use camera_connector_core::{
 use rusqlite::{params, Connection};
 
 #[test]
+fn evaluation_config_tests_service_creates_global_prompt_profile_from_shared_preference() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+
+    let profile = service
+        .create_global_prompt_profile(
+            "纪实偏好",
+            vec!["纪实".to_string(), "人像".to_string()],
+            SceneProfile::General,
+            "偏纪实，优先情绪、主体清晰和自然肤色。",
+            10_000,
+        )
+        .expect("prompt profile should create");
+    let version_id = profile
+        .active_version_id
+        .as_deref()
+        .expect("created profile should have an active version")
+        .to_string();
+    let version = service
+        .storage_store()
+        .expect("store should open")
+        .prompt_profile_version(&version_id)
+        .expect("version should query")
+        .expect("version should exist");
+
+    assert_eq!(profile.scope, PromptScope::Global);
+    assert!(!profile.built_in);
+    assert_eq!(profile.name, "纪实偏好");
+    assert!(version.prompt_text.contains("shared_preference"));
+    assert!(version
+        .prompt_text
+        .contains("偏纪实，优先情绪、主体清晰和自然肤色。"));
+}
+
+#[test]
 fn evaluation_config_tests_enums_round_trip_and_fallback() {
     for variant in [
         ModelProviderKind::None,
@@ -22,7 +57,7 @@ fn evaluation_config_tests_enums_round_trip_and_fallback() {
         ModelProviderKind::None
     );
 
-    for variant in [ModelSendMode::PreviewOnly, ModelSendMode::ReviewImage] {
+    for variant in [ModelSendMode::PreviewOnly, ModelSendMode::DetailImage] {
         assert_eq!(ModelSendMode::from_str(variant.as_str()), variant);
     }
     assert_eq!(
@@ -122,7 +157,7 @@ fn evaluation_config_tests_service_persists_model_provider_settings_in_app_confi
                 base_url: "https://api.openai.com/v1".to_string(),
                 default_model: "gpt-5.1-mini".to_string(),
                 default_max_image_side: 1600,
-                default_send_mode: ModelSendMode::ReviewImage,
+                default_send_mode: ModelSendMode::DetailImage,
                 default_batch_size: 4,
                 configured: true,
                 api_key_configured: false,
@@ -134,10 +169,142 @@ fn evaluation_config_tests_service_persists_model_provider_settings_in_app_confi
         .expect("settings should save");
 
     let config = CameraConnectorConfig::load(Some(&config_path)).expect("config should load");
+    let raw_config = std::fs::read_to_string(&config_path).expect("config should read");
+    assert!(
+        !raw_config.contains("\"model_provider\":"),
+        "model provider configuration should be stored only as resource list"
+    );
     assert_eq!(saved.base_url, "https://api.openai.com/v1");
     assert!(saved.api_key_configured);
-    assert_eq!(config.model_provider.base_url, "https://api.openai.com/v1");
-    assert_eq!(config.model_provider.api_key.as_deref(), Some("sk-test"));
+    assert_eq!(config.model_providers.len(), 1);
+    assert_eq!(
+        config.model_providers[0].base_url,
+        "https://api.openai.com/v1"
+    );
+    assert_eq!(
+        config.model_providers[0].api_key.as_deref(),
+        Some("sk-test")
+    );
+}
+
+#[test]
+fn evaluation_config_tests_model_provider_profiles_are_independent_resources() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let config_path = temp_dir.path().join("camera-connector.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+
+    service
+        .save_model_provider_settings_with_api_key(
+            ModelProviderSettings {
+                settings_id: "preview-fast".to_string(),
+                provider_kind: ModelProviderKind::Custom,
+                provider_label: "OpenAI compatible".to_string(),
+                base_url: "https://models.example/v1".to_string(),
+                default_model: "gpt-fast".to_string(),
+                default_max_image_side: 1600,
+                default_send_mode: ModelSendMode::PreviewOnly,
+                default_batch_size: 4,
+                configured: true,
+                api_key_configured: false,
+                key_alias: None,
+                updated_at_ms: 1000,
+            },
+            Some("sk-shared".to_string()),
+        )
+        .expect("first settings should save");
+    service
+        .save_model_provider_settings_with_api_key(
+            ModelProviderSettings {
+                settings_id: "detail-eval".to_string(),
+                provider_kind: ModelProviderKind::Custom,
+                provider_label: "OpenAI compatible".to_string(),
+                base_url: "https://models.example/v1".to_string(),
+                default_model: "gpt-photo-eval".to_string(),
+                default_max_image_side: 1600,
+                default_send_mode: ModelSendMode::DetailImage,
+                default_batch_size: 1,
+                configured: true,
+                api_key_configured: false,
+                key_alias: None,
+                updated_at_ms: 2000,
+            },
+            Some("sk-shared".to_string()),
+        )
+        .expect("second settings should save");
+
+    let config = CameraConnectorConfig::load(Some(&config_path)).expect("config should load");
+    let ids = config
+        .model_providers
+        .iter()
+        .map(|provider| {
+            (
+                provider.settings_id.as_str(),
+                provider.base_url.as_str(),
+                provider.default_model.as_str(),
+                provider.api_key.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            (
+                "preview-fast",
+                "https://models.example/v1",
+                "gpt-fast",
+                Some("sk-shared")
+            ),
+            (
+                "detail-eval",
+                "https://models.example/v1",
+                "gpt-photo-eval",
+                Some("sk-shared")
+            ),
+        ]
+    );
+}
+
+#[test]
+fn evaluation_config_tests_delete_model_provider_profile_removes_only_that_resource() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let config_path = temp_dir.path().join("camera-connector.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+
+    for (settings_id, default_model) in [
+        ("preview-fast", "gpt-fast"),
+        ("detail-eval", "gpt-photo-eval"),
+    ] {
+        service
+            .save_model_provider_settings_with_api_key(
+                ModelProviderSettings {
+                    settings_id: settings_id.to_string(),
+                    provider_kind: ModelProviderKind::Custom,
+                    provider_label: "OpenAI compatible".to_string(),
+                    base_url: "https://models.example/v1".to_string(),
+                    default_model: default_model.to_string(),
+                    default_max_image_side: 1600,
+                    default_send_mode: ModelSendMode::PreviewOnly,
+                    default_batch_size: 1,
+                    configured: true,
+                    api_key_configured: false,
+                    key_alias: None,
+                    updated_at_ms: 1000,
+                },
+                Some("sk-shared".to_string()),
+            )
+            .expect("settings should save");
+    }
+
+    service
+        .delete_model_provider_settings("preview-fast")
+        .expect("settings should delete");
+
+    let profiles = service
+        .model_provider_settings_list()
+        .expect("settings should list");
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].settings_id, "detail-eval");
+    assert_eq!(profiles[0].default_model, "gpt-photo-eval");
 }
 
 #[test]
@@ -263,6 +430,7 @@ fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEval
         auto_burst_recommendation_enabled: true,
         project_recommendation_mode: ProjectRecommendationMode::Manual,
         prompt_profile_id: None,
+        model_provider_settings_id: None,
         scene_profile: SceneProfile::General,
         cv_policy: CvPolicy::Standard,
         allow_risky_model_selects: false,
@@ -697,7 +865,7 @@ fn evaluation_config_tests_evaluation_run_save_query_preserves_manual_trigger_an
         trigger: EvaluationRunTrigger::Manual,
         status: EvaluationRunStatus::Ready,
         provider_kind: ModelProviderKind::Imported,
-        provider_model: "imported-reviewer-v1".to_string(),
+        provider_model: "imported-evaluator-v1".to_string(),
         prompt_profile_id: Some("general-default".to_string()),
         prompt_version_id: Some("general-default-v1".to_string()),
         prompt_hash: Some("builtin-general-default-v1".to_string()),
@@ -954,7 +1122,6 @@ fn completed_transfer(
         status: TransferStatus::Completed,
         original_path: original_path.to_string(),
         final_filename: final_filename.clone(),
-        final_path: None,
         final_location: Some(StoredObjectLocation::local_path(final_filename)),
         size_bytes: 100,
         username: Some("z5".to_string()),

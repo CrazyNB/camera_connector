@@ -28,12 +28,12 @@ class NativeMobileCorePatchTest {
     @Test
     fun androidReceiverPathsPatchEnablesDeferredPublish() {
         val patch = androidReceiverPathsPatch(
-            outputDir = "/data/user/0/com.cameraconnector.app/files/inbox",
+            outputDir = "/data/user/0/com.cameraconnector.app/files/output",
             stateDir = "/data/user/0/com.cameraconnector.app/files/state",
         )
 
         assertEquals(
-            "/data/user/0/com.cameraconnector.app/files/inbox",
+            "/data/user/0/com.cameraconnector.app/files/output",
             patch.getString("output_dir"),
         )
         assertEquals(
@@ -44,8 +44,8 @@ class NativeMobileCorePatchTest {
     }
 
     @Test
-    fun inboxStableIdPrefersGroupIdentity() {
-        assertEquals("group-123", inboxStableId("group-123", "asset-1"))
-        assertEquals("asset-1", inboxStableId("", "asset-1"))
+    fun projectAssetStableIdPrefersGroupIdentity() {
+        assertEquals("group-123", projectAssetStableId("group-123", "asset-1"))
+        assertEquals("asset-1", projectAssetStableId("", "asset-1"))
     }
 }

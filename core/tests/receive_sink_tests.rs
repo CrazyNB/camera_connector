@@ -65,7 +65,7 @@ fn sanitizes_windows_unsafe_filename_characters() {
 }
 
 #[test]
-fn ignores_remote_directory_creation_for_flat_inbox() {
+fn ignores_remote_directory_creation_for_flat_received_storage() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let sink = LocalFileSink::new(temp_dir.path());
 

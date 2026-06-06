@@ -26,18 +26,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionGateway: AndroidPermissionGateway
     private lateinit var storageGateway: AndroidStorageGateway
     private val notificationPermissionGranted = MutableStateFlow(true)
-    private val selectedInboxLabel = MutableStateFlow<String?>(null)
+    private val selectedOutputLabel = MutableStateFlow<String?>(null)
     private val requestNotificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) {
         notificationPermissionGranted.value = permissionGateway.hasNotificationPermission()
     }
-    private val requestInboxDirectory = registerForActivityResult(
+    private val requestOutputDirectory = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            storageGateway.persistInboxDirectory(uri)
-            selectedInboxLabel.value = storageGateway.selectedInboxLabel()
+            storageGateway.persistOutputDirectory(uri)
+            selectedOutputLabel.value = storageGateway.selectedOutputLabel()
             lifecycleScope.launch {
                 runCatching { coreGateway.value?.retryFailedPublishes() }
             }
@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
         permissionGateway = AndroidPermissionGateway(this)
         notificationPermissionGranted.value = permissionGateway.hasNotificationPermission()
         storageGateway = AndroidStorageGateway(this)
-        selectedInboxLabel.value = storageGateway.selectedInboxLabel()
+        selectedOutputLabel.value = storageGateway.selectedOutputLabel()
 
         showStartupView {
             startCoreInitialization()
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
             isIndeterminate = true
         }
         val title = TextView(this).apply {
-            text = "正在初始化核心"
+            text = "\u6b63\u5728\u521d\u59cb\u5316\u6838\u5fc3"
             setTextColor(0xFFEAF6FF.toInt())
             textSize = 16f
             gravity = Gravity.CENTER
@@ -117,12 +117,12 @@ class MainActivity : ComponentActivity() {
                 storageGateway = storageGateway,
                 notificationPermissionRequired = permissionGateway.notificationPermissionRequired(),
                 notificationPermissionGranted = notificationPermissionGranted,
-                selectedInboxLabel = selectedInboxLabel,
+                selectedOutputLabel = selectedOutputLabel,
                 onRequestNotificationPermission = {
                     requestNotificationPermission.launch(permissionGateway.notificationPermission())
                 },
-                onChooseInboxDirectory = {
-                    requestInboxDirectory.launch(null)
+                onChooseOutputDirectory = {
+                    requestOutputDirectory.launch(null)
                 },
             )
         }

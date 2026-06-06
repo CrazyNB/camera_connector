@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -46,6 +47,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Home
@@ -103,6 +105,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -114,15 +117,17 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DEFAULT_LISTEN_HOST
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
+import com.cameraconnector.app.core.ModelEvaluationPreviewInput
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
+import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.PhotoSortMode
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
+import com.cameraconnector.app.core.SelectionCandidateVisualInput
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
@@ -131,12 +136,14 @@ import com.cameraconnector.app.media.cachedThumbnailPreview
 import com.cameraconnector.app.media.isDecodablePreviewLocation
 import com.cameraconnector.app.media.loadPhotoMetadata
 import com.cameraconnector.app.media.loadPreviewBitmap
+import com.cameraconnector.app.media.loadPreviewSampleJson
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 @Composable
 internal fun ProjectAssetsScreen(
@@ -148,6 +155,7 @@ internal fun ProjectAssetsScreen(
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onOpenProjects: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     onConfigureAccount: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     actionsEnabled: Boolean,
@@ -162,11 +170,10 @@ internal fun ProjectAssetsScreen(
     gridColumnCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    var selectedAccount by remember { mutableStateOf<String?>(null) }
-    var selectedFilter by remember { mutableStateOf(InboxFilter.All) }
+    var selectedFilter by remember { mutableStateOf(AssetFormatFilter.All) }
     var selectedSort by remember { mutableStateOf(PhotoSortMode.LatestReceived) }
     var selectedPhotoCollection by rememberSaveable { mutableStateOf(ProjectPhotoCollection.All) }
-    var selectedPhoto by remember { mutableStateOf<InboxAsset?>(null) }
+    var selectedPhoto by remember { mutableStateOf<ProjectAsset?>(null) }
     var selectedBurstPreview by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
     var detailNavigationDirection by remember { mutableStateOf<DetailNavigationDirection?>(null) }
     var selectedAssetIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -174,37 +181,44 @@ internal fun ProjectAssetsScreen(
     var filterExpanded by remember { mutableStateOf(false) }
     var projectFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var projectFeedbackToken by remember { mutableStateOf(0) }
-    val inboxQuery = remember(
+    val assetQuery = remember(
         selectedPhotoCollection,
-        selectedAccount,
         selectedFilter,
         selectedSort,
     ) {
         assetListQuery(
             selectedCollection = selectedPhotoCollection,
-            selectedAccount = selectedAccount,
             selectedFilter = selectedFilter,
             selectedSort = selectedSort,
-            selectedScoreFilter = ScoreFilter.All,
         )
     }
-    val filteredAssets by produceState<List<InboxAsset>>(
-        initialValue = dashboard.inbox,
+    val filteredAssets by produceState<List<ProjectAsset>>(
+        initialValue = dashboard.assets,
         projectState.activeProjectId,
-        inboxQuery,
+        assetQuery,
         selectedPhotoCollection,
-        selectedAccount,
         selectedFilter,
         selectedSort,
-        dashboard.inbox,
+        dashboard.assets,
     ) {
         value = withContext(Dispatchers.IO) {
-            coreGateway.loadInbox(inboxQuery)
+            coreGateway.loadProjectAssets(assetQuery)
         }
     }
+    val gridItems = remember(filteredAssets) {
+        projectPhotoGridItems(filteredAssets)
+    }
     val selectionMode = isAssetSelectionMode(selectedAssetIds)
-    val selectedAssets = remember(filteredAssets, selectedAssetIds) {
-        selectedAssetsFromIds(filteredAssets, selectedAssetIds)
+    val selectedGridItems = remember(gridItems, selectedAssetIds) {
+        selectedPhotoGridItemsFromIds(gridItems, selectedAssetIds)
+    }
+    val selectedEvaluationTargets = remember(selectedGridItems) {
+        projectPhotoEvaluationTargets(selectedGridItems)
+    }
+    val selectedAssets = remember(selectedGridItems) {
+        selectedGridItems
+            .filterNot { it.isBurstGroup }
+            .map { it.coverAsset }
     }
     val selectedBurstMergeTarget = remember(selectedAssets) {
         manualBurstMergeTarget(selectedAssets)
@@ -213,6 +227,8 @@ internal fun ProjectAssetsScreen(
     val moveTargets = remember(projectState.projects, sourceProjectId) {
         projectState.groupMoveTargets(sourceProjectId)
     }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var receiverPanelExpanded by remember { mutableStateOf(!dashboard.receiver.running) }
     val receiverConnectHost = normalizeCameraConnectHost(cameraConnectHost)
     LaunchedEffect(projectFeedbackToken) {
@@ -230,7 +246,7 @@ internal fun ProjectAssetsScreen(
         receiverPanelExpanded = !dashboard.receiver.running
     }
 
-    LaunchedEffect(projectState.activeProjectId, inboxQuery, selectedPhotoCollection) {
+    LaunchedEffect(projectState.activeProjectId, assetQuery, selectedPhotoCollection) {
         selectedAssetIds = emptyList()
         selectedBurstPreview = null
         movePickerOpen = false
@@ -246,7 +262,7 @@ internal fun ProjectAssetsScreen(
     }
 
     selectedPhoto?.let { photo ->
-        val detailBurstMembers = burstMemberFilmstrip(photo, dashboard.inbox)
+        val detailBurstMembers = burstMemberFilmstrip(photo, dashboard.assets)
         BackHandler {
             detailNavigationDirection = null
             selectedPhoto = null
@@ -325,6 +341,41 @@ internal fun ProjectAssetsScreen(
                     showProjectFeedback(if (nextFavorite) "已收藏" else "已取消收藏")
                     onSetAssetGroupUserMarks(projectId, assetId, nextFavorite, null)
                 },
+                onEvaluateModel = { asset ->
+                    val projectId = projectState.activeProjectId ?: return@PhotoDetailScreen
+                    if (asset.modelEvaluationInFlight()) {
+                        showProjectFeedback("\u8bc4\u4ef7\u5df2\u63d0\u4ea4")
+                        return@PhotoDetailScreen
+                    }
+                    selectedPhoto = asset.copy(modelStatus = "pending")
+                    showProjectFeedback("\u5df2\u63d0\u4ea4\u8bc4\u4ef7")
+                    coroutineScope.launch {
+                        runCatching {
+                            val input = withContext(Dispatchers.IO) {
+                                ModelEvaluationPreviewInput(
+                                    assetGroupId = asset.id,
+                                    sampleJson = loadPreviewSampleJson(
+                                        context,
+                                        asset.previewLocation,
+                                    ),
+                                )
+                            }
+                            val count = coreGateway.evaluateAssetGroupsWithModelInputs(projectId, listOf(input))
+                            val refreshedAsset = withContext(Dispatchers.IO) {
+                                coreGateway.loadProjectAssets(assetQuery)
+                                    .firstOrNull { it.assetSelectionId() == asset.assetSelectionId() }
+                            }
+                            count to refreshedAsset
+                        }.onSuccess { count ->
+                            count.second?.let { refreshed -> selectedPhoto = refreshed }
+                                ?: run { selectedPhoto = asset.copy(modelStatus = "ready") }
+                            showProjectFeedback("\u5df2\u5b8c\u6210\u8bc4\u4ef7 ${count.first}")
+                        }.onFailure {
+                            selectedPhoto = asset.copy(modelStatus = "failed")
+                            showProjectFeedback("\u8bc4\u4ef7\u5931\u8d25")
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             projectFeedbackMessage?.let { message ->
@@ -382,6 +433,7 @@ internal fun ProjectAssetsScreen(
                 dashboard = dashboard,
                 projectState = projectState,
                 onExpand = { receiverPanelExpanded = true },
+                onOpenProjectIntelligence = onOpenProjectIntelligence,
                 connectHost = receiverConnectHost,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -394,7 +446,6 @@ internal fun ProjectAssetsScreen(
                 onCollectionChange = { collection ->
                     selectedPhotoCollection = collection
                 },
-                selectedAccount = selectedAccount,
                 selectedFilter = selectedFilter,
                 selectedSort = selectedSort,
                 expanded = filterExpanded,
@@ -403,16 +454,10 @@ internal fun ProjectAssetsScreen(
             Spacer(Modifier.height(8.dp))
             if (filterExpanded) {
                 Spacer(Modifier.height(8.dp))
-                AccountFilterBar(
-                    selectedAccount = selectedAccount,
-                    onAccountChange = { selectedAccount = it },
-                    assets = dashboard.inbox,
-                )
-                Spacer(Modifier.height(8.dp))
-                InboxFilterBar(
+                AssetFormatFilterBar(
                     selectedFilter = selectedFilter,
                     onFilterChange = { selectedFilter = it },
-                    assets = dashboard.inbox.filter { selectedAccount == null || it.username == selectedAccount },
+                    assets = dashboard.assets,
                 )
                 Spacer(Modifier.height(8.dp))
                 PhotoSortBar(
@@ -425,23 +470,20 @@ internal fun ProjectAssetsScreen(
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         when {
-                            selectedPhotoCollection == ProjectPhotoCollection.Favorites -> "还没有收藏照片。"
-                            selectedPhotoCollection == ProjectPhotoCollection.Marked -> "还没有标记照片。"
-                            dashboard.inbox.isEmpty() -> "还没有导入文件。"
-                            else -> "当前筛选下没有文件。"
+                            selectedPhotoCollection == ProjectPhotoCollection.Favorites -> "\u8fd8\u6ca1\u6709\u6536\u85cf\u7167\u7247"
+                            selectedPhotoCollection == ProjectPhotoCollection.Marked -> "\u8fd8\u6ca1\u6709\u6807\u8bb0\u7167\u7247"
+                            dashboard.assets.isEmpty() -> "\u8fd8\u6ca1\u6709\u5bfc\u5165\u6587\u4ef6"
+                            else -> "当前筛选下没有文件"
                         },
                         modifier = Modifier.padding(16.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             } else {
-                val gridItems = remember(filteredAssets) {
-                    projectPhotoGridItems(filteredAssets)
-                }
                 selectedBurstPreview?.let { previewItem ->
                     BurstGroupPreviewDialog(
                         item = previewItem,
-                        allProjectAssets = dashboard.inbox,
+                        allProjectAssets = dashboard.assets,
                         onDismiss = { selectedBurstPreview = null },
                         onOpenAsset = { memberAsset ->
                             selectedBurstPreview = null
@@ -464,14 +506,14 @@ internal fun ProjectAssetsScreen(
                         ) { index ->
                             val item = gridItems[index]
                             val asset = item.coverAsset
-                            val selected = asset.assetSelectionId() in selectedAssetIds
+                            val selected = item.key in selectedAssetIds
                             CompactPhotoTile(
                                 asset = asset,
                                 selected = selected,
                                 selectionMode = selectionMode,
                                 onClick = {
                                     if (selectionMode) {
-                                        selectedAssetIds = toggleAssetSelection(selectedAssetIds, asset)
+                                        selectedAssetIds = togglePhotoGridItemSelection(selectedAssetIds, item)
                                     } else if (item.isBurstGroup) {
                                         selectedBurstPreview = item
                                     } else {
@@ -480,25 +522,100 @@ internal fun ProjectAssetsScreen(
                                     }
                                 },
                                 onLongClick = {
-                                    selectedAssetIds = toggleAssetSelection(selectedAssetIds, asset)
+                                    selectedAssetIds = togglePhotoGridItemSelection(selectedAssetIds, item)
                                 },
                             )
                         }
                     }
                     if (selectionMode) {
                         SelectedAssetsActionBar(
-                            selectedCount = selectedAssets.size,
-                            canOpen = selectedAssets.size == 1,
+                            selectedCount = selectedGridItems.size,
+                            totalCount = gridItems.size,
+                            canOpen = selectedGridItems.size == 1,
+                            canEvaluate = actionsEnabled &&
+                                sourceProjectId != null &&
+                                (
+                                    selectedEvaluationTargets.assetGroups.isNotEmpty() ||
+                                        selectedEvaluationTargets.burstGroups.isNotEmpty()
+                                ),
                             canMove = actionsEnabled &&
                                 sourceProjectId != null &&
                                 selectedAssets.any { it.groupMoveId() != null } &&
                                 moveTargets.isNotEmpty(),
                             canMerge = actionsEnabled && selectedBurstMergeTarget != null,
                             onOpen = {
-                                selectedAssets.firstOrNull()?.let { asset ->
+                                selectedGridItems.firstOrNull()?.let { item ->
                                     selectedAssetIds = emptyList()
-                                    detailNavigationDirection = null
-                                    selectedPhoto = asset
+                                    if (item.isBurstGroup) {
+                                        selectedBurstPreview = item
+                                    } else {
+                                        detailNavigationDirection = null
+                                        selectedPhoto = item.coverAsset
+                                    }
+                                }
+                            },
+                            onEvaluate = {
+                                val currentProjectId = sourceProjectId
+                                val targets = selectedEvaluationTargets
+                                if (
+                                    currentProjectId != null &&
+                                    (
+                                        targets.assetGroups.isNotEmpty() ||
+                                            targets.burstGroups.isNotEmpty()
+                                    )
+                                ) {
+                                    selectedAssetIds = emptyList()
+                                    coroutineScope.launch {
+                                        runCatching {
+                                            var evaluatedCount = 0
+                                            var recommendedBurstCount = 0
+                                            val assetsForEvaluation = targets.assetGroups.distinctBy { it.id }
+                                            if (assetsForEvaluation.isNotEmpty()) {
+                                                val inputs = withContext(Dispatchers.IO) {
+                                                    assetsForEvaluation.map { asset ->
+                                                        ModelEvaluationPreviewInput(
+                                                            assetGroupId = asset.id,
+                                                            sampleJson = loadPreviewSampleJson(
+                                                                context,
+                                                                asset.previewLocation,
+                                                            ),
+                                                        )
+                                                    }
+                                                }
+                                                evaluatedCount += coreGateway.evaluateAssetGroupsWithModelInputs(
+                                                    currentProjectId,
+                                                    inputs,
+                                                )
+                                            }
+                                            targets.burstGroups.forEach { burstTarget ->
+                                                val candidateVisuals = burstRecommendationCandidateVisuals(
+                                                    context = context,
+                                                    members = burstTarget.members,
+                                                )
+                                                if (candidateVisuals.size < 2) {
+                                                    error("burst candidate visuals are incomplete")
+                                                }
+                                                if (
+                                                    coreGateway.recommendBurstGroupWithCandidateVisuals(
+                                                        burstGroupId = burstTarget.burstGroupId,
+                                                        candidateVisuals = candidateVisuals,
+                                                    )
+                                                ) {
+                                                    recommendedBurstCount += 1
+                                                }
+                                            }
+                                            evaluatedCount to recommendedBurstCount
+                                        }.onSuccess { (evaluatedCount, recommendedBurstCount) ->
+                                            showProjectFeedback(
+                                                projectEvaluationFeedback(
+                                                    evaluatedCount = evaluatedCount,
+                                                    recommendedBurstCount = recommendedBurstCount,
+                                                ),
+                                            )
+                                        }.onFailure {
+                                            showProjectFeedback("\u8bc4\u4ef7\u5931\u8d25")
+                                        }
+                                    }
                                 }
                             },
                             onMove = { movePickerOpen = true },
@@ -507,6 +624,9 @@ internal fun ProjectAssetsScreen(
                                     onMergeBurstMember(target.targetBurstGroupId, target.memberGroupId)
                                     selectedAssetIds = emptyList()
                                 }
+                            },
+                            onSelectAll = {
+                                selectedAssetIds = gridItems.map { it.key }
                             },
                             onCancel = { selectedAssetIds = emptyList() },
                             modifier = Modifier
@@ -582,13 +702,22 @@ private fun ProjectFeedbackToast(
     }
 }
 
+private fun ProjectAsset.modelEvaluationInFlight(): Boolean =
+    modelStatus?.trim()?.lowercase() in setOf(
+        "pending",
+        "queued",
+        "running",
+        "processing",
+        "analyzing",
+    )
+
 
 @Composable
 internal fun BurstGroupPreviewDialog(
     item: ProjectPhotoGridItemUi,
-    allProjectAssets: List<InboxAsset>,
+    allProjectAssets: List<ProjectAsset>,
     onDismiss: () -> Unit,
-    onOpenAsset: (InboxAsset) -> Unit,
+    onOpenAsset: (ProjectAsset) -> Unit,
 ) {
     val previewItems = remember(item, allProjectAssets) {
         val filmstrip = burstMemberFilmstrip(item.coverAsset, allProjectAssets)
@@ -626,7 +755,7 @@ internal fun BurstGroupPreviewDialog(
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                "连拍组",
+                                "\u8fde\u62cd\u7ec4",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -657,7 +786,11 @@ internal fun BurstGroupPreviewDialog(
                         ) { index ->
                             BurstGroupPreviewTile(
                                 item = previewItems[index],
-                                positionText = "${index + 1}/${previewItems.size}",
+                                tileUi = burstPreviewTileUi(
+                                    item = previewItems[index],
+                                    index = index,
+                                    total = previewItems.size,
+                                ),
                                 onClick = { onOpenAsset(previewItems[index].asset) },
                             )
                         }
@@ -671,7 +804,7 @@ internal fun BurstGroupPreviewDialog(
 @Composable
 private fun BurstGroupPreviewTile(
     item: BurstMemberFilmstripItemUi,
-    positionText: String,
+    tileUi: BurstPreviewTileUi,
     onClick: () -> Unit,
 ) {
     Column(
@@ -696,15 +829,24 @@ private fun BurstGroupPreviewTile(
                 modifier = Modifier.matchParentSize(),
             )
             PhotoEdgeBadge(
-                text = positionText,
+                text = tileUi.positionText,
                 color = ElementPurple,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(5.dp),
             )
-            if (item.asset.isBestRecommendedAsset()) {
+            tileUi.scoreText?.let { scoreText ->
                 PhotoEdgeBadge(
-                    text = "优选",
+                    text = scoreText,
+                    color = ElementWarning,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(5.dp),
+                )
+            }
+            if (tileUi.modelSelected) {
+                PhotoEdgeBadge(
+                    text = "\u4f18\u9009",
                     color = ElementSuccess,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -719,6 +861,19 @@ private fun BurstGroupPreviewTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (tileUi.auxiliaryBadges.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tileUi.auxiliaryBadges.forEach { badge ->
+                    PhotoInlineBadge(
+                        text = badge,
+                        color = auxiliaryBadgeColor(badge),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -727,12 +882,13 @@ internal fun ProjectReceiverStatusStrip(
     dashboard: DashboardState,
     projectState: ProjectState,
     onExpand: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     connectHost: String?,
     modifier: Modifier = Modifier,
 ) {
     val project = projectState.activeProjectSummary()
     Surface(
-        modifier = modifier.clickable(onClick = onExpand),
+        modifier = modifier,
         color = ElementControlSurface.copy(alpha = 0.86f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(14.dp),
@@ -741,7 +897,7 @@ internal fun ProjectReceiverStatusStrip(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(start = 12.dp, top = 9.dp, end = 4.dp, bottom = 9.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -776,17 +932,29 @@ internal fun ProjectReceiverStatusStrip(
                     )
                 }
             }
-            Spacer(Modifier.width(10.dp))
-            ElementTag(
-                text = if (dashboard.receiver.running) "接收中" else receiverPhaseLabel(dashboard.receiver.phase),
-                color = if (dashboard.receiver.running) ElementSuccess else ElementInfo,
-            )
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                imageVector = Icons.Outlined.KeyboardArrowDown,
-                contentDescription = "展开接收抽屉",
-                tint = ElementBlue,
-            )
+            Spacer(Modifier.width(4.dp))
+            IconButton(
+                onClick = onOpenProjectIntelligence,
+                enabled = project != null,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.AutoAwesome,
+                    contentDescription = "项目智能",
+                    tint = if (project != null) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            IconButton(
+                onClick = onExpand,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = "展开接收抽屉",
+                    tint = ElementBlue,
+                )
+            }
         }
     }
 }
@@ -835,7 +1003,7 @@ internal fun ProjectLaunchHeader(
         ) {
             Icon(
                 imageVector = Icons.Outlined.KeyboardArrowUp,
-                contentDescription = "收起启动页",
+                contentDescription = "\u6536\u8d77\u542f\u52a8\u9875",
                 tint = ElementBlue,
             )
         }
@@ -878,8 +1046,10 @@ internal fun ProjectReceiverLaunchPanel(
         outputLabel = dashboard.receiver.outputLabel,
     )
     val onlineConnections = dashboard.accounts.sumOf { it.activeConnections }
+    val receiverBusy = receiverPhaseBusy(dashboard.receiver.phase)
     val startBlockReason = receiverStartBlockReason(
         running = dashboard.receiver.running,
+        busy = receiverBusy,
         actionsEnabled = actionsEnabled,
         notificationPermissionGranted = notificationPermissionGranted,
         accountCount = dashboard.accounts.size,
@@ -927,11 +1097,15 @@ internal fun ProjectReceiverLaunchPanel(
                 accountCount = dashboard.accounts.size,
                 publishQueue = dashboard.publishQueue,
                 message = dashboard.receiver.message,
-                enabled = actionsEnabled && (dashboard.receiver.running || receiverSettingsValid),
+                enabled = actionsEnabled &&
+                    !receiverBusy &&
+                    (dashboard.receiver.running || receiverSettingsValid),
                 retryEnabled = actionsEnabled,
                 onToggleReceiver = {
                     if (dashboard.receiver.running) {
                         onStopReceiver()
+                    } else if (receiverBusy) {
+                        visibleStartBlockReason = ReceiverStartBlockReason.Busy
                     } else if (startBlockReason == null) {
                         onStartReceiver(receiverSettings, cleanConnectHost)
                     } else {
@@ -946,14 +1120,14 @@ internal fun ProjectReceiverLaunchPanel(
                 ProtocolSegment(
                     label = "FTP",
                     selected = protocol == "FTP",
-                    enabled = actionsEnabled && !dashboard.receiver.running,
+                    enabled = actionsEnabled && !dashboard.receiver.running && !receiverBusy,
                     onClick = { protocol = "FTP" },
                     modifier = Modifier.weight(1f),
                 )
                 ProtocolSegment(
                     label = "SFTP",
                     selected = protocol == "SFTP",
-                    enabled = actionsEnabled && !dashboard.receiver.running,
+                    enabled = actionsEnabled && !dashboard.receiver.running && !receiverBusy,
                     onClick = { protocol = "SFTP" },
                     modifier = Modifier.weight(1f),
                 )
@@ -965,7 +1139,7 @@ internal fun ProjectReceiverLaunchPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("相机连接 IP") },
                 singleLine = true,
-                enabled = actionsEnabled,
+                enabled = actionsEnabled && !receiverBusy,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -974,7 +1148,7 @@ internal fun ProjectReceiverLaunchPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("端口") },
                 singleLine = true,
-                enabled = actionsEnabled && !dashboard.receiver.running,
+                enabled = actionsEnabled && !dashboard.receiver.running && !receiverBusy,
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -984,10 +1158,10 @@ internal fun ProjectReceiverLaunchPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (dashboard.receiver.running) {
+            if (dashboard.receiver.running || receiverBusy) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "修改配置前需要先停止接收。收起后照片列表会占满主要空间。",
+                    "\u4fee\u6539\u914d\u7f6e\u524d\u9700\u8981\u5148\u505c\u6b62\u63a5\u6536\u3002\u6536\u8d77\u540e\u7167\u7247\u5217\u8868\u4f1a\u5360\u6ee1\u4e3b\u8981\u7a7a\u95f4\u3002",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -1014,6 +1188,40 @@ internal fun ProjectReceiverLaunchPanel(
 internal fun receiverEndpointLabel(receiver: ReceiverState, connectHost: String? = null): String =
     "${receiver.protocol} ${normalizeCameraConnectHost(connectHost)}:${receiver.port}"
 
+private suspend fun burstRecommendationCandidateVisuals(
+    context: Context,
+    members: List<ProjectAsset>,
+): List<SelectionCandidateVisualInput> =
+    withContext(Dispatchers.IO) {
+        members
+            .distinctBy { it.assetSelectionId() }
+            .mapNotNull { asset ->
+                val imageDataUrl = runCatching {
+                    JSONObject(loadPreviewSampleJson(context, asset.previewLocation))
+                        .optString("image_data_url")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                }.getOrNull()
+                imageDataUrl?.let {
+                    SelectionCandidateVisualInput(
+                        assetGroupId = asset.id,
+                        imageDataUrl = it,
+                    )
+                }
+            }
+    }
+
+private fun projectEvaluationFeedback(
+    evaluatedCount: Int,
+    recommendedBurstCount: Int,
+): String =
+    when {
+        evaluatedCount > 0 && recommendedBurstCount > 0 ->
+            "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount \u00b7 \u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
+        recommendedBurstCount > 0 ->
+            "\u5df2\u5b8c\u6210\u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
+        else -> "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount"
+    }
+
 @Composable
 internal fun ReceiverStartBlockedDialog(
     reason: ReceiverStartBlockReason,
@@ -1036,11 +1244,11 @@ internal fun ReceiverStartBlockedDialog(
             Text(
                 when (reason) {
                     ReceiverStartBlockReason.MissingAccount ->
-                        "接收服务使用账号认证。请先创建相机账号，再启动接收。"
+                        "\u63a5\u6536\u670d\u52a1\u4f7f\u7528\u8d26\u53f7\u8ba4\u8bc1\u3002\u8bf7\u5148\u521b\u5efa\u76f8\u673a\u8d26\u53f7\uff0c\u518d\u542f\u52a8\u63a5\u6536\u3002"
                     ReceiverStartBlockReason.MissingNotificationPermission ->
-                        "接收服务会以前台服务运行，需要先允许通知权限。"
+                        "\u63a5\u6536\u670d\u52a1\u4f1a\u4ee5\u524d\u53f0\u670d\u52a1\u8fd0\u884c\uff0c\u9700\u8981\u5148\u5141\u8bb8\u901a\u77e5\u6743\u9650\u3002"
                     ReceiverStartBlockReason.Busy ->
-                        "当前还有操作未完成，请稍后再启动接收。"
+                        "\u5f53\u524d\u8fd8\u6709\u64cd\u4f5c\u672a\u5b8c\u6210\uff0c\u8bf7\u7a0d\u540e\u518d\u542f\u52a8\u63a5\u6536\u3002"
                 },
             )
         },
@@ -1054,9 +1262,9 @@ internal fun ReceiverStartBlockedDialog(
             ) {
                 Text(
                     when (reason) {
-                        ReceiverStartBlockReason.MissingAccount -> "去配置账号"
-                        ReceiverStartBlockReason.MissingNotificationPermission -> "开启权限"
-                        ReceiverStartBlockReason.Busy -> "知道了"
+                        ReceiverStartBlockReason.MissingAccount -> "\u53bb\u914d\u7f6e\u8d26\u53f7"
+                        ReceiverStartBlockReason.MissingNotificationPermission -> "\u5f00\u542f\u6743\u9650"
+                        ReceiverStartBlockReason.Busy -> "\u77e5\u9053\u4e86"
                     },
                 )
             }
@@ -1074,12 +1282,16 @@ internal fun ReceiverStartBlockedDialog(
 @Composable
 internal fun SelectedAssetsActionBar(
     selectedCount: Int,
+    totalCount: Int,
     canOpen: Boolean,
+    canEvaluate: Boolean,
     canMove: Boolean,
     canMerge: Boolean,
     onOpen: () -> Unit,
+    onEvaluate: () -> Unit,
     onMove: () -> Unit,
     onMerge: () -> Unit,
+    onSelectAll: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1091,73 +1303,100 @@ internal fun SelectedAssetsActionBar(
         border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.35f)),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                "已选择 $selectedCount 个分组",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "\u5df2\u9009 $selectedCount/$totalCount",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = onSelectAll,
+                    enabled = selectedCount < totalCount,
+                ) {
+                    Text("\u5168\u9009")
+                }
+                TextButton(onClick = onCancel) {
+                    Text("\u53d6\u6d88")
+                }
+            }
             Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Button(
-                    onClick = onOpen,
+                SelectionActionButton(
+                    text = "\u6253\u5f00",
                     enabled = canOpen,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ElementBlue,
-                        contentColor = ElementOnAccent,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-                ) {
-                    Text("打开")
-                }
-                OutlinedButton(
-                    onClick = onMove,
+                    primary = true,
+                    width = 84.dp,
+                    onClick = onOpen,
+                )
+                SelectionActionButton(
+                    text = "\u8bc4\u4ef7",
+                    enabled = canEvaluate,
+                    width = 84.dp,
+                    accent = ElementBlue,
+                    onClick = onEvaluate,
+                )
+                SelectionActionButton(
+                    text = "\u79fb\u52a8",
                     enabled = canMove,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, ElementBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = ElementControlSurface,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-                ) {
-                    Text("移动")
-                }
-                OutlinedButton(
-                    onClick = onMerge,
+                    width = 84.dp,
+                    onClick = onMove,
+                )
+                SelectionActionButton(
+                    text = "\u5408\u5e76",
                     enabled = canMerge,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, ElementPurple.copy(alpha = 0.45f)),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = ElementControlSurface,
-                        contentColor = ElementPurple,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-                ) {
-                    Text("\u5408\u5e76\u8fde\u62cd", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, ElementBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = ElementControlSurface,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-                ) {
-                    Text("取消")
-                }
+                    width = 84.dp,
+                    accent = ElementPurple,
+                    onClick = onMerge,
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun SelectionActionButton(
+    text: String,
+    enabled: Boolean,
+    width: Dp,
+    onClick: () -> Unit,
+    primary: Boolean = false,
+    accent: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    if (primary) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.width(width),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = ElementBlue,
+                contentColor = ElementOnAccent,
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+        ) {
+            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.width(width),
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, if (enabled) accent.copy(alpha = 0.45f) else ElementBorder),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = ElementControlSurface,
+                contentColor = accent,
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+        ) {
+            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -1177,13 +1416,13 @@ internal fun MoveSelectedGroupsDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "移动 $selectedCount 个分组",
+                    "\u79fb\u52a8 $selectedCount \u4e2a\u5206\u7ec4",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 if (targets.isEmpty()) {
                     Text(
-                        "当前没有可移动到的项目",
+                        "\u5f53\u524d\u6ca1\u6709\u53ef\u79fb\u52a8\u5230\u7684\u9879\u76ee",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
@@ -1227,12 +1466,12 @@ internal fun MoveSelectedGroupsDialog(
 internal fun PhotoListControlRow(
     selectedCollection: ProjectPhotoCollection,
     onCollectionChange: (ProjectPhotoCollection) -> Unit,
-    selectedAccount: String?,
-    selectedFilter: InboxFilter,
+    selectedFilter: AssetFormatFilter,
     selectedSort: PhotoSortMode,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
+    val activeSummary = photoListFilterSummary(selectedFilter, selectedSort)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1270,52 +1509,15 @@ internal fun PhotoListControlRow(
                 }
             }
         }
-        Text(
-            listOf(
-                selectedAccount?.let { "账号：$it" } ?: "全部账号",
-                selectedFilter.label,
-                selectedSort.label,
-            ).joinToString(" / "),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-internal fun FilterToggleRow(
-    selectedAccount: String?,
-    selectedFilter: InboxFilter,
-    selectedSort: PhotoSortMode,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
-            Text("筛选", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.height(2.dp))
+        activeSummary?.let { summary ->
             Text(
-                listOf(
-                    selectedAccount?.let { "账号：$it" } ?: "全部账号",
-                    selectedFilter.label,
-                    selectedSort.label,
-                ).joinToString(" / "),
+                summary,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(if (expanded) "收起 ▲" else "展开 ▼", color = ElementBlue, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1336,59 +1538,13 @@ internal fun PhotoSortBar(
 }
 
 @Composable
-internal fun ProjectPhotoCollectionBar(
-    selectedCollection: ProjectPhotoCollection,
-    onCollectionChange: (ProjectPhotoCollection) -> Unit,
+internal fun AssetFormatFilterBar(
+    selectedFilter: AssetFormatFilter,
+    onFilterChange: (AssetFormatFilter) -> Unit,
+    assets: List<ProjectAsset>,
 ) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(ProjectPhotoCollection.entries) { collection ->
-            FilterChipButton(
-                label = collection.label,
-                selected = selectedCollection == collection,
-                onClick = { onCollectionChange(collection) },
-            )
-        }
-    }
-}
-
-@Composable
-internal fun AccountFilterBar(
-    selectedAccount: String?,
-    onAccountChange: (String?) -> Unit,
-    assets: List<InboxAsset>,
-) {
-    val accounts = remember(assets) {
-        assets.mapNotNull { it.username?.takeIf { username -> username.isNotBlank() } }
-            .distinct()
-            .sorted()
-    }
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        item {
-            FilterChipButton(
-                label = "全部账号 ${assets.size}",
-                selected = selectedAccount == null,
-                onClick = { onAccountChange(null) },
-            )
-        }
-        items(accounts) { account ->
-            val count = assets.count { it.username == account }
-            FilterChipButton(
-                label = "账号：$account $count",
-                selected = selectedAccount == account,
-                onClick = { onAccountChange(account) },
-            )
-        }
-    }
-}
-
-@Composable
-internal fun InboxFilterBar(
-    selectedFilter: InboxFilter,
-    onFilterChange: (InboxFilter) -> Unit,
-    assets: List<InboxAsset>,
-) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(InboxFilter.entries) { filter ->
+        items(AssetFormatFilter.entries) { filter ->
             val count = assets.count { filter.matches(it) }
             FilterChipButton(
                 label = "${filter.label} $count",
@@ -1402,16 +1558,16 @@ internal fun InboxFilterBar(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CompactPhotoTile(
-    asset: InboxAsset,
+    asset: ProjectAsset,
     selected: Boolean,
     selectionMode: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     val burstBadge = asset.burstCountBadgeText()
-    val qualityBadge = asset.tileQualityBadgeText()
+    val primaryBadge = asset.tilePrimaryBadgeText()
     val recommendationBadge = asset.recommendationBadgeText()
-    val smartMeta = asset.tileSmartMeta()
+    val auxiliaryBadges = asset.tileAuxiliaryBadges()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1423,7 +1579,12 @@ internal fun CompactPhotoTile(
                 shape = RoundedCornerShape(16.dp),
             )
             .semantics {
-                contentDescription = "照片 ${asset.filename()} ${asset.sourceLabel()} ${asset.formatBadges()}"
+                contentDescription = listOf(
+                    "照片 ${asset.filename()}",
+                    primaryBadge,
+                    recommendationBadge?.takeIf { asset.isBestRecommendedAsset() },
+                    auxiliaryBadges.joinToString(" ").takeIf { it.isNotBlank() },
+                ).filterNotNull().joinToString(" ")
                 stateDescription = when {
                     selected -> "已选择"
                     selectionMode -> "未选择"
@@ -1456,10 +1617,11 @@ internal fun CompactPhotoTile(
                         .padding(6.dp),
                 )
             }
-            qualityBadge?.let {
+            primaryBadge?.let {
                 PhotoEdgeBadge(
                     text = it,
-                    color = smartBadgeColor(asset),
+                    color = asset.modelScoreText()?.let { asset.modelScoreColor() }
+                        ?: asset.tilePrimaryBadgeColor(),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp),
@@ -1484,26 +1646,19 @@ internal fun CompactPhotoTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            listOf(asset.sourceLabel(), asset.formatBadges()).joinToString(" · "),
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        smartMeta?.let {
-            Spacer(Modifier.height(3.dp))
-            Text(
-                it,
-                fontSize = 10.sp,
-                lineHeight = 12.sp,
-                color = smartBadgeColor(asset),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        if (auxiliaryBadges.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                auxiliaryBadges.forEach { badge ->
+                    PhotoInlineBadge(
+                        text = badge,
+                        color = auxiliaryBadgeColor(badge),
+                    )
+                }
+            }
         }
     }
 }
@@ -1532,3 +1687,38 @@ private fun PhotoEdgeBadge(
         )
     }
 }
+
+@Composable
+private fun PhotoInlineBadge(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = color.copy(alpha = 0.12f),
+        contentColor = color,
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.36f)),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun auxiliaryBadgeColor(text: String): Color =
+    when (text) {
+        "收藏" -> ElementSuccess
+        "标记" -> ElementBlue
+        "风险", "不支持预览" -> ElementDanger
+        "RAW", "JPG+RAW" -> ElementPurple
+        "视频" -> ElementInfo
+        else -> ElementInfo
+    }

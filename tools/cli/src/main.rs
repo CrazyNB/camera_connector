@@ -30,6 +30,8 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         output: PathBuf,
+        #[arg(long, alias = "project")]
+        project_id: String,
         #[arg(long)]
         state: Option<PathBuf>,
         #[arg(long, default_value = "manual")]
@@ -147,7 +149,7 @@ enum Command {
         #[arg(long)]
         source_name: Option<String>,
     },
-    Inbox {
+    Assets {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, required_unless_present = "project_id")]
@@ -319,6 +321,7 @@ struct ReceiverSettingsArgs {
 struct ReceiveFileArgs {
     input: PathBuf,
     output: PathBuf,
+    project_id: String,
     state: Option<PathBuf>,
     source: ImportSource,
     username: Option<String>,
@@ -345,6 +348,7 @@ async fn main() -> Result<()> {
         Some(Command::ReceiveFile {
             input,
             output,
+            project_id,
             state,
             source,
             username,
@@ -353,6 +357,7 @@ async fn main() -> Result<()> {
             handle_receive_file_command(ReceiveFileArgs {
                 input,
                 output,
+                project_id,
                 state,
                 source: parse_source(&source)?,
                 username,
@@ -528,7 +533,7 @@ async fn main() -> Result<()> {
             tokio::signal::ctrl_c().await?;
             runtime.stop_receiver().await?;
         }
-        Some(Command::Inbox {
+        Some(Command::Assets {
             config,
             path,
             project_id,
@@ -556,7 +561,7 @@ async fn main() -> Result<()> {
                 ..AssetGroupQuery::default()
             };
             let groups = if let Some(project_id) = project_id {
-                let page = load_project_inbox_page(
+                let page = load_project_asset_page(
                     config,
                     &project_id,
                     query,
@@ -587,7 +592,7 @@ async fn main() -> Result<()> {
                 }
             } else {
                 let path = path.ok_or(camera_connector_core::ImporterError::InvalidUploadPath)?;
-                service.diagnostic_inbox_groups(path, source)?
+                service.diagnostic_received_asset_groups(path, source)?
             };
             print_asset_groups(groups);
         }
@@ -701,9 +706,12 @@ fn handle_receive_file_command(args: ReceiveFileArgs) -> Result<TransferRecord> 
         asset.filename, asset.format, asset.size_bytes
     );
     let final_path = progress
-        .output_path
-        .clone()
-        .ok_or_else(|| camera_connector_core::ImporterError::internal("missing output path"))?;
+        .output_location
+        .as_ref()
+        .and_then(StoredObjectLocation::as_local_path)
+        .map(Path::to_path_buf)
+        .or(progress.output_path.clone())
+        .ok_or_else(|| camera_connector_core::ImporterError::internal("missing output location"))?;
     let log_dir = args.state.unwrap_or_else(|| {
         final_path
             .parent()
@@ -716,7 +724,6 @@ fn handle_receive_file_command(args: ReceiveFileArgs) -> Result<TransferRecord> 
         status: TransferStatus::Completed,
         original_path: filename.to_string(),
         final_filename: asset.filename,
-        final_path: Some(final_path),
         final_location: progress.output_location,
         size_bytes: progress.bytes_written,
         username: args.username,
@@ -727,18 +734,17 @@ fn handle_receive_file_command(args: ReceiveFileArgs) -> Result<TransferRecord> 
         error: None,
     };
     append_transfer_record(&log_dir, &record)?;
-    record_transfer_in_active_project(&log_dir, &record)?;
+    record_transfer_in_project(&log_dir, &args.project_id, &record)?;
     Ok(record)
 }
 
-fn record_transfer_in_active_project(state_dir: &Path, record: &TransferRecord) -> Result<()> {
+fn record_transfer_in_project(
+    state_dir: &Path,
+    project_id: &str,
+    record: &TransferRecord,
+) -> Result<()> {
     let store = SqliteStore::open_state_dir(state_dir)?;
-    let project = store.active_project()?.ok_or_else(|| {
-        camera_connector_core::ImporterError::internal(
-            "no active project selected; create and select a project first",
-        )
-    })?;
-    store.record_transfer(&project.project_id, record.clone())
+    store.record_transfer(project_id, record.clone())
 }
 
 fn load_dashboard(args: DashboardArgs) -> Result<CameraConnectorDashboard> {
@@ -752,7 +758,7 @@ fn load_dashboard(args: DashboardArgs) -> Result<CameraConnectorDashboard> {
     )
 }
 
-fn load_project_inbox_page(
+fn load_project_asset_page(
     config: Option<PathBuf>,
     project_id: &str,
     query: AssetGroupQuery,
@@ -1468,7 +1474,7 @@ mod tests {
                 bind_host: Some("127.0.0.1".to_string()),
                 ftp_port: Some(2122),
                 sftp_port: Some(2223),
-                output: Some(PathBuf::from("C:\\CameraConnector\\Inbox")),
+                output: Some(PathBuf::from("C:\\CameraConnector\\Received")),
                 state: Some(PathBuf::from("C:\\CameraConnector\\State")),
                 advertised_host: Some("192.168.137.1".to_string()),
                 source_name: Some("Studio".to_string()),
@@ -1483,7 +1489,7 @@ mod tests {
         assert_eq!(loaded.receiver.sftp_port, 2223);
         assert_eq!(
             loaded.receiver.output_dir.as_deref(),
-            Some(Path::new("C:\\CameraConnector\\Inbox"))
+            Some(Path::new("C:\\CameraConnector\\Received"))
         );
         assert_eq!(
             loaded.receiver.state_dir.as_deref(),
@@ -1499,10 +1505,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_inbox_from_transfers_command() {
+    fn parses_assets_from_transfers_command() {
         let cli = Cli::try_parse_from([
             "camera-connector",
-            "inbox",
+            "assets",
             "--diagnostic",
             "--config",
             "C:\\CameraConnector\\config.json",
@@ -1525,11 +1531,11 @@ mod tests {
             "--limit",
             "20",
         ])
-        .expect("inbox from transfers command should parse");
+        .expect("assets from transfers command should parse");
 
         assert!(matches!(
             cli.command,
-            Some(Command::Inbox {
+            Some(Command::Assets {
                 from_transfers: true,
                 summary: true,
                 username: Some(_),
@@ -1545,12 +1551,12 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_inbox_requires_explicit_flag() {
+    fn diagnostic_assets_requires_explicit_flag() {
         let result = Cli::try_parse_from([
             "camera-connector",
-            "inbox",
+            "assets",
             "--path",
-            "C:\\CameraConnector\\Inbox",
+            "C:\\CameraConnector\\Received",
             "--source",
             "ftp",
         ]);
@@ -1559,21 +1565,21 @@ mod tests {
     }
 
     #[test]
-    fn parses_diagnostic_inbox_command() {
+    fn parses_diagnostic_assets_command() {
         let cli = Cli::try_parse_from([
             "camera-connector",
-            "inbox",
+            "assets",
             "--diagnostic",
             "--path",
-            "C:\\CameraConnector\\Inbox",
+            "C:\\CameraConnector\\Received",
             "--source",
             "ftp",
         ])
-        .expect("diagnostic inbox command should parse");
+        .expect("diagnostic assets command should parse");
 
         assert!(matches!(
             cli.command,
-            Some(Command::Inbox {
+            Some(Command::Assets {
                 project_id: None,
                 path: Some(_),
                 ..
@@ -1582,10 +1588,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_project_inbox_command_without_path() {
+    fn parses_project_assets_command_without_path() {
         let cli = Cli::try_parse_from([
             "camera-connector",
-            "inbox",
+            "assets",
             "--config",
             "C:\\CameraConnector\\config.json",
             "--project-id",
@@ -1596,11 +1602,11 @@ mod tests {
             "--limit",
             "20",
         ])
-        .expect("project inbox command should parse");
+        .expect("project assets command should parse");
 
         assert!(matches!(
             cli.command,
-            Some(Command::Inbox {
+            Some(Command::Assets {
                 path: None,
                 project_id: Some(project_id),
                 summary: true,
@@ -1639,7 +1645,7 @@ mod tests {
     }
 
     #[test]
-    fn project_inbox_loads_asset_page_from_sqlite() {
+    fn project_assets_load_asset_page_from_sqlite() {
         let root = std::env::temp_dir().join(format!(
             "camera-connector-project-assets-{}",
             current_time_ms()
@@ -1655,7 +1661,7 @@ mod tests {
             })
             .expect("receiver settings should save");
         let project = service
-            .create_project("Project Inbox")
+            .create_project("project assets")
             .expect("project should create");
         service
             .record_project_transfer(
@@ -1666,7 +1672,6 @@ mod tests {
                     status: TransferStatus::Completed,
                     original_path: "DCIM/100/IMG_0202.CR3".to_string(),
                     final_filename: "IMG_0202.CR3".to_string(),
-                    final_path: None,
                     final_location: Some(StoredObjectLocation::local_path(
                         root.join("IMG_0202.CR3"),
                     )),
@@ -1681,14 +1686,14 @@ mod tests {
             )
             .expect("project transfer should record");
 
-        let page = load_project_inbox_page(
+        let page = load_project_asset_page(
             Some(config_path.clone()),
             &project.project_id,
             AssetGroupQuery::default(),
             0,
             50,
         )
-        .expect("project inbox page should load");
+        .expect("project assets page should load");
 
         assert_eq!(page.total_groups, 1);
         assert_eq!(page.summary.asset_count, 1);
@@ -1729,7 +1734,6 @@ mod tests {
                     status: TransferStatus::Completed,
                     original_path: "DCIM/100/IMG_0303.JPG".to_string(),
                     final_filename: "IMG_0303.JPG".to_string(),
-                    final_path: None,
                     final_location: Some(StoredObjectLocation::local_path(
                         root.join("IMG_0303.JPG"),
                     )),
@@ -1857,7 +1861,6 @@ mod tests {
             status: TransferStatus::Failed,
             original_path: "DCIM/100/IMG_0303.CR3".to_string(),
             final_filename: "IMG_0303.CR3".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::local_path(root.join("IMG_0303.CR3"))),
             size_bytes: 42,
             username: Some("verify".to_string()),
@@ -2000,7 +2003,6 @@ mod tests {
                     status: TransferStatus::Completed,
                     original_path: "DCIM/100/IMG_0101.CR3".to_string(),
                     final_filename: "IMG_0101.CR3".to_string(),
-                    final_path: None,
                     final_location: Some(StoredObjectLocation::local_path(
                         root.join("IMG_0101.CR3"),
                     )),
@@ -2069,7 +2071,6 @@ mod tests {
             updated_at_ms: 20,
             archived_at_ms: None,
             default_output_target_id: None,
-            default_strategy_profile_id: None,
         };
 
         let line = project_line(&project, Some("project-1"));
@@ -2324,7 +2325,7 @@ mod tests {
     }
 
     #[test]
-    fn receive_file_command_indexes_upload_under_active_project() {
+    fn receive_file_command_indexes_upload_under_explicit_project() {
         let root = std::env::temp_dir().join(format!(
             "camera-connector-receive-file-{}",
             current_time_ms()
@@ -2340,13 +2341,11 @@ mod tests {
         let project = store
             .create_project("CLI Shoot")
             .expect("project should create");
-        store
-            .set_active_project(&project.project_id)
-            .expect("project should become active");
 
         let record = handle_receive_file_command(ReceiveFileArgs {
             input,
             output,
+            project_id: project.project_id.clone(),
             state: Some(state.clone()),
             source: ImportSource::FtpPush,
             username: Some("verify".to_string()),
@@ -2421,7 +2420,6 @@ mod tests {
                     status: TransferStatus::Failed,
                     original_path: "IMG_0002.CR3".to_string(),
                     final_filename: "IMG_0002.CR3".to_string(),
-                    final_path: None,
                     final_location: None,
                     size_bytes: 0,
                     username: Some("z5".to_string()),
@@ -2460,7 +2458,6 @@ mod tests {
                     raw: Some(asset),
                     video: None,
                     burst: None,
-                    quality: None,
                     technical_status: None,
                     technical_gate_status: None,
                     technical_defects: Vec::new(),
@@ -2521,7 +2518,6 @@ mod tests {
                 status: TransferStatus::Completed,
                 original_path: "DCIM/IMG_0001.DNG".to_string(),
                 final_filename: "IMG_0001.DNG".to_string(),
-                final_path: None,
                 final_location: Some(StoredObjectLocation::document_uri(
                     "content://camera-connector/IMG_0001.DNG",
                 )),
@@ -2556,7 +2552,6 @@ mod tests {
                 status: TransferStatus::Failed,
                 original_path: "IMG_0002.CR3".to_string(),
                 final_filename: "IMG_0002.CR3".to_string(),
-                final_path: None,
                 final_location: None,
                 size_bytes: 0,
                 username: Some("z5".to_string()),
@@ -2598,7 +2593,6 @@ mod tests {
             raw: Some(asset),
             video: None,
             burst: None,
-            quality: None,
             technical_status: None,
             technical_gate_status: None,
             technical_defects: Vec::new(),
@@ -2706,7 +2700,6 @@ mod tests {
             status: TransferStatus::Completed,
             original_path: original_path.to_string(),
             final_filename: final_filename.clone(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::local_path(final_filename)),
             size_bytes: 100,
             username: Some("z5".to_string()),

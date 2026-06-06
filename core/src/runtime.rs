@@ -298,8 +298,10 @@ fn stopped_status_for(output_dir: PathBuf, state_dir: PathBuf) -> ReceiverRuntim
 }
 
 fn observe_receiver_runtime_status(mut status: ReceiverRuntimeStatus) -> ReceiverRuntimeStatus {
-    if matches!(status.phase, ReceiverRuntimePhase::Running)
-        && !is_receiver_listener_alive(status.local_addr)
+    if matches!(
+        status.phase,
+        ReceiverRuntimePhase::Running | ReceiverRuntimePhase::Stopping
+    ) && !is_receiver_listener_alive(status.local_addr)
     {
         status.phase = ReceiverRuntimePhase::Stopped;
         status.local_addr = None;

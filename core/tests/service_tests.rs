@@ -2,9 +2,9 @@ use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
     CvPolicy, ImportSource, ModelProviderKind, ModelProviderSettings, ModelSendMode, ObjectFormat,
-    ProjectRecommendationMode, PushProtocol, ReceiverAuthMode, ReceiverConfigRequest,
-    ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate, SceneProfile,
-    StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
+    ProjectRecommendationMode, PromptProfileContent, PushProtocol, ReceiverAuthMode,
+    ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
+    SceneProfile, StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -116,7 +116,6 @@ fn service_returns_transfer_views_with_virtual_display_paths() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100NIKON/DSC_0001.NEF".to_string(),
             final_filename: "DSC_0001.NEF".to_string(),
-            final_path: Some(output_dir.join("DSC_0001.NEF")),
             final_location: Some(StoredObjectLocation::local_path(
                 output_dir.join("DSC_0001.NEF"),
             )),
@@ -164,7 +163,6 @@ fn service_summarizes_transfer_statuses() {
             status: TransferStatus::Completed,
             original_path: "IMG_0001.CR3".to_string(),
             final_filename: "IMG_0001.CR3".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_0001.CR3",
             )),
@@ -186,7 +184,6 @@ fn service_summarizes_transfer_statuses() {
             status: TransferStatus::Failed,
             original_path: "IMG_0002.CR3".to_string(),
             final_filename: "IMG_0002.CR3".to_string(),
-            final_path: None,
             final_location: None,
             size_bytes: 0,
             username: Some("z5".to_string()),
@@ -229,7 +226,6 @@ fn service_filters_failed_transfer_views_by_status() {
             status: TransferStatus::Completed,
             original_path: "IMG_0001.CR3".to_string(),
             final_filename: "IMG_0001.CR3".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_0001.CR3",
             )),
@@ -251,7 +247,6 @@ fn service_filters_failed_transfer_views_by_status() {
             status: TransferStatus::Failed,
             original_path: "IMG_0002.CR3".to_string(),
             final_filename: "IMG_0002.CR3".to_string(),
-            final_path: None,
             final_location: None,
             size_bytes: 0,
             username: Some("z5".to_string()),
@@ -309,7 +304,6 @@ fn service_resolves_transfer_display_source_from_current_account_name() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100NIKON/DSC_0002.NEF".to_string(),
             final_filename: "DSC_0002.NEF".to_string(),
-            final_path: Some(state_dir.join("DSC_0002.NEF")),
             final_location: Some(StoredObjectLocation::local_path(
                 state_dir.join("DSC_0002.NEF"),
             )),
@@ -392,15 +386,15 @@ fn service_maps_connected_devices_to_account_device_names() {
 }
 
 #[test]
-fn service_scans_inbox_groups() {
-    let output_dir = unique_temp_dir("service-inbox");
+fn service_scans_received_asset_groups() {
+    let output_dir = unique_temp_dir("service-output");
     std::fs::create_dir_all(&output_dir).expect("output dir should create");
     std::fs::write(output_dir.join("IMG_0001.JPG"), [1, 2, 3]).expect("jpg should write");
     std::fs::write(output_dir.join("IMG_0001.CR3"), [4, 5, 6]).expect("raw should write");
 
     let service = CameraConnectorService::new(None);
     let groups = service
-        .diagnostic_inbox_groups(&output_dir, ImportSource::FtpPush)
+        .diagnostic_received_asset_groups(&output_dir, ImportSource::FtpPush)
         .expect("groups should load");
 
     assert_eq!(groups.len(), 1);
@@ -430,7 +424,6 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_2222.JPG".to_string(),
             final_filename: "IMG_2222.JPG".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_2222.JPG",
             )),
@@ -452,7 +445,6 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_2222.NEF".to_string(),
             final_filename: "IMG_2222.NEF".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::media_uri(
                 "content://media/external/images/media/2222",
             )),
@@ -474,7 +466,6 @@ fn service_groups_received_assets_from_transfer_log_without_scanning_storage() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/README.TXT".to_string(),
             final_filename: "README.TXT".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/README.TXT",
             )),
@@ -548,7 +539,6 @@ fn service_marks_duplicate_assets_from_same_account_and_original_path() {
                 status: TransferStatus::Completed,
                 original_path: "DCIM/100CANON/IMG_7777.CR3".to_string(),
                 final_filename: final_filename.to_string(),
-                final_path: None,
                 final_location: Some(StoredObjectLocation::document_uri(format!(
                     "content://camera-connector/{final_filename}"
                 ))),
@@ -598,7 +588,6 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_3000.JPG".to_string(),
             final_filename: "IMG_3000.JPG".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_3000.JPG",
             )),
@@ -620,7 +609,6 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_3000.NEF".to_string(),
             final_filename: "IMG_3000.NEF".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_3000.NEF",
             )),
@@ -642,7 +630,6 @@ fn service_filters_transfer_asset_groups_by_metadata_and_format() {
             status: TransferStatus::Completed,
             original_path: "DCIM/101/IMG_4000.JPG".to_string(),
             final_filename: "IMG_4000.JPG".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_4000.JPG",
             )),
@@ -691,7 +678,6 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_5000.JPG".to_string(),
             final_filename: "IMG_5000.JPG".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_5000.JPG",
             )),
@@ -713,7 +699,6 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
             status: TransferStatus::Completed,
             original_path: "DCIM/100/IMG_5000.NEF".to_string(),
             final_filename: "IMG_5000.NEF".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_5000.NEF",
             )),
@@ -735,7 +720,6 @@ fn service_summarizes_log_backed_asset_groups_for_filter_tabs() {
             status: TransferStatus::Completed,
             original_path: "PRIVATE/CLIP_1.MOV".to_string(),
             final_filename: "CLIP_1.MOV".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::media_uri(
                 "content://media/external/video/media/1",
             )),
@@ -781,7 +765,6 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
             status: TransferStatus::Completed,
             original_path: "IMG_1000.CR3".to_string(),
             final_filename: "IMG_1000.CR3".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_1000.CR3",
             )),
@@ -803,7 +786,6 @@ fn service_orders_log_backed_asset_groups_by_latest_completed_time() {
             status: TransferStatus::Completed,
             original_path: "IMG_1001.CR3".to_string(),
             final_filename: "IMG_1001.CR3".to_string(),
-            final_path: None,
             final_location: Some(StoredObjectLocation::document_uri(
                 "content://camera-connector/IMG_1001.CR3",
             )),
@@ -842,7 +824,6 @@ fn service_paginates_log_backed_asset_groups_after_filtering_and_sorting() {
                 status: TransferStatus::Completed,
                 original_path: format!("IMG_200{index}.CR3"),
                 final_filename: format!("IMG_200{index}.CR3"),
-                final_path: None,
                 final_location: Some(StoredObjectLocation::document_uri(format!(
                     "content://camera-connector/IMG_200{index}.CR3"
                 ))),
@@ -948,7 +929,7 @@ fn service_rejects_editing_builtin_prompt_until_forked_for_project() {
         .expect("forked prompt should edit");
 
     assert_eq!(saved.prompt_profile_id, forked.prompt_profile_id);
-    assert_eq!(saved.prompt_text, "Project-specific prompt text.");
+    assert_prompt_shared_preference(&saved.prompt_text, "Project-specific prompt text.");
     assert_eq!(saved.output_schema_version, "model-evaluation-v1");
     assert!(!saved.prompt_hash.is_empty());
 
@@ -1102,7 +1083,7 @@ fn service_editing_project_prompt_creates_new_version_without_deleting_old_one()
         .expect("profile should exist");
 
     assert_eq!(old_version.prompt_profile_id, forked.prompt_profile_id);
-    assert_eq!(new_version.prompt_text, "A newer rubric for this project.");
+    assert_prompt_shared_preference(&new_version.prompt_text, "A newer rubric for this project.");
     assert_eq!(
         active_profile.active_version_id.as_deref(),
         Some(edited.prompt_version_id.as_str())
@@ -1110,6 +1091,15 @@ fn service_editing_project_prompt_creates_new_version_without_deleting_old_one()
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(state_dir);
+}
+
+fn assert_prompt_shared_preference(prompt_text: &str, expected: &str) {
+    let content: PromptProfileContent =
+        serde_json::from_str(prompt_text).expect("prompt should be structured JSON");
+    assert_eq!(content.shared_preference, expected);
+    assert!(content.evaluation_instruction.is_none());
+    assert!(content.burst_selection_instruction.is_none());
+    assert!(content.project_selection_instruction.is_none());
 }
 
 #[test]
@@ -1167,7 +1157,7 @@ fn service_saves_provider_and_project_settings_with_manual_recommendation_mode()
             updated_at_ms: 6_000,
         })
         .expect("provider settings should save");
-    assert_eq!(provider.settings_id, "global");
+    assert_eq!(provider.settings_id, "contains-no-secret-fields");
     assert_eq!(
         service
             .model_provider_settings()

@@ -21,7 +21,7 @@ $seedState = Join-Path $root "target\android-emulator-ftp-seed-state"
 $controlForward = "tcp:$HostControlPort"
 $deviceControl = "tcp:2121"
 $androidConfig = "/data/user/0/$packageName/files/camera-connector.json"
-$androidInbox = "/data/user/0/$packageName/files/inbox"
+$androidOutput = "/data/user/0/$packageName/files/output"
 $androidState = "/data/user/0/$packageName/files/state"
 $sampleRawName = "VERIFY_9001.NEF"
 $sampleJpegName = "VERIFY_9001.JPG"
@@ -58,6 +58,44 @@ function Invoke-Adb {
     if ($LASTEXITCODE -ne 0) {
         throw "adb command failed: adb -s $Serial $($Arguments -join ' ')"
     }
+}
+
+function Test-AppForeground {
+    $window = & $adb -s $Serial shell dumpsys window 2>$null
+    $focus = $window |
+        Select-String -Pattern "mCurrentFocus|mFocusedApp" |
+        Select-Object -First 10
+    return (($focus -join "`n").Contains($packageName))
+}
+
+function Bring-AppToForeground {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
+        Start-Sleep -Milliseconds 2500
+        if (Test-AppForeground) {
+            return
+        }
+        Invoke-Adb @(
+            "shell",
+            "monkey",
+            "-p",
+            $packageName,
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1"
+        ) | Out-Null
+        Start-Sleep -Milliseconds 2500
+        if (Test-AppForeground) {
+            return
+        }
+    }
+    $window = (& $adb -s $Serial shell dumpsys window 2>$null) -join "`n"
+    throw "Unable to bring $packageName to foreground. Window state: $window"
+}
+
+function Start-App {
+    Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
+    Bring-AppToForeground
 }
 
 function U {
@@ -301,15 +339,18 @@ function Test-FtpGreeting {
 }
 
 function Start-ReceiverFromUi {
-    Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
+    Start-App
     $startText = U @(0x5F00,0x59CB,0x63A5,0x6536)
     $startShortText = U @(0x542F,0x52A8)
-    $runningText = U @(0x8FD0,0x884C,0x4E2D)
+    $runningText = U @(0x63A5,0x6536,0x4E2D)
     $stopText = U @(0x505C,0x6B62)
 
     for ($attempt = 1; $attempt -le 20; $attempt++) {
         if (Test-FtpGreeting) {
             return
+        }
+        if (-not (Test-AppForeground)) {
+            Bring-AppToForeground
         }
 
         $xml = ""
@@ -498,11 +539,15 @@ function Test-UiNodeByText {
 function Test-ProjectWorkspaceXml {
     param([string]$Xml)
     $cameraConnectIpText = "$(U @(0x76F8,0x673A,0x8FDE,0x63A5)) IP"
+    $projectIntelligenceText = U @(0x9879,0x76EE,0x667A,0x80FD)
+    $expandReceiverDrawerText = U @(0x5C55,0x5F00,0x63A5,0x6536,0x62BD,0x5C49)
     $allText = U @(0x5168,0x90E8)
     $favoriteText = U @(0x6536,0x85CF)
     $markedText = U @(0x6807,0x8BB0)
     $startShortText = U @(0x542F,0x52A8)
-    return $Xml.Contains($cameraConnectIpText) -or (
+    return $Xml.Contains($cameraConnectIpText) -or
+        $Xml.Contains($projectIntelligenceText) -or
+        $Xml.Contains($expandReceiverDrawerText) -or (
         $Xml.Contains($startShortText) -and
         $Xml.Contains($allText) -and
         $Xml.Contains($favoriteText) -and
@@ -582,6 +627,16 @@ function Tap-UiNodeByContentDescription {
     $y = [int](([int]$match.Groups[2].Value + [int]$match.Groups[4].Value) / 2)
     Invoke-Adb @("shell", "input", "tap", "$x", "$y") | Out-Null
     Start-Sleep -Milliseconds 900
+}
+
+function Collapse-ReceiverLauncherIfExpanded {
+    param([string]$Xml)
+    $collapseText = U @(0x6536,0x8D77,0x542F,0x52A8,0x9875)
+    if ($Xml.Contains($collapseText)) {
+        Tap-UiNodeByContentDescription $Xml $collapseText "collapse receiver launcher"
+        return Get-UiXml
+    }
+    return $Xml
 }
 
 function Tap-UiNodeByContentDescriptionUntilUiContains {
@@ -719,7 +774,7 @@ if (Test-Path -LiteralPath $configPath) {
     --bind-host "0.0.0.0" `
     --ftp-port 2121 `
     --sftp-port 2222 `
-    --output $androidInbox `
+    --output $androidOutput `
     --state $seedState `
     --advertised-host "127.0.0.1" `
     --source-name $DeviceName | Out-Host
@@ -742,7 +797,7 @@ if (-not (Test-Path -LiteralPath $seedDatabase -PathType Leaf)) {
     --bind-host "0.0.0.0" `
     --ftp-port 2121 `
     --sftp-port 2222 `
-    --output $androidInbox `
+    --output $androidOutput `
     --state $androidState `
     --advertised-host "127.0.0.1" `
     --source-name $DeviceName | Out-Host
@@ -754,9 +809,9 @@ if ($configRaw -like "*$Password*") {
 }
 
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
-Invoke-Adb @("shell", "run-as", $packageName, "rm", "-rf", "files/inbox", "files/state") | Out-Null
+Invoke-Adb @("shell", "run-as", $packageName, "rm", "-rf", "files/output", "files/state") | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "rm", "-f", "shared_prefs/camera_connector_storage.xml") | Out-Null
-Invoke-Adb @("shell", "run-as", $packageName, "mkdir", "-p", "files/inbox", "files/state") | Out-Null
+Invoke-Adb @("shell", "run-as", $packageName, "mkdir", "-p", "files/output", "files/state") | Out-Null
 Invoke-Adb @("push", $configPath, "/data/local/tmp/camera-connector.json") | Out-Null
 Invoke-Adb @("shell", "chmod", "644", "/data/local/tmp/camera-connector.json") | Out-Null
 Invoke-Adb @("shell", "run-as", $packageName, "cp", "/data/local/tmp/camera-connector.json", "files/camera-connector.json") | Out-Null
@@ -843,11 +898,11 @@ if ($RealImagesOnly) {
 
 Invoke-Adb @("shell", "am", "start", "-S", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 3
-$xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
+$xml = Collapse-ReceiverLauncherIfExpanded (Enter-ProjectWorkspaceIfNeeded (Get-UiXml))
 $photoSwipeAttempts = if ($RealImagesOnly) { [Math]::Max(12, $uploadCases.Count + 8) } else { 6 }
 if ($RealImagesOnly) {
-    $inboxUi = Swipe-UntilUiContains "DSC_" "uploaded image group in project photos" $photoSwipeAttempts
-    Assert-UiContains $inboxUi (U @(0x8BC4,0x5206)) "quality score in project photos"
+    $assetGridUi = Swipe-UntilUiContains "DSC_" "uploaded image group in project photos" $photoSwipeAttempts
+    Assert-UiContains $assetGridUi (U @(0x8BC4,0x5206)) "model score in project photos"
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
     if ($LASTEXITCODE -ne 0) {
         throw "Android diagnostics collection failed after FTP upload verification."
@@ -855,19 +910,19 @@ if ($RealImagesOnly) {
     Write-Host "Android emulator FTP full-image upload verification passed for $($uploadCases.Count) real image files"
     return
 }
-$inboxUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos" $photoSwipeAttempts
-Assert-UiContains $inboxUi "RAW" "raw pair tag"
-Assert-UiContains $inboxUi "JPG" "jpeg pair tag"
+$assetGridUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos" $photoSwipeAttempts
+Assert-UiContains $assetGridUi "RAW" "raw pair tag"
+Assert-UiContains $assetGridUi "JPG" "jpeg pair tag"
 if (($uploadCases | Where-Object { $_.Filename -eq "EDGE_NOT_IMAGE.TXT" }).Count -gt 0) {
-    Assert-UiNotContains $inboxUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo inbox"
+    Assert-UiNotContains $assetGridUi "EDGE_NOT_IMAGE.TXT" "non-image file in photo grid"
 }
 Invoke-Adb @("shell", "am", "force-stop", $packageName) | Out-Null
 Invoke-Adb @("shell", "am", "start", "-n", "$packageName/.MainActivity") | Out-Null
 Start-Sleep -Seconds 2
-$xml = Enter-ProjectWorkspaceIfNeeded (Get-UiXml)
-$inboxUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos after restart" $photoSwipeAttempts
+$xml = Collapse-ReceiverLauncherIfExpanded (Enter-ProjectWorkspaceIfNeeded (Get-UiXml))
+$assetGridUi = Swipe-UntilUiContains $sampleJpegName "uploaded asset in project photos after restart" $photoSwipeAttempts
 $photoDetailText = U @(0x7167,0x7247,0x8BE6,0x60C5)
-$detailUi = Tap-UiNodeByContentDescriptionUntilUiContains $inboxUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile" $photoDetailText "photo detail screen"
+$detailUi = Tap-UiNodeByContentDescriptionUntilUiContains $assetGridUi "$(U @(0x7167,0x7247,0x0020))$sampleJpegName" "uploaded photo tile" $photoDetailText "photo detail screen"
 Assert-UiContains $detailUi (U @(0x7167,0x7247,0x8BE6,0x60C5)) "photo detail screen"
 $detailSourceUi = Swipe-UntilUiContains (U @(0x6765,0x6E90,0x4FE1,0x606F)) "photo source information"
 Assert-UiContains $detailSourceUi $sampleJpegName "photo detail jpeg file"

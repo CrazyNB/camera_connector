@@ -1,9 +1,10 @@
 use camera_connector_core::{
-    group_received_assets, scan_inbox, scan_inbox_groups, ImportSource, ObjectFormat,
+    group_received_assets, scan_received_asset_groups, scan_received_assets, ImportSource,
+    ObjectFormat,
 };
 
 #[test]
-fn scans_inbox_files_and_skips_temporary_uploads() {
+fn scans_received_files_and_skips_temporary_uploads() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     std::fs::write(temp_dir.path().join("DSC_2467.JPG"), [1, 2, 3]).unwrap();
     std::fs::write(temp_dir.path().join("DSC_2467.NEF"), [4, 5]).unwrap();
@@ -16,7 +17,8 @@ fn scans_inbox_files_and_skips_temporary_uploads() {
     )
     .unwrap();
 
-    let assets = scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan");
+    let assets =
+        scan_received_assets(temp_dir.path(), ImportSource::FtpPush).expect("assets should scan");
 
     assert_eq!(assets.len(), 3);
     assert!(assets.iter().all(|asset| !asset.filename.ends_with(".tmp")));
@@ -37,7 +39,7 @@ fn scans_inbox_files_and_skips_temporary_uploads() {
 }
 
 #[test]
-fn scans_inbox_files_and_skips_transfer_log() {
+fn scans_received_files_and_skips_transfer_log() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     std::fs::write(temp_dir.path().join("IMG_1001.CR3"), [1, 2, 3]).unwrap();
     std::fs::write(temp_dir.path().join("transfer-log.jsonl"), []).unwrap();
@@ -45,21 +47,22 @@ fn scans_inbox_files_and_skips_transfer_log() {
     std::fs::write(temp_dir.path().join("receiver-status.json"), []).unwrap();
     std::fs::write(temp_dir.path().join("sftp-host-key"), []).unwrap();
 
-    let assets = scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan");
+    let assets =
+        scan_received_assets(temp_dir.path(), ImportSource::FtpPush).expect("assets should scan");
 
     assert_eq!(assets.len(), 1);
     assert_eq!(assets[0].filename, "IMG_1001.CR3");
 }
 
 #[test]
-fn scans_inbox_groups_raw_jpeg_pairs() {
+fn scans_received_groups_raw_jpeg_pairs() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     std::fs::write(temp_dir.path().join("DSC_2467.JPG"), [1]).unwrap();
     std::fs::write(temp_dir.path().join("DSC_2467.NEF"), [2]).unwrap();
     std::fs::write(temp_dir.path().join("DSC_2468.JPG"), [3]).unwrap();
 
-    let groups =
-        scan_inbox_groups(temp_dir.path(), ImportSource::FtpPush).expect("groups should scan");
+    let groups = scan_received_asset_groups(temp_dir.path(), ImportSource::FtpPush)
+        .expect("groups should scan");
 
     assert_eq!(groups.len(), 2);
     let pair = groups
@@ -70,7 +73,7 @@ fn scans_inbox_groups_raw_jpeg_pairs() {
     assert!(pair.raw.is_some());
 
     let direct_groups = group_received_assets(
-        scan_inbox(temp_dir.path(), ImportSource::FtpPush).expect("inbox should scan"),
+        scan_received_assets(temp_dir.path(), ImportSource::FtpPush).expect("assets should scan"),
     );
     assert_eq!(direct_groups, groups);
 }

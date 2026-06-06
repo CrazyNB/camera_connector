@@ -4,21 +4,16 @@
 
 Approved direction from product discussion on 2026-05-31.
 
-This document supersedes the scoring and recommendation semantics in
-`2026-05-26-smart-selection-design.md`. The older document still describes useful
-infrastructure such as background jobs, burst grouping, project-scoped browsing,
-and non-destructive user actions, but its "local CV score as recommendation"
-model is no longer the target product direction.
+This document supersedes the smart-selection product semantics in
+`2026-05-26-smart-selection-design.md`. The current source of truth is the split
+between technical gates, model evaluations, model recommendations, and user
+marks.
 
 Configuration, prompt versioning, API-key/no-key behavior, manual project
 recommendation triggers, and portrait-specific subject assessment are defined in
 `2026-05-31-model-evaluation-configuration-design.md`.
 
 ## Problem
-
-The current smart selection path produces a local numeric score and uses it to
-pick recommendations. That makes the UI look as if the app can judge whether a
-photo is good or bad from simple CV metrics. This is misleading.
 
 The product needs two different kinds of intelligence:
 
@@ -28,7 +23,8 @@ The product needs two different kinds of intelligence:
 
 The recommendation surface must also separate machine results from human intent.
 User favorites and user marks must not overwrite model recommendations, and model
-recommendations must not imply that the user has accepted or collected a photo.
+recommendations must not imply that the user has collected or manually chosen a
+photo.
 
 ## Core Decision
 
@@ -86,7 +82,7 @@ A model recommendation in a scope:
 Human curation state, independent of model results. Initial marks:
 
 - `favorite`: user-collected or user-preferred photo.
-- `flagged`: replacement for "review"; means user-marked candidate/alternate.
+- `flagged`: user-marked candidate or alternate.
 
 ## Pipeline
 
@@ -164,7 +160,7 @@ technical_assessment
   asset_group_id
   assessor_version
   status: pending | analyzing | ready | failed | unsupported
-  gate_status: pass | warn | reject | needs_review | unsupported
+  gate_status: pass | warn | reject | inconclusive | unsupported
   defect_flags[]
     type: blur | highlight_clip | shadow_clip | noise | color_cast | unsupported
     severity: low | medium | high | severe
@@ -175,7 +171,7 @@ technical_assessment
   analyzed_at_ms
 ```
 
-The UI can show this as "质量风险", not as a final score.
+The UI can show this as "技术风险", not as a final score.
 
 ## Model Evaluation
 
@@ -256,7 +252,7 @@ selection_recommendation
 Important rule:
 
 The burst winner does not have to be a project-level recommended work. A photo
-can be "best in this weak burst" while still failing to become a project select.
+can be "best in this weak burst" while still failing to become a project-level model recommendation.
 
 If the whole burst is bad, the result should be `no_selection`, not a forced best
 pick.
@@ -269,7 +265,7 @@ Candidate set:
 
 - Non-burst asset groups.
 - Burst winners from `burst_group` recommendations.
-- Optional alternates if the user enables broader review.
+- Optional alternates if the user enables a broader candidate pool.
 
 Output:
 
@@ -290,7 +286,7 @@ stored internally as `project` or `burst_group`, but the visible product languag
 should be consistent.
 
 Project-level recommendation is always triggered by an explicit user action such
-as "Generate Project Selects". Upload drains, background analysis drains, and
+as "Generate Project Recommendation". Upload drains, background analysis drains, and
 burst-stable events must not create or refresh `scope = project`
 recommendations. Each manual regeneration records its own evaluation run.
 
@@ -327,19 +323,19 @@ selection_recommendations
 user_marks
 ```
 
-### Existing Concepts To Retire Or Rename
+### Current Storage Rules
 
-- `quality_scores` should no longer mean final quality. It should be replaced by
-  `technical_assessments`, or kept only as an implementation detail during a
-  short transition.
-- `overall` should not be exposed as final good/bad score.
-- `rank` should not be stored as durable truth. Ordering should be derived from
-  model score, recommendation status, capture time, and UI query.
-- `selection_user_overrides` should become explicit user marks and grouping
-  corrections, not "accepted model best" state.
+- Local CV output is persisted only in `technical_assessments`; final
+  photographic evaluation belongs to `model_evaluations`.
+- Technical gate metrics are diagnostics and must not be exposed as final
+  good/bad photo scores.
+- Ordering should be derived from model score, recommendation status, capture
+  time, and UI query instead of durable rank fields.
+- Recommendation decisions are model outputs. Human intent is represented by
+  explicit user marks and grouping corrections.
 
-The project is still in development, so no historical-data compatibility layer is
-required.
+The project is still in development, so storage is defined directly by the
+current model.
 
 ## Job Types
 
@@ -350,7 +346,7 @@ detect_burst_for_asset_group
 assess_asset_group_technical_quality
 evaluate_asset_group_with_model
 recommend_burst_group
-recommend_project_selects
+recommend_project_model_selections
 ```
 
 LLM/VLM jobs should be debounced and batched:
@@ -375,7 +371,7 @@ Primary filters:
 - 模型优选
 - 收藏
 - 标记
-- 质量风险
+- 技术风险
 - 待分析
 
 Burst cards:
@@ -400,9 +396,9 @@ Show:
 
 The burst overview is still useful. It should show group members, their model
 scores, technical risks, and the recommended member. It should not require a
-separate "screening mode" to understand a group.
+standalone filtering workflow to understand a group.
 
-### Project Selects
+### Project Recommendations
 
 Project-level model selected works should be accessible as a normal filter or
 collection. It should not be mixed with user favorites.
@@ -423,7 +419,7 @@ First useful controls:
 - Allow risk photos to participate in model selection.
 - Project recommendation mode: manual only.
 - Maximum images per model batch.
-- Privacy option: send preview only / allow larger review image.
+- Privacy option: send preview only / allow larger detail image.
 
 CV thresholds can remain advanced settings. They are less important than the
 model evaluation profile in the target product.
@@ -438,7 +434,7 @@ projects use their own project evaluation settings as the source of truth.
   enabled.
 - Burst groups receive within-group recommendations.
 - Project-level recommendations can select both non-burst photos and burst
-  winners when the user manually generates project selects.
+  winners when the user manually generates project recommendations.
 - The UI distinguishes model recommendation, model score, technical risk, user
   favorite, and user flag.
 - A weak burst can have a group winner but no project-level selected work.
@@ -456,4 +452,4 @@ projects use their own project evaluation settings as the source of truth.
 - Treating CV metrics as final photographic quality.
 - Requiring LLM/VLM for local technical risk detection.
 - Forcing a best pick when the whole group is bad.
-- Maintaining compatibility with earlier development-stage smart-selection data.
+- Migrating earlier development-stage smart-selection data.

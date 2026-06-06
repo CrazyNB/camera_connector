@@ -1,167 +1,46 @@
 package com.cameraconnector.app.ui
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.graphics.Bitmap
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SyncAlt
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import com.cameraconnector.app.core.CoreGateway
-import com.cameraconnector.app.core.DashboardState
-import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
-import com.cameraconnector.app.core.InboxAssetRole
-import com.cameraconnector.app.core.ProjectState
-import com.cameraconnector.app.core.ProjectSummary
-import com.cameraconnector.app.core.PublishQueueState
-import com.cameraconnector.app.core.ReceiverSettings
-import com.cameraconnector.app.core.ReceiverState
-import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
-import com.cameraconnector.app.media.PhotoMetadata
-import com.cameraconnector.app.media.PreviewQuality
-import com.cameraconnector.app.media.cacheThumbnailPreview
-import com.cameraconnector.app.media.cachedThumbnailPreview
-import com.cameraconnector.app.media.isDecodablePreviewLocation
-import com.cameraconnector.app.media.loadPhotoMetadata
-import com.cameraconnector.app.media.loadPreviewBitmap
-import com.cameraconnector.app.storage.AndroidStorageGateway
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetRole
 import kotlin.math.roundToInt
 
-internal enum class InboxFilter(val label: String) {
+internal enum class AssetFormatFilter(val label: String) {
     All("全部文件"),
     Raw("RAW"),
     Jpeg("JPEG"),
     Video("视频"),
 }
 
-internal fun InboxFilter.matches(asset: InboxAsset): Boolean = when (this) {
-    InboxFilter.All -> true
-    InboxFilter.Raw -> asset.hasRaw
-    InboxFilter.Jpeg -> asset.hasJpeg
-    InboxFilter.Video -> asset.hasVideo
+internal fun AssetFormatFilter.matches(asset: ProjectAsset): Boolean = when (this) {
+    AssetFormatFilter.All -> true
+    AssetFormatFilter.Raw -> asset.hasRaw
+    AssetFormatFilter.Jpeg -> asset.hasJpeg
+    AssetFormatFilter.Video -> asset.hasVideo
 }
 
-internal fun InboxFilter.assetRole(): InboxAssetRole? = when (this) {
-    InboxFilter.All -> null
-    InboxFilter.Raw -> InboxAssetRole.Raw
-    InboxFilter.Jpeg -> InboxAssetRole.Jpeg
-    InboxFilter.Video -> InboxAssetRole.Video
+internal fun AssetFormatFilter.assetRole(): ProjectAssetRole? = when (this) {
+    AssetFormatFilter.All -> null
+    AssetFormatFilter.Raw -> ProjectAssetRole.Raw
+    AssetFormatFilter.Jpeg -> ProjectAssetRole.Jpeg
+    AssetFormatFilter.Video -> ProjectAssetRole.Video
 }
 
-internal fun InboxAsset.filename(): String =
+internal fun ProjectAsset.filename(): String =
     displayPath.substringAfterLast('/').substringAfterLast('\\').ifBlank { displayPath }
 
-internal fun InboxAsset.groupTitle(): String =
+internal fun ProjectAsset.groupTitle(): String =
     groupKey.ifBlank { filename().substringBeforeLast('.', filename()) }
 
-internal fun InboxAsset.groupMoveId(): String? =
+internal fun ProjectAsset.groupMoveId(): String? =
     id.takeIf { it.isNotBlank() }
 
-internal fun InboxAsset.sourceLabel(): String =
+internal fun ProjectAsset.sourceLabel(): String =
     displaySource?.takeIf { it.isNotBlank() }
-        ?: username?.takeIf { it.isNotBlank() }?.let { "账号：$it" }
+        ?: username?.takeIf { it.isNotBlank() }?.let { "账号 $it" }
         ?: sourceGroupLabel(displayPath)
 
-internal fun InboxAsset.formatBadges(): String =
+internal fun ProjectAsset.formatBadges(): String =
     buildList {
         if (hasJpeg) add("JPG")
         if (hasRaw) add("RAW")
@@ -169,128 +48,237 @@ internal fun InboxAsset.formatBadges(): String =
         if (isEmpty()) add(format.ifBlank { "未知" })
     }.joinToString(" · ")
 
-internal fun InboxAsset.previewAccentColor(): Color = when {
+internal fun ProjectAsset.previewAccentColor(): Color = when {
     hasVideo -> ElementWarning
     hasRaw -> ElementPurple
     hasJpeg -> ElementSuccess
     else -> ElementBlue
 }
 
-internal fun InboxAsset.qualityScoreText(): String? =
-    normalizedScoreText(modelScore?.toDouble() ?: quality?.overall)
+internal fun ProjectAsset.modelScoreText(): String? =
+    normalizedScoreText(modelScore?.toDouble())
 
-internal fun InboxAsset.qualityBadgeText(): String? =
-    qualityScoreText()?.let { "模型分 $it" }
-        ?: quality?.analysisStatus?.let { qualityStatusLabel(it) }
+internal fun ProjectAsset.modelBadgeText(): String? =
+    modelScoreText()?.let { "模型 $it" }
 
-internal fun InboxAsset.tileQualityBadgeText(): String? =
-    when {
-        technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") -> "风险"
+internal fun ProjectAsset.modelScoreColor(): Color {
+    val tier = modelTier?.trim()?.lowercase()
+    val score = modelScoreText()?.toIntOrNull()
+    return when {
+        tier == "reject" || (score != null && score < 40) -> ElementDanger
+        tier == "weak" || (score != null && score < 70) -> ElementWarning
+        score != null -> ElementSuccess
+        else -> ElementInfo
+    }
+}
+
+internal fun ProjectAsset.tilePrimaryBadgeText(): String? {
+    val score = modelScoreText()
+    if (score != null) {
+        return "评分 $score"
+    }
+    return when {
         modelStatus.equals("running", ignoreCase = true) ||
-            quality?.analysisStatus.equals("running", ignoreCase = true) -> "分析中"
-        quality?.analysisStatus.equals("pending", ignoreCase = true) ||
-            quality?.analysisStatus.equals("queued", ignoreCase = true) -> "待分析"
-        quality?.analysisStatus.equals("failed", ignoreCase = true) ||
-            quality?.analysisStatus.equals("error", ignoreCase = true) -> "分析失败"
-        quality?.analysisStatus.equals("unsupported", ignoreCase = true) -> "需复核"
+            modelStatus.equals("processing", ignoreCase = true) ||
+            modelStatus.equals("analyzing", ignoreCase = true) -> "评价中"
+        modelStatus.equals("failed", ignoreCase = true) ||
+            modelStatus.equals("error", ignoreCase = true) -> "失败"
+        modelStatus.equals("pending", ignoreCase = true) ||
+            modelStatus.equals("queued", ignoreCase = true) -> "待评"
+        technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "风险"
+        modelStatus.equals("skipped", ignoreCase = true) -> "未评"
+        else -> null
+    }
+}
+
+internal fun ProjectAsset.tilePrimaryBadgeColor(): Color =
+    modelScoreText()?.let { modelScoreColor() } ?: when (tilePrimaryBadgeText()) {
+        null -> ElementInfo
+        "评价中", "待评" -> ElementBlue
+        "失败", "风险" -> ElementDanger
+        "未评" -> ElementInfo
+        else -> ElementWarning
+    }
+
+internal fun ProjectAsset.tileAnalysisBadgeText(): String? =
+    when {
+        technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "风险"
+        modelStatus.equals("running", ignoreCase = true) -> "\u5206\u6790\u4e2d"
+        modelStatus.equals("pending", ignoreCase = true) -> "\u5f85\u5206\u6790"
+        modelStatus.equals("failed", ignoreCase = true) -> "分析失败"
+        modelStatus.equals("skipped", ignoreCase = true) -> "\u672a\u8bc4\u4ef7"
         else -> null
     }
 
-internal fun InboxAsset.groupBestScoreText(): String? =
+internal fun ProjectAsset.groupBestModelScoreText(): String? =
     normalizedScoreText(burst?.bestScore)
 
-internal fun InboxAsset.groupBestBadgeText(): String? {
-    val bestScore = groupBestScoreText() ?: return null
-    if (bestScore == qualityScoreText()) {
-        return null
-    }
-    return "组最高 $bestScore"
-}
+internal fun ProjectAsset.burstBadgeText(): String? =
+    burstCountBadgeText()
 
-internal fun InboxAsset.burstBadgeText(): String? {
-    return burstCountBadgeText()
-}
-
-internal fun InboxAsset.burstCountBadgeText(): String? {
+internal fun ProjectAsset.burstCountBadgeText(): String? {
     val burst = burst ?: return null
     if (burst.memberCount <= 1) return null
     return burst.memberCount.toString()
 }
 
-internal fun InboxAsset.recommendationBadgeText(): String? =
+internal fun ProjectAsset.recommendationBadgeText(): String? =
     when {
-        isBestRecommendedAsset() -> "优选"
-        burst?.recommendationStatus != null -> recommendationStatusLabel(burst.recommendationStatus)
+        isBestRecommendedAsset() -> "\u4f18\u9009"
+        burst?.recommendationStatus?.trim()?.lowercase() in setOf(
+            "pending",
+            "queued",
+            "running",
+            "processing",
+            "analyzing",
+            "stale",
+            "unsupported",
+            "failed",
+            "error",
+        ) -> recommendationStatusLabel(burst?.recommendationStatus)
         else -> null
     }
 
-internal fun InboxAsset.tileSmartMeta(): String? =
+internal fun ProjectAsset.compactFormatBadge(): String? =
+    when {
+        hasJpeg && hasRaw -> "JPG+RAW"
+        hasRaw -> "RAW"
+        hasVideo -> "视频"
+        else -> null
+    }
+
+internal fun ProjectAsset.tileAuxiliaryBadges(): List<String> =
+    buildList {
+        if (userMarks.favorite) add("收藏")
+        if (userMarks.marked) add("标记")
+        tileRiskAuxiliaryBadge()?.let(::add)
+        compactFormatBadge()?.let(::add)
+    }.distinct().take(2)
+
+private fun ProjectAsset.tileRiskAuxiliaryBadge(): String? {
+    val risk = technicalGateStatus?.lowercase() ?: return null
+    if (risk !in setOf("warn", "reject", "inconclusive", "unsupported")) {
+        return null
+    }
+    return when {
+        risk == "unsupported" && tilePrimaryBadgeText() != "风险" -> "不支持预览"
+        tilePrimaryBadgeText() != "风险" -> "风险"
+        else -> null
+    }
+}
+
+internal fun ProjectAsset.tileSmartMeta(): String? =
     listOfNotNull(
-        tileQualityReasonText(),
+        tileAnalysisReasonText(),
         recommendationBadgeText()?.takeUnless { isBestRecommendedAsset() },
     ).distinct().takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
-private fun InboxAsset.tileQualityReasonText(): String? {
-    val status = quality?.analysisStatus?.lowercase()
-    if (status in setOf("pending", "queued", "running", "processing", "analyzing")) {
-        return qualityStatusLabel(status)
+private fun ProjectAsset.tileAnalysisReasonText(): String? {
+    val modelSummaryText = modelSummary
+        ?.takeIf { it.isNotBlank() }
+        ?.let(::smartReasonText)
+    if (modelSummaryText != null) {
+        return modelSummaryText
     }
-    val hasRisk = technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") ||
-        status in setOf("failed", "error", "unsupported")
+    val hasRisk = technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported")
     return if (hasRisk) {
-        qualityReasonText() ?: qualityStatusLabel(quality?.analysisStatus)
+        technicalRiskSummary()
     } else {
         null
     }
 }
 
-internal fun InboxAsset.qualityReasonText(): String? =
+internal fun ProjectAsset.smartSummaryText(): String? =
     modelSummary
         ?.takeIf { it.isNotBlank() }
         ?.let(::smartReasonText)
-        ?: quality?.primaryReason
-        ?.takeIf { it.isNotBlank() }
+        ?: technicalRiskSummary()
+
+private fun ProjectAsset.technicalRiskSummary(): String? =
+    technicalDefects
+        .firstOrNull { it.reason?.isNotBlank() == true }
+        ?.reason
         ?.let(::smartReasonText)
+        ?: when (technicalGateStatus?.lowercase()) {
+            "warn" -> "\u5b58\u5728\u6280\u672f\u98ce\u9669"
+            "reject" -> "\u4e25\u91cd\u6280\u672f\u98ce\u9669"
+            "inconclusive" -> "无法判断"
+            "unsupported" -> "\u9700\u8981\u4eba\u5de5\u9884\u89c8"
+            else -> null
+        }
 
 internal fun smartReasonText(reason: String): String {
     val trimmed = reason.trim()
     return when (trimmed.lowercase()) {
-        "balanced", "balanced technical score" -> "技术表现均衡"
-        "low sharpness" -> "锐度偏低"
-        "highlight clipping" -> "高光溢出"
-        "shadow clipping" -> "阴影过暗"
-        "weak exposure" -> "曝光偏弱"
-        "unsupported preview sample" -> "需要复核预览"
-        "no supported scores" -> "缺少可评价预览"
-        "some frames need review" -> "部分照片需要复核"
-        "edge weighted detail" -> "主体靠近边缘"
-        "low information area" -> "画面信息偏少"
-        else -> if (trimmed.startsWith("best technical score:", ignoreCase = true)) {
-            "技术分数领先"
-        } else {
-            trimmed
-        }
+        "severe defocus or blur risk" -> "\u4e25\u91cd\u5931\u7126\u6216\u6a21\u7cca"
+        "soft detail risk" -> "细节偏软"
+        "large highlight clipping risk" -> "\u5927\u9762\u79ef\u9ad8\u5149\u6ea2\u51fa"
+        "large shadow clipping risk" -> "\u5927\u9762\u79ef\u6b7b\u9ed1"
+        "unsupported preview sample" -> "\u9700\u8981\u4eba\u5de5\u9884\u89c8"
+        "passes local technical gate" -> "\u901a\u8fc7\u6280\u672f\u95e8\u63a7"
+        "usable with technical warnings" -> "\u53ef\u7528\u4f46\u6709\u6280\u672f\u98ce\u9669"
+        "rejected by local technical gate" -> "\u6280\u672f\u95e8\u63a7\u4e0d\u5efa\u8bae\u5165\u9009"
+        "unsupported image for model evaluation" -> "暂不支持模型评价"
+        else -> trimmed
     }
 }
 
-internal data class QualitySignalRow(
-    val label: String,
-    val value: String,
-)
+internal fun modelEvaluationStatusLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "ready", "done", "completed" -> "\u5df2\u8bc4\u4ef7"
+        "running", "processing", "analyzing" -> "\u8bc4\u4ef7\u4e2d"
+        "pending", "queued" -> "\u5f85\u8bc4\u4ef7"
+        "skipped" -> "\u672a\u8bc4\u4ef7"
+        "failed", "error" -> "\u8bc4\u4ef7\u5931\u8d25"
+        null, "" -> "\u672a\u77e5"
+        else -> value
+    }
 
-internal fun InboxAsset.qualitySignalRows(): List<QualitySignalRow> {
-    val quality = quality ?: return emptyList()
-    return listOfNotNull(
-        quality.sharpness?.let { QualitySignalRow("锐度", normalizedScoreText(it).orEmpty()) },
-        quality.exposure?.let { QualitySignalRow("曝光", normalizedScoreText(it).orEmpty()) },
-        quality.composition?.let { QualitySignalRow("构图", normalizedScoreText(it).orEmpty()) },
-        quality.highlightClippingPenalty?.let { QualitySignalRow("高光", normalizedScoreText(it).orEmpty()) },
-        quality.shadowClippingPenalty?.let { QualitySignalRow("阴影", normalizedScoreText(it).orEmpty()) },
-        quality.compositionConfidence?.let { QualitySignalRow("构图置信", normalizedScoreText(it).orEmpty()) },
-    ).filter { it.value.isNotBlank() }
-}
+internal fun modelEvaluationTierLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "excellent" -> "\u4f18\u79c0"
+        "good" -> "\u826f\u597d"
+        "normal" -> "\u666e\u901a"
+        "weak" -> "\u504f\u5f31"
+        "reject" -> "\u4e0d\u5efa\u8bae\u5165\u9009"
+        null, "" -> "\u672a\u77e5"
+        else -> value
+    }
 
-internal fun InboxAsset.isBestRecommendedAsset(): Boolean {
+internal fun technicalGateStatusLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "pass" -> "\u901a\u8fc7"
+        "warn" -> "\u6709\u98ce\u9669"
+        "reject" -> "\u4e25\u91cd\u98ce\u9669"
+        "inconclusive" -> "\u65e0\u6cd5\u5224\u65ad"
+        "unsupported" -> "\u6682\u4e0d\u652f\u6301"
+        null, "" -> "\u672a\u77e5"
+        else -> value
+    }
+
+internal fun technicalDefectTypeLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "blur" -> "\u6a21\u7cca"
+        "highlight_clip" -> "\u9ad8\u5149\u6ea2\u51fa"
+        "shadow_clip" -> "\u6697\u90e8\u6b7b\u9ed1"
+        "noise" -> "\u9ad8\u566a\u70b9"
+        "color_cast" -> "\u504f\u8272"
+        "unsupported" -> "\u4e0d\u652f\u6301"
+        null, "" -> "\u672a\u77e5"
+        else -> value
+    }
+
+internal fun technicalDefectSeverityLabel(value: String?): String =
+    when (value?.trim()?.lowercase()) {
+        "low" -> "\u4f4e"
+        "medium" -> "\u4e2d"
+        "high" -> "\u9ad8"
+        "severe" -> "\u4e25\u91cd"
+        null, "" -> "\u672a\u77e5"
+        else -> value
+    }
+
+internal fun ProjectAsset.isBestRecommendedAsset(): Boolean {
     if (isModelSelect) {
         return true
     }
@@ -298,40 +286,25 @@ internal fun InboxAsset.isBestRecommendedAsset(): Boolean {
     return bestId == id || bestId == groupKey
 }
 
-internal fun qualityStatusLabel(value: String?): String =
-    when (value?.lowercase()) {
-        "completed", "ready", "done" -> "已评价"
-        "pending", "queued" -> "待分析"
-        "running", "processing", "analyzing" -> "分析中"
-        "stale" -> "更新中"
-        "unsupported" -> "不支持评价"
-        "failed", "error" -> "评价失败"
-        null, "" -> "待分析"
-        else -> value
-    }
-
 internal fun recommendationStatusLabel(value: String?): String =
     when (value?.lowercase()) {
-        "recommended", "completed", "ready", "done" -> "已推荐"
-        "accepted" -> "已推荐"
-        "needs_review" -> "需要复核"
-        "user_overridden" -> "人工变更"
-        "pending", "queued" -> "待推荐"
-        "running", "processing", "analyzing" -> "推荐中"
-        "stale" -> "更新中"
-        "unsupported" -> "不支持推荐"
+        "recommended", "completed", "ready", "done" -> "\u5df2\u63a8\u8350"
+        "pending", "queued" -> "\u5f85\u63a8\u8350"
+        "running", "processing", "analyzing" -> "\u63a8\u8350\u4e2d"
+        "stale" -> "\u66f4\u65b0\u4e2d"
+        "no_selection" -> "\u672a\u63a8\u8350"
+        "unsupported" -> "\u4e0d\u652f\u6301\u63a8\u8350"
         "failed", "error" -> "推荐失败"
-        null, "" -> "待推荐"
+        null, "" -> "\u5f85\u63a8\u8350"
         else -> value
     }
 
-internal fun smartBadgeColor(asset: InboxAsset): Color = when {
+internal fun smartBadgeColor(asset: ProjectAsset): Color = when {
     asset.isModelSelect -> ElementSuccess
-    asset.technicalGateStatus in setOf("warn", "reject", "needs_review", "unsupported") -> ElementDanger
-    asset.quality?.analysisStatus?.equals("failed", ignoreCase = true) == true -> ElementDanger
-    asset.modelStatus?.equals("running", ignoreCase = true) == true ||
-        asset.quality?.analysisStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
-    asset.qualityScoreText() != null -> ElementWarning
+    asset.technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> ElementDanger
+    asset.modelStatus?.equals("failed", ignoreCase = true) == true -> ElementDanger
+    asset.modelStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
+    asset.modelScoreText() != null -> ElementWarning
     asset.burst != null -> ElementPurple
     else -> ElementInfo
 }

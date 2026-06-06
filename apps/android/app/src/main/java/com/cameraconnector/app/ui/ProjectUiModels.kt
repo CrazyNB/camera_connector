@@ -1,18 +1,15 @@
 package com.cameraconnector.app.ui
 
-import com.cameraconnector.app.core.InboxAsset
-import com.cameraconnector.app.core.InboxAssetQuery
 import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PhotoSortMode
-import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.ProjectAsset
+import com.cameraconnector.app.core.ProjectAssetQuery
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
-import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.ProjectState
-import com.cameraconnector.app.core.StrategyProfileUi
-import com.cameraconnector.app.core.StrategyWeightsUi
+import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.PromptProfileUi
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 internal enum class GlobalDestination(val label: String) {
     Projects("项目"),
@@ -31,7 +28,7 @@ internal fun ProjectDestination.assetScreenTitle(): String =
     "项目照片"
 
 internal fun ProjectDestination.assetScreenSubtitle(): String =
-    "项目内 Assets / Asset Groups"
+    "照片分组与原始文件"
 
 internal data class ProjectLifecycleUi(
     val statusLabel: String,
@@ -40,6 +37,7 @@ internal data class ProjectLifecycleUi(
     val canRename: Boolean,
     val canRestore: Boolean,
 )
+
 internal data class PhotoDetailDecisionUi(
     val splitBurstTarget: ManualBurstSplitTarget?,
     val splitBurstEnabled: Boolean,
@@ -50,9 +48,16 @@ internal data class PhotoDetailDecisionUi(
 }
 
 internal data class BurstMemberFilmstripItemUi(
-    val asset: InboxAsset,
+    val asset: ProjectAsset,
     val badgeText: String,
     val scoreText: String?,
+)
+
+internal data class BurstPreviewTileUi(
+    val positionText: String,
+    val scoreText: String?,
+    val modelSelected: Boolean,
+    val auxiliaryBadges: List<String>,
 )
 
 internal data class ProjectIntelligenceSettingsUi(
@@ -76,40 +81,37 @@ internal data class ManualProjectRecommendationActionUi(
     val disabledReason: String?,
 )
 
-internal interface ProjectRecommendationGateway {
-    suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi
-}
-
 internal data class ProjectPhotoGridItemUi(
     val key: String,
-    val coverAsset: InboxAsset,
-    val members: List<InboxAsset>,
+    val coverAsset: ProjectAsset,
+    val members: List<ProjectAsset>,
 ) {
     val isBurstGroup: Boolean
         get() = key.startsWith("burst:") && members.size > 1
 }
+
+internal data class SelectedBurstEvaluationTargetUi(
+    val burstGroupId: String,
+    val members: List<ProjectAsset>,
+)
+
+internal data class ProjectPhotoEvaluationTargetsUi(
+    val assetGroups: List<ProjectAsset>,
+    val burstGroups: List<SelectedBurstEvaluationTargetUi>,
+)
 
 internal enum class DetailNavigationDirection {
     Previous,
     Next,
 }
 
-internal enum class ScoreFilter(
-    val label: String,
-    val scoreMin: Double?,
-) {
-    All("全部评价", null),
-    Excellent("80+", 80.0),
-    Usable("60+", 60.0),
-}
-
 internal enum class ProjectPhotoCollection(val label: String) {
-    All("全部"),
-    ModelSelects("模型优选"),
-    Favorites("收藏"),
-    Marked("标记"),
-    QualityRisk("质量风险"),
-    PendingAnalysis("待分析"),
+    All("\u5168\u90e8"),
+    ModelSelects("\u6a21\u578b\u4f18\u9009"),
+    Favorites("\u6536\u85cf"),
+    Marked("\u6807\u8bb0"),
+    TechnicalRisk("\u6280\u672f\u98ce\u9669"),
+    PendingAnalysis("\u5f85\u5206\u6790"),
 }
 
 internal enum class ReceiverStartBlockReason {
@@ -120,16 +122,21 @@ internal enum class ReceiverStartBlockReason {
 
 internal fun receiverStartBlockReason(
     running: Boolean,
+    busy: Boolean,
     actionsEnabled: Boolean,
     notificationPermissionGranted: Boolean,
     accountCount: Int,
 ): ReceiverStartBlockReason? = when {
     running -> null
+    busy -> ReceiverStartBlockReason.Busy
     !actionsEnabled -> ReceiverStartBlockReason.Busy
     accountCount <= 0 -> ReceiverStartBlockReason.MissingAccount
     !notificationPermissionGranted -> ReceiverStartBlockReason.MissingNotificationPermission
     else -> null
 }
+
+internal fun receiverPhaseBusy(value: String): Boolean =
+    value == "Starting" || value == "Stopping"
 
 @Suppress("UNUSED_PARAMETER")
 internal fun projectPhotoContentVisible(
@@ -162,6 +169,25 @@ internal fun projectIntelligenceSettingsUi(
         providerConfigured = providerConfigured,
     )
 
+internal fun modelProviderReadyForProject(
+    settings: ProjectEvaluationSettingsUi,
+    providerOptions: List<ModelProviderSettingsUi>,
+): Boolean {
+    val selectedProviderId = settings.modelProviderSettingsId?.takeIf { it.isNotBlank() } ?: return false
+    return providerOptions.firstOrNull { it.settingsId == selectedProviderId }?.isReadyForModelWork() == true
+}
+
+internal fun ModelProviderSettingsUi.isReadyForModelWork(): Boolean {
+    if (!configured) {
+        return false
+    }
+    return when (providerKind.lowercase()) {
+        "openai", "custom" -> apiKeyConfigured
+        "imported" -> true
+        else -> false
+    }
+}
+
 internal fun promptStyleTagsText(profile: PromptProfileUi): String =
     profile.styleTags
         .filter { it.isNotBlank() }
@@ -179,8 +205,8 @@ internal fun promptProfileDisplayName(profile: PromptProfileUi): String {
         normalized.contains("portrait") -> "人像评价"
         normalized.contains("landscape") -> "风光评价"
         normalized.contains("action") -> "动作评价"
-        normalized.contains("custom") -> name.replace("Custom", "自定义")
-        else -> name.ifBlank { "未命名 Prompt" }
+        normalized.contains("custom") -> name.replace("Custom", "\u81ea\u5b9a\u4e49")
+        else -> name.ifBlank { "未命名提示词" }
     }
 }
 
@@ -192,8 +218,8 @@ internal fun promptStyleTagLabel(value: String): String =
         "action" -> "动作"
         "landscape" -> "风光"
         "conservative" -> "稳健"
-        "editorial" -> "编辑向"
-        "technical" -> "技术"
+        "editorial" -> "编辑"
+        "technical" -> "\u6280\u672f"
         "creative" -> "创意"
         else -> value
     }
@@ -204,7 +230,7 @@ internal fun sceneProfileLabel(value: String): String =
         "portrait" -> "人像"
         "action" -> "动作"
         "landscape" -> "风光"
-        "custom" -> "自定义"
+        "custom" -> "\u81ea\u5b9a\u4e49"
         else -> value
     }
 
@@ -217,61 +243,42 @@ internal fun cvPolicyLabel(value: String): String =
     }
 
 internal fun manualProjectRecommendationActionUi(
-    provider: ModelProviderSettingsUi,
+    providerConfigured: Boolean,
     settings: ProjectEvaluationSettingsUi,
     actionInFlight: Boolean,
 ): ManualProjectRecommendationActionUi {
-    if (!provider.configured) {
+    if (!providerConfigured) {
         return ManualProjectRecommendationActionUi(
             enabled = false,
-            ctaLabel = "生成项目优选",
-            disabledReason = "模型服务未配置",
+            ctaLabel = "\u751f\u6210\u9879\u76ee\u4f18\u9009",
+            disabledReason = "\u6a21\u578b\u670d\u52a1\u672a\u914d\u7f6e",
         )
     }
     if (settings.projectId.isBlank()) {
         return ManualProjectRecommendationActionUi(
             enabled = false,
-            ctaLabel = "生成项目优选",
-            disabledReason = "请先进入项目",
+            ctaLabel = "\u751f\u6210\u9879\u76ee\u4f18\u9009",
+            disabledReason = "\u8bf7\u5148\u8fdb\u5165\u9879\u76ee",
         )
     }
     return ManualProjectRecommendationActionUi(
         enabled = !actionInFlight && settings.projectRecommendationMode.equals("manual", ignoreCase = true),
-        ctaLabel = "生成项目优选",
-        disabledReason = if (actionInFlight) "项目优选生成中" else null,
+        ctaLabel = "\u751f\u6210\u9879\u76ee\u4f18\u9009",
+        disabledReason = if (actionInFlight) "\u9879\u76ee\u4f18\u9009\u751f\u6210\u4e2d" else null,
     )
 }
 
-internal suspend fun runManualProjectRecommendationAction(
-    projectId: String?,
-    provider: ModelProviderSettingsUi,
-    gateway: ProjectRecommendationGateway,
-    onFeedback: (String) -> Unit,
-): EvaluationRunUi? {
-    if (!provider.configured) {
-        onFeedback("请先配置模型服务")
-        return null
-    }
-    val activeProjectId = projectId?.takeIf { it.isNotBlank() }
-    if (activeProjectId == null) {
-        onFeedback("请先进入项目")
-        return null
-    }
-    val run = gateway.generateProjectRecommendation(activeProjectId)
-    onFeedback(projectRecommendationRunFeedback(run))
-    return run
-}
 
 internal fun projectRecommendationRunFeedback(run: EvaluationRunUi): String =
-    "项目优选：${evaluationRunStatusLabel(run.status.ifBlank { "updated" })}"
+    "\u9879\u76ee\u4f18\u9009\uff1a${evaluationRunStatusLabel(run.status.ifBlank { "updated" })}"
 
 internal fun evaluationRunStatusLabel(value: String?): String =
     when (value?.trim()?.lowercase()) {
-        "ready", "done", "completed", "updated" -> "已更新"
-        "running", "processing" -> "生成中"
-        "queued", "pending" -> "等待中"
-        "failed", "error" -> "失败"
-        null, "" -> "未知"
+        "ready", "done", "completed", "updated" -> "\u5df2\u66f4\u65b0"
+        "running", "processing" -> "\u751f\u6210\u4e2d"
+        "queued", "pending" -> "\u7b49\u5f85\u4e2d"
+        "failed", "error" -> "\u5931\u8d25"
+        null, "" -> "\u672a\u77e5"
         else -> value
     }
 
@@ -283,7 +290,7 @@ internal fun projectRecommendationFeedbackForActiveProject(
     return if (run.projectId == projectId) projectRecommendationRunFeedback(run) else null
 }
 
-internal fun scopedProjectRecommendationRun(
+internal fun activeProjectRecommendationRun(
     run: EvaluationRunUi?,
     activeProjectId: String?,
 ): EvaluationRunUi? {
@@ -302,12 +309,12 @@ internal fun modelEvaluationSourceLabel(evaluatorKind: String?): String =
 internal fun providerBatchSizeValue(value: Int): Int =
     value.coerceIn(1, 8)
 
-internal fun InboxAsset.assetSelectionId(): String =
+internal fun ProjectAsset.assetSelectionId(): String =
     id.ifBlank { displayPath }
 
 internal fun toggleAssetSelection(
     selectedIds: List<String>,
-    asset: InboxAsset,
+    asset: ProjectAsset,
 ): List<String> {
     val id = asset.assetSelectionId()
     if (id.isBlank()) {
@@ -321,9 +328,9 @@ internal fun toggleAssetSelection(
 }
 
 internal fun selectedAssetsFromIds(
-    assets: List<InboxAsset>,
+    assets: List<ProjectAsset>,
     selectedIds: List<String>,
-): List<InboxAsset> {
+): List<ProjectAsset> {
     if (selectedIds.isEmpty()) {
         return emptyList()
     }
@@ -331,10 +338,61 @@ internal fun selectedAssetsFromIds(
     return assets.filter { it.assetSelectionId() in selected }
 }
 
+internal fun togglePhotoGridItemSelection(
+    selectedIds: List<String>,
+    item: ProjectPhotoGridItemUi,
+): List<String> {
+    val id = item.key.takeIf { it.isNotBlank() } ?: return selectedIds
+    return if (id in selectedIds) {
+        selectedIds.filterNot { it == id }
+    } else {
+        selectedIds + id
+    }
+}
+
+internal fun selectedPhotoGridItemsFromIds(
+    gridItems: List<ProjectPhotoGridItemUi>,
+    selectedIds: List<String>,
+): List<ProjectPhotoGridItemUi> {
+    if (selectedIds.isEmpty()) {
+        return emptyList()
+    }
+    val selected = selectedIds.toSet()
+    return gridItems.filter { it.key in selected }
+}
+
+internal fun projectPhotoEvaluationTargets(
+    selectedItems: List<ProjectPhotoGridItemUi>,
+): ProjectPhotoEvaluationTargetsUi {
+    val burstGroups = selectedItems
+        .filter { it.isBurstGroup }
+        .mapNotNull { item ->
+            val burstGroupId = item.coverAsset.burst?.burstGroupId?.takeIf { it.isNotBlank() }
+                ?: item.key.removePrefix("burst:").takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            SelectedBurstEvaluationTargetUi(
+                burstGroupId = burstGroupId,
+                members = item.members.distinctBy { it.assetSelectionId() },
+            )
+        }
+    val burstMemberIds = burstGroups
+        .flatMap { target -> target.members.map { it.assetSelectionId() } }
+        .toSet()
+    val assetGroups = selectedItems
+        .filterNot { it.isBurstGroup }
+        .map { it.coverAsset }
+        .filterNot { it.assetSelectionId() in burstMemberIds }
+        .distinctBy { it.assetSelectionId() }
+    return ProjectPhotoEvaluationTargetsUi(
+        assetGroups = assetGroups,
+        burstGroups = burstGroups,
+    )
+}
+
 internal fun refreshedSelectedPhoto(
-    selectedPhoto: InboxAsset?,
-    visibleAssets: List<InboxAsset>,
-): InboxAsset? {
+    selectedPhoto: ProjectAsset?,
+    visibleAssets: List<ProjectAsset>,
+): ProjectAsset? {
     val selectedId = selectedPhoto?.assetSelectionId()?.takeIf { it.isNotBlank() } ?: return selectedPhoto
     return visibleAssets.firstOrNull { it.assetSelectionId() == selectedId }
 }
@@ -350,8 +408,8 @@ internal fun projectLifecycleUi(
     return ProjectLifecycleUi(
         statusLabel = when {
             selected -> "当前项目"
-            project.canRestore -> "已归档"
-            else -> "活跃"
+            project.canRestore -> "\u5df2\u5f52\u6863"
+            else -> "\u6d3b\u8dc3"
         },
         canSelect = actionsEnabled && !selected && project.canBeActiveProject,
         canArchive = actionsEnabled && project.canArchive,
@@ -360,134 +418,64 @@ internal fun projectLifecycleUi(
     )
 }
 
-internal enum class StrategyWeightField(
-    val label: String,
-    val range: ClosedFloatingPointRange<Double>,
-    val value: (StrategyWeightsUi) -> Double,
-) {
-    Sharpness("锐度", 0.0..0.7, { it.sharpness }),
-    Exposure("曝光", 0.0..0.5, { it.exposure }),
-    Composition("构图", 0.0..0.12, { it.composition }),
-    HighlightClippingPenalty("高光惩罚", -0.3..0.0, { it.highlightClippingPenalty }),
-    ShadowClippingPenalty("暗部惩罚", -0.2..0.0, { it.shadowClippingPenalty }),
-    Diversity("多样性", 0.0..0.12, { it.diversity }),
-}
-
-internal fun selectedStrategyProfile(
-    profiles: List<StrategyProfileUi>,
-    selectedProfileId: String?,
-): StrategyProfileUi? =
-    profiles.firstOrNull { it.profileId == selectedProfileId }
-        ?: profiles.firstOrNull { it.profileId == "general" }
-        ?: profiles.firstOrNull()
-
-internal fun StrategyProfileUi.weightValue(field: StrategyWeightField): Double =
-    field.value(weights)
-
-internal fun StrategyProfileUi.withStrategyWeight(
-    field: StrategyWeightField,
-    rawValue: Double,
-): StrategyProfileUi {
-    val value = rawValue.coerceIn(field.range.start, field.range.endInclusive)
-    val nextWeights = when (field) {
-        StrategyWeightField.Sharpness -> weights.copy(sharpness = value)
-        StrategyWeightField.Exposure -> weights.copy(exposure = value)
-        StrategyWeightField.Composition -> weights.copy(composition = value)
-        StrategyWeightField.HighlightClippingPenalty -> weights.copy(highlightClippingPenalty = value)
-        StrategyWeightField.ShadowClippingPenalty -> weights.copy(shadowClippingPenalty = value)
-        StrategyWeightField.Diversity -> weights.copy(diversity = value)
-    }
-    return copy(weights = nextWeights)
-}
-
-internal fun StrategyProfileUi.asSavableCustomStrategyProfile(nowMs: Long): StrategyProfileUi {
-    val customId = if (builtIn) {
-        "custom-${profileId.trim().ifBlank { "strategy" }}"
-    } else {
-        profileId.trim().ifBlank { "custom-strategy" }
-    }
-    val customName = if (builtIn && !name.startsWith("自定义 ")) {
-        "自定义 $name"
-    } else {
-        name
-    }
-    return copy(
-        profileId = customId,
-        name = customName,
-        builtIn = false,
-        weights = weights.copy(composition = weights.composition.coerceIn(0.0, 0.12)),
-        updatedAtMs = nowMs,
-    )
-}
-
-internal fun strategyWeightDisplayText(value: Double): String =
-    "${(value * 100).roundToInt()}%"
-
 internal fun assetListQuery(
     selectedCollection: ProjectPhotoCollection,
-    selectedAccount: String?,
-    selectedFilter: InboxFilter,
+    selectedFilter: AssetFormatFilter,
     selectedSort: PhotoSortMode,
-    selectedScoreFilter: ScoreFilter,
-): InboxAssetQuery {
-    val scoreMin = selectedScoreFilter.scoreMin
+): ProjectAssetQuery {
     val favorite = if (selectedCollection == ProjectPhotoCollection.Favorites) true else null
     val marked = if (selectedCollection == ProjectPhotoCollection.Marked) true else null
-    val reviewQueue = when (selectedCollection) {
+    val collection = when (selectedCollection) {
         ProjectPhotoCollection.ModelSelects -> "model_selects"
-        ProjectPhotoCollection.QualityRisk -> "quality_risk"
+        ProjectPhotoCollection.TechnicalRisk -> "technical_risk"
         ProjectPhotoCollection.PendingAnalysis -> "pending_analysis"
         else -> null
     }
-    return InboxAssetQuery(
-        username = selectedAccount,
+    return ProjectAssetQuery(
         role = selectedFilter.assetRole(),
-        sort = if (scoreMin != null && selectedSort == PhotoSortMode.LatestReceived) {
-            PhotoSortMode.GroupBestScore
-        } else {
-            selectedSort
-        },
-        scoreMin = scoreMin,
-        reviewQueue = reviewQueue,
+        sort = selectedSort,
+        collection = collection,
         favorite = favorite,
         marked = marked,
     )
 }
 
-internal fun projectPhotoCollectionAssets(
-    assets: List<InboxAsset>,
-    selectedAccount: String?,
-    selectedFilter: InboxFilter,
+internal fun photoListFilterSummary(
+    selectedFilter: AssetFormatFilter,
     selectedSort: PhotoSortMode,
-    selectedScoreFilter: ScoreFilter,
-): List<InboxAsset> {
-    val scoreMin = selectedScoreFilter.scoreMin?.let(::normalizedProjectQueryScore)
+): String? =
+    buildList {
+        if (selectedFilter != AssetFormatFilter.All) {
+            add(selectedFilter.label)
+        }
+        if (selectedSort != PhotoSortMode.LatestReceived) {
+            add(selectedSort.label)
+        }
+    }.takeIf { it.isNotEmpty() }?.joinToString(" / ")
+
+internal fun projectPhotoCollectionAssets(
+    assets: List<ProjectAsset>,
+    selectedFilter: AssetFormatFilter,
+    selectedSort: PhotoSortMode,
+): List<ProjectAsset> {
     val filtered = assets
         .asSequence()
-        .filter { asset -> selectedAccount == null || asset.username == selectedAccount }
         .filter { asset -> selectedFilter.matches(asset) }
-        .filter { asset ->
-            scoreMin == null ||
-                asset.projectQueryBestScore()
-                    ?.let(::normalizedProjectQueryScore)
-                    ?.let { it >= scoreMin }
-                    ?: false
-        }
         .toList()
 
     return when (selectedSort) {
         PhotoSortMode.LatestReceived -> filtered.sortedByDescending { it.receivedAt.toLongOrNull() ?: 0L }
         PhotoSortMode.Filename -> filtered.sortedBy { it.groupKey.ifBlank { it.displayPath } }
-        PhotoSortMode.GroupBestScore -> filtered.sortedWith(
-            compareByDescending<InboxAsset> {
+        PhotoSortMode.ModelScore -> filtered.sortedWith(
+            compareByDescending<ProjectAsset> {
                 it.projectQueryBestScore()?.let(::normalizedProjectQueryScore) ?: -1.0
             }.thenByDescending { it.receivedAt.toLongOrNull() ?: 0L },
         )
     }
 }
 
-private fun InboxAsset.projectQueryBestScore(): Double? =
-    burst?.bestScore ?: modelScore?.toDouble() ?: quality?.overall
+private fun ProjectAsset.projectQueryBestScore(): Double? =
+    burst?.bestScore ?: modelScore?.toDouble()
 
 private fun normalizedProjectQueryScore(value: Double): Double =
     if (value > 1.0) value / 100.0 else value
@@ -502,7 +490,7 @@ internal data class ManualBurstMergeTarget(
     val memberGroupId: String,
 )
 
-internal fun manualBurstSplitTarget(asset: InboxAsset): ManualBurstSplitTarget? {
+internal fun manualBurstSplitTarget(asset: ProjectAsset): ManualBurstSplitTarget? {
     val burst = asset.burst ?: return null
     if (burst.memberCount <= 1) {
         return null
@@ -515,9 +503,9 @@ internal fun manualBurstSplitTarget(asset: InboxAsset): ManualBurstSplitTarget? 
     )
 }
 
-internal fun projectPhotoGridItems(assets: List<InboxAsset>): List<ProjectPhotoGridItemUi> {
+internal fun projectPhotoGridItems(assets: List<ProjectAsset>): List<ProjectPhotoGridItemUi> {
     val orderedKeys = mutableListOf<String>()
-    val grouped = linkedMapOf<String, MutableList<InboxAsset>>()
+    val grouped = linkedMapOf<String, MutableList<ProjectAsset>>()
     assets.forEach { asset ->
         val burst = asset.burst
         val burstGroupId = burst?.burstGroupId?.takeIf { it.isNotBlank() }
@@ -555,10 +543,10 @@ internal fun projectPhotoGridItems(assets: List<InboxAsset>): List<ProjectPhotoG
 }
 
 internal fun adjacentBurstMemberAsset(
-    currentAsset: InboxAsset,
-    allProjectAssets: List<InboxAsset>,
+    currentAsset: ProjectAsset,
+    allProjectAssets: List<ProjectAsset>,
     direction: DetailNavigationDirection,
-): InboxAsset? {
+): ProjectAsset? {
     val members = burstMemberFilmstrip(currentAsset, allProjectAssets).map { it.asset }
     val currentIndex = members.indexOfFirst { it.assetSelectionId() == currentAsset.assetSelectionId() }
     if (currentIndex < 0) {
@@ -572,8 +560,8 @@ internal fun adjacentBurstMemberAsset(
 }
 
 internal fun photoDetailBurstPositionText(
-    asset: InboxAsset,
-    burstMembers: List<InboxAsset>,
+    asset: ProjectAsset,
+    burstMembers: List<ProjectAsset>,
 ): String? {
     val burst = asset.burst ?: return null
     if (burst.memberCount <= 1) {
@@ -592,7 +580,7 @@ internal fun photoDetailBurstPositionText(
 }
 
 internal fun detailBurstMemberIndex(
-    asset: InboxAsset,
+    asset: ProjectAsset,
     burstMembers: List<BurstMemberFilmstripItemUi>,
 ): Int =
     burstMembers.indexOfFirst { item ->
@@ -600,10 +588,10 @@ internal fun detailBurstMemberIndex(
     }.takeIf { it >= 0 } ?: Int.MAX_VALUE
 
 internal fun adjacentProjectGridAsset(
-    currentAsset: InboxAsset,
-    visibleAssets: List<InboxAsset>,
+    currentAsset: ProjectAsset,
+    visibleAssets: List<ProjectAsset>,
     direction: DetailNavigationDirection,
-): InboxAsset? {
+): ProjectAsset? {
     val gridItems = projectPhotoGridItems(visibleAssets)
     val currentId = currentAsset.assetSelectionId()
     val currentIndex = gridItems.indexOfFirst { item ->
@@ -620,7 +608,7 @@ internal fun adjacentProjectGridAsset(
     return gridItems.getOrNull(targetIndex)?.coverAsset
 }
 
-private fun List<InboxAsset>.burstCoverAsset(): InboxAsset? {
+private fun List<ProjectAsset>.burstCoverAsset(): ProjectAsset? {
     if (isEmpty()) {
         return null
     }
@@ -635,11 +623,11 @@ private fun List<InboxAsset>.burstCoverAsset(): InboxAsset? {
         }
     } else {
         null
-    } ?: maxByOrNull { it.quality?.overall ?: -1.0 }
+    } ?: maxByOrNull { it.modelScore ?: -1 }
         ?: firstOrNull()
 }
 
-internal fun manualBurstMergeTarget(selectedAssets: List<InboxAsset>): ManualBurstMergeTarget? {
+internal fun manualBurstMergeTarget(selectedAssets: List<ProjectAsset>): ManualBurstMergeTarget? {
     val target = selectedAssets.firstOrNull() ?: return null
     val targetBurstGroupId = target.burst?.burstGroupId?.takeIf { it.isNotBlank() } ?: return null
     val source = selectedAssets
@@ -654,7 +642,7 @@ internal fun manualBurstMergeTarget(selectedAssets: List<InboxAsset>): ManualBur
 }
 
 internal fun photoDetailDecisionUi(
-    asset: InboxAsset,
+    asset: ProjectAsset,
     actionsEnabled: Boolean,
 ): PhotoDetailDecisionUi {
     val splitBurstTarget = manualBurstSplitTarget(asset)
@@ -670,15 +658,23 @@ internal fun photoDetailActionBarVisible(
     hasActionCallbacks: Boolean,
 ): Boolean = hasActionCallbacks
 
-internal fun photoDetailFavoriteSelected(
-    asset: InboxAsset,
-): Boolean =
+internal fun photoDetailFavoriteSelected(asset: ProjectAsset): Boolean =
     asset.userMarks.favorite
 
-internal fun photoDetailMarkedSelected(
-    asset: InboxAsset,
-): Boolean =
+internal fun photoDetailMarkedSelected(asset: ProjectAsset): Boolean =
     asset.userMarks.marked
+
+internal fun burstPreviewTileUi(
+    item: BurstMemberFilmstripItemUi,
+    index: Int,
+    total: Int,
+): BurstPreviewTileUi =
+    BurstPreviewTileUi(
+        positionText = "${index + 1}/$total",
+        scoreText = (item.scoreText ?: item.asset.modelScoreText())?.let { "\u8bc4\u5206 $it" },
+        modelSelected = item.asset.isBestRecommendedAsset(),
+        auxiliaryBadges = item.asset.tileAuxiliaryBadges(),
+    )
 
 internal fun detailPageSlideOffset(
     fullWidth: Int,
@@ -694,8 +690,8 @@ internal fun detailPageSlideOffset(
 }
 
 internal fun burstMemberFilmstrip(
-    currentAsset: InboxAsset,
-    allProjectAssets: List<InboxAsset>,
+    currentAsset: ProjectAsset,
+    allProjectAssets: List<ProjectAsset>,
 ): List<BurstMemberFilmstripItemUi> {
     val burstGroupId = currentAsset.burst?.burstGroupId?.takeIf { it.isNotBlank() } ?: return emptyList()
     val currentId = currentAsset.assetSelectionId()
@@ -712,14 +708,14 @@ internal fun burstMemberFilmstrip(
         BurstMemberFilmstripItemUi(
             asset = asset,
             badgeText = burstMemberBadgeText(asset, currentId),
-            scoreText = asset.qualityScoreText(),
+            scoreText = asset.modelScoreText(),
         )
     }
 }
 
 internal fun burstComparisonItems(
-    currentAsset: InboxAsset,
-    allProjectAssets: List<InboxAsset>,
+    currentAsset: ProjectAsset,
+    allProjectAssets: List<ProjectAsset>,
     maxItems: Int = 3,
 ): List<BurstMemberFilmstripItemUi> {
     val filmstrip = burstMemberFilmstrip(currentAsset, allProjectAssets)
@@ -741,7 +737,7 @@ internal fun burstComparisonItems(
         .asSequence()
         .filter { item -> selected.none { it.asset.assetSelectionId() == item.asset.assetSelectionId() } }
         .sortedWith(
-            compareByDescending<BurstMemberFilmstripItemUi> { it.asset.quality?.overall ?: -1.0 }
+            compareByDescending<BurstMemberFilmstripItemUi> { it.asset.modelScore ?: -1 }
                 .thenBy { it.asset.receivedAt.toLongOrNull() ?: Long.MAX_VALUE }
                 .thenBy { burstMemberOrderKey(it.asset) },
         )
@@ -751,19 +747,18 @@ internal fun burstComparisonItems(
     return selected.take(maxItems).takeIf { it.size > 1 }.orEmpty()
 }
 
-private fun burstMemberBadgeText(asset: InboxAsset, currentId: String): String =
+private fun burstMemberBadgeText(asset: ProjectAsset, currentId: String): String =
     when {
-        asset.isBestRecommendedAsset() -> "最佳"
-        asset.assetSelectionId() == currentId -> "当前"
-        (asset.quality?.overall ?: 1.0) < 0.4 -> "低分"
-        asset.burst?.recommendationStatus.equals("needs_review", ignoreCase = true) -> "需复核"
-        else -> "备选"
+        asset.isBestRecommendedAsset() -> "\u6700\u4f73"
+        asset.assetSelectionId() == currentId -> "\u5f53\u524d"
+        (asset.modelScore ?: 100) < 40 -> "\u4f4e\u5206"
+        asset.technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "\u98ce\u9669"
+        else -> "\u5907\u9009"
     }
-
-private fun burstMemberOrderComparator(): Comparator<InboxAsset> =
-    compareBy<InboxAsset> { it.receivedAt.toLongOrNull() ?: Long.MAX_VALUE }
+private fun burstMemberOrderComparator(): Comparator<ProjectAsset> =
+    compareBy<ProjectAsset> { it.receivedAt.toLongOrNull() ?: Long.MAX_VALUE }
         .thenBy(::burstMemberOrderKey)
         .thenBy { it.assetSelectionId() }
 
-private fun burstMemberOrderKey(asset: InboxAsset): String =
+private fun burstMemberOrderKey(asset: ProjectAsset): String =
     asset.groupKey.ifBlank { asset.displayPath }

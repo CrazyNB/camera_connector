@@ -12,7 +12,7 @@
 - Add `ReceiveProgress`, `ReceiveState`, and `LocalFileSink`.
 - Add safe relative path handling and atomic publish.
 - Add duplicate filename preservation.
-- Add inbox scanning and grouped asset output.
+- Add project-scoped upload indexing and grouped asset output.
 
 ## Phase 3: FTP Receiver
 
@@ -25,7 +25,7 @@
 - Add `receiver-config`.
 - Add `receive-file`.
 - Add `serve-ftp`.
-- Add `inbox`.
+- Add project asset listing.
 
 ## Phase 5: Verification
 

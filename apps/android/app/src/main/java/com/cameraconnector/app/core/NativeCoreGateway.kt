@@ -33,12 +33,12 @@ class NativeCoreGateway(
 
     override fun observeProjects(): Flow<ProjectState> = projects.asStateFlow()
 
-    override suspend fun loadInbox(query: InboxAssetQuery, offset: Int, limit: Int): List<InboxAsset> =
+    override suspend fun loadProjectAssets(query: ProjectAssetQuery, offset: Int, limit: Int): List<ProjectAsset> =
         withContext(Dispatchers.IO) {
             val projectId = projects.value.activeProjectId
                 ?: loadProjects().activeProjectId
                 ?: return@withContext emptyList()
-            mapInboxAssets(
+            mapProjectAssets(
                 nativeCore.projectAssetGroupPageJson(
                     projectId = projectId,
                     query = query,
@@ -111,9 +111,9 @@ class NativeCoreGateway(
         groupId: String,
         favorite: Boolean?,
         marked: Boolean?,
-    ): InboxAssetUserMarks {
+    ): ProjectAssetUserMarks {
         val marks = withContext(Dispatchers.IO) {
-            mapInboxAssetUserMarks(
+            mapProjectAssetUserMarks(
                 nativeCore.setAssetGroupUserMarks(
                     projectId = projectId,
                     groupId = groupId,
@@ -123,7 +123,7 @@ class NativeCoreGateway(
             )
         }
         dashboard.value = dashboard.value.copy(
-            inbox = dashboard.value.inbox.map { asset ->
+            assets = dashboard.value.assets.map { asset ->
                 if (asset.id == groupId) asset.copy(userMarks = marks) else asset
             },
         )
@@ -171,21 +171,14 @@ class NativeCoreGateway(
         refresh()
     }
 
-    override suspend fun loadStrategyProfiles(): List<StrategyProfileUi> =
-        withContext(Dispatchers.IO) {
-            mapStrategyProfiles(nativeCore.strategyProfiles())
-        }
-
-    override suspend fun saveStrategyProfile(profile: StrategyProfileUi): StrategyProfileUi =
-        withContext(Dispatchers.IO) {
-            mapStrategyProfile(
-                nativeCore.saveStrategyProfile(profile.toStrategyProfileJson().toString()),
-            )
-        }
-
     override suspend fun loadModelProviderSettings(): ModelProviderSettingsUi =
         withContext(Dispatchers.IO) {
             mapModelProviderSettings(nativeCore.modelProviderSettings())
+        }
+
+    override suspend fun loadModelProviderSettingsList(): List<ModelProviderSettingsUi> =
+        withContext(Dispatchers.IO) {
+            mapModelProviderSettingsList(nativeCore.modelProviderSettingsList())
         }
 
     override suspend fun saveModelProviderSettings(settings: ModelProviderSettingsUi): ModelProviderSettingsUi =
@@ -194,6 +187,12 @@ class NativeCoreGateway(
                 nativeCore.saveModelProviderSettings(settings.toModelProviderSettingsJson().toString()),
             )
         }
+
+    override suspend fun deleteModelProviderSettings(settingsId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteModelProviderSettings(settingsId)
+        }
+    }
 
     override suspend fun loadProjectEvaluationSettings(projectId: String): ProjectEvaluationSettingsUi =
         withContext(Dispatchers.IO) {
@@ -215,6 +214,26 @@ class NativeCoreGateway(
     override suspend fun loadGlobalPromptProfiles(): List<PromptProfileUi> =
         withContext(Dispatchers.IO) {
             mapPromptProfiles(nativeCore.globalPromptProfiles())
+        }
+
+    override suspend fun createGlobalPromptProfile(
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
+        promptText: String,
+    ): PromptProfileUi =
+        withContext(Dispatchers.IO) {
+            val tagsJson = JSONArray().apply {
+                styleTags.forEach { put(it) }
+            }
+            mapPromptProfile(
+                nativeCore.createGlobalPromptProfile(
+                    name,
+                    tagsJson.toString(),
+                    sceneProfile,
+                    promptText,
+                ),
+            )
         }
 
     override suspend fun forkGlobalPromptProfile(
@@ -264,10 +283,66 @@ class NativeCoreGateway(
             )
         }
 
+    override suspend fun generateProjectRecommendationWithCandidateVisuals(
+        projectId: String,
+        candidateVisuals: List<SelectionCandidateVisualInput>,
+    ): EvaluationRunUi =
+        withContext(Dispatchers.IO) {
+            projectRecommendationRunAfterGenerate(
+                generateRecommendation = {
+                    nativeCore.generateProjectRecommendationWithCandidateVisuals(
+                        projectId,
+                        candidateVisuals,
+                    )
+                },
+                latestRun = { nativeCore.latestProjectRecommendationRunStatus(projectId) },
+            )
+        }
+
     override suspend fun latestProjectRecommendationRunStatus(projectId: String): EvaluationRunUi? =
         withContext(Dispatchers.IO) {
             nativeCore.latestProjectRecommendationRunStatus(projectId)?.let(::mapEvaluationRun)
         }
+
+    override suspend fun enqueueModelEvaluation(projectId: String, assetGroupIds: List<String>): Int {
+        val enqueuedCount = withContext(Dispatchers.IO) {
+            nativeCore.enqueueModelEvaluationForAssetGroups(projectId, assetGroupIds)
+                .optInt("enqueued_count")
+        }
+        refresh()
+        return enqueuedCount
+    }
+
+    override suspend fun evaluateAssetGroupsWithModelInputs(
+        projectId: String,
+        inputs: List<ModelEvaluationPreviewInput>,
+    ): Int {
+        val savedCount = withContext(Dispatchers.IO) {
+            nativeCore.evaluateAssetGroupsWithModelInputs(projectId, inputs)
+                .optInt("saved_count")
+        }
+        refresh()
+        return savedCount
+    }
+
+    override suspend fun recommendBurstGroupWithCandidateVisuals(
+        burstGroupId: String,
+        candidateVisuals: List<SelectionCandidateVisualInput>,
+    ): Boolean {
+        withContext(Dispatchers.IO) {
+            val visualArray = JSONArray()
+            candidateVisuals.forEach { visual ->
+                visualArray.put(
+                    JSONObject()
+                        .put("asset_group_id", visual.assetGroupId)
+                        .put("image_data_url", visual.imageDataUrl),
+                )
+            }
+            nativeCore.recommendBurstGroupWithCandidateVisuals(burstGroupId, visualArray)
+        }
+        refresh()
+        return true
+    }
 
     override suspend fun shouldScheduleSubjectAssessment(projectId: String): Boolean =
         withContext(Dispatchers.IO) {
@@ -319,7 +394,7 @@ class NativeCoreGateway(
         val dashboardJson = nativeCore.projectDashboardJson(
             projectId,
             offset = 0,
-            limit = CONTINUOUS_INBOX_LIMIT,
+            limit = PROJECT_DASHBOARD_ASSET_LIMIT,
         )
         return mapDashboard(dashboardJson)
     }
@@ -405,7 +480,7 @@ class NativeCoreGateway(
                     .takeIf { it.isNotBlank() },
             ),
             accounts = mapAccounts(value),
-            inbox = mapInboxAssets(assets),
+            assets = mapProjectAssets(assets),
             transfers = transferRows,
             publishQueue = mapPublishQueueState(value.optJSONObject("publish_queue")),
         )
@@ -552,17 +627,17 @@ class NativeCoreGateway(
                 accountCount = 0,
                 host = DEFAULT_LISTEN_HOST,
                 port = 2121,
-                outputLabel = "选择收件箱文件夹",
+                outputLabel = "\u9009\u62e9\u8f93\u51fa\u6587\u4ef6\u5939",
                 message = null,
             ),
             accounts = emptyList(),
-            inbox = emptyList(),
+            assets = emptyList(),
             transfers = emptyList(),
         )
 
     private companion object {
         const val DASHBOARD_POLL_INTERVAL_MS = 2_000L
-        const val CONTINUOUS_INBOX_LIMIT = 2_000
+        const val PROJECT_DASHBOARD_ASSET_LIMIT = 2_000
     }
 }
 
@@ -599,10 +674,10 @@ internal fun mapProjectSummary(value: JSONObject): ProjectSummary {
     )
 }
 
-internal fun inboxStableId(groupId: String, primaryAssetId: String): String =
+internal fun projectAssetStableId(groupId: String, primaryAssetId: String): String =
     groupId.ifBlank { primaryAssetId }
 
-internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
+internal fun mapProjectAssets(assets: JSONObject?): List<ProjectAsset> {
     val groups = assets?.optJSONArray("groups") ?: return emptyList()
     return buildList {
         for (index in 0 until groups.length()) {
@@ -612,8 +687,8 @@ internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
             val jpeg = group.optJSONObject("jpeg")
             val video = group.optJSONObject("video")
             add(
-                InboxAsset(
-                    id = inboxStableId(
+                ProjectAsset(
+                    id = projectAssetStableId(
                         group.optString("group_id"),
                         primary.optString("id"),
                     ),
@@ -634,17 +709,16 @@ internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
                     hasRaw = raw != null,
                     hasJpeg = jpeg != null || primary.optString("format").equals("Jpeg", ignoreCase = true),
                     hasVideo = video != null,
-                    burst = group.optJSONObject("burst")?.toInboxAssetBurst(),
-                    quality = group.optJSONObject("quality")?.toInboxAssetQuality(),
+                    burst = group.optJSONObject("burst")?.toProjectAssetBurst(),
                     technicalGateStatus = group.optStringOrNull("technical_gate_status"),
-                    technicalDefects = group.optJSONArray("technical_defects").toInboxAssetTechnicalDefects(),
+                    technicalDefects = group.optJSONArray("technical_defects").toProjectAssetTechnicalDefects(),
                     modelStatus = group.optStringOrNull("model_status"),
                     modelScore = group.optIntOrNull("model_score"),
                     modelTier = group.optStringOrNull("model_tier"),
                     modelEvaluatorKind = group.optStringOrNull("model_evaluator_kind"),
                     modelSummary = group.optStringOrNull("model_summary"),
                     isModelSelect = group.optBoolean("is_model_select", false),
-                    userMarks = mapInboxAssetUserMarks(
+                    userMarks = mapProjectAssetUserMarks(
                         group.optJSONObject("user_marks"),
                         favoriteOverride = group.optBooleanOrNull("is_favorite"),
                         markedOverride = group.optBooleanOrNull("is_flagged"),
@@ -655,17 +729,17 @@ internal fun mapInboxAssets(assets: JSONObject?): List<InboxAsset> {
     }
 }
 
-internal fun mapInboxAssetUserMarks(
+internal fun mapProjectAssetUserMarks(
     value: JSONObject?,
     favoriteOverride: Boolean? = null,
     markedOverride: Boolean? = null,
-): InboxAssetUserMarks =
-    InboxAssetUserMarks(
+): ProjectAssetUserMarks =
+    ProjectAssetUserMarks(
         favorite = favoriteOverride ?: value?.optBoolean("favorite") ?: false,
         marked = markedOverride ?: value?.optBoolean("marked") ?: false,
     )
 
-private fun JSONArray?.toInboxAssetTechnicalDefects(): List<InboxAssetTechnicalDefect> {
+private fun JSONArray?.toProjectAssetTechnicalDefects(): List<ProjectAssetTechnicalDefect> {
     if (this == null) {
         return emptyList()
     }
@@ -673,7 +747,7 @@ private fun JSONArray?.toInboxAssetTechnicalDefects(): List<InboxAssetTechnicalD
         for (index in 0 until length()) {
             val item = optJSONObject(index) ?: continue
             add(
-                InboxAssetTechnicalDefect(
+                ProjectAssetTechnicalDefect(
                     defectType = item.optString("defect_type"),
                     severity = item.optString("severity"),
                     confidence = item.optDoubleOrDefault("confidence", 0.0),
@@ -684,8 +758,8 @@ private fun JSONArray?.toInboxAssetTechnicalDefects(): List<InboxAssetTechnicalD
     }
 }
 
-private fun JSONObject.toInboxAssetBurst(): InboxAssetBurst =
-    InboxAssetBurst(
+private fun JSONObject.toProjectAssetBurst(): ProjectAssetBurst =
+    ProjectAssetBurst(
         burstGroupId = optString("burst_group_id"),
         memberCount = optIntOrNull("member_count") ?: 0,
         recommendationStatus = optStringOrNull("recommendation_status"),
@@ -693,94 +767,9 @@ private fun JSONObject.toInboxAssetBurst(): InboxAssetBurst =
         bestScore = optDoubleOrNull("best_score"),
     )
 
-private fun JSONObject.toInboxAssetQuality(): InboxAssetQuality =
-    InboxAssetQuality(
-        overall = optDoubleOrNull("overall"),
-        analysisStatus = optStringOrNull("analysis_status"),
-        scorerVersion = optStringOrNull("scorer_version"),
-        primaryReason = optStringOrNull("primary_reason"),
-        analyzedAtMs = optLongOrNull("analyzed_at_ms"),
-        sharpness = optDoubleOrNull("sharpness"),
-        exposure = optDoubleOrNull("exposure"),
-        highlightClippingPenalty = optDoubleOrNull("highlight_clipping_penalty"),
-        shadowClippingPenalty = optDoubleOrNull("shadow_clipping_penalty"),
-        composition = optDoubleOrNull("composition"),
-        compositionConfidence = optDoubleOrNull("composition_confidence"),
-    )
-
-internal fun mapStrategyProfiles(profiles: JSONArray?): List<StrategyProfileUi> {
-    if (profiles == null) {
-        return emptyList()
-    }
-    return buildList {
-        for (index in 0 until profiles.length()) {
-            profiles.optJSONObject(index)?.let { add(mapStrategyProfile(it)) }
-        }
-    }
-}
-
-internal fun mapStrategyProfile(value: JSONObject): StrategyProfileUi =
-    StrategyProfileUi(
-        profileId = value.optString("profile_id"),
-        name = value.optString("name"),
-        builtIn = value.optBoolean("built_in"),
-        strategyVersion = value.optString("strategy_version").ifBlank { "strategy-v1" },
-        burstWindowMs = value.optLong("burst_window_ms"),
-        minGroupSize = value.optInt("min_group_size"),
-        weights = mapStrategyWeights(value.optJSONObject("weights")),
-        rejectIfSharpnessBelow = value.optDoubleOrDefault("reject_if_sharpness_below", 0.25),
-        flagIfOverallBelow = value.optDoubleOrDefault("flag_if_overall_below", 0.40),
-        nearDuplicateSimilarityAbove = value.optDoubleOrDefault("near_duplicate_similarity_above", 0.92),
-        maxLlmCandidatesPerGroup = value.optInt("max_llm_candidates_per_group", 5),
-        autoDelete = value.optBoolean("auto_delete", false),
-        autoHideLowScore = value.optBoolean("auto_hide_low_score", false),
-        markBest = value.optBoolean("mark_best", true),
-        keepRawPairs = value.optBoolean("keep_raw_pairs", true),
-        llmEnabled = value.optBoolean("llm_enabled", false),
-        updatedAtMs = value.optLong("updated_at_ms"),
-    )
-
-private fun mapStrategyWeights(value: JSONObject?): StrategyWeightsUi =
-    StrategyWeightsUi(
-        sharpness = value.optDoubleOrDefault("sharpness", 0.40),
-        exposure = value.optDoubleOrDefault("exposure", 0.22),
-        composition = value.optDoubleOrDefault("composition", 0.12),
-        highlightClippingPenalty = value.optDoubleOrDefault("highlight_clipping_penalty", -0.14),
-        shadowClippingPenalty = value.optDoubleOrDefault("shadow_clipping_penalty", -0.08),
-        diversity = value.optDoubleOrDefault("diversity", 0.04),
-    )
-
-internal fun StrategyProfileUi.toStrategyProfileJson(): JSONObject =
-    JSONObject()
-        .put("profile_id", profileId)
-        .put("name", name)
-        .put("built_in", builtIn)
-        .put("strategy_version", strategyVersion)
-        .put("burst_window_ms", burstWindowMs)
-        .put("min_group_size", minGroupSize)
-        .put(
-            "weights",
-            JSONObject()
-                .put("sharpness", weights.sharpness)
-                .put("exposure", weights.exposure)
-                .put("composition", weights.composition)
-                .put("highlight_clipping_penalty", weights.highlightClippingPenalty)
-                .put("shadow_clipping_penalty", weights.shadowClippingPenalty)
-                .put("diversity", weights.diversity),
-        )
-        .put("reject_if_sharpness_below", rejectIfSharpnessBelow)
-        .put("flag_if_overall_below", flagIfOverallBelow)
-        .put("near_duplicate_similarity_above", nearDuplicateSimilarityAbove)
-        .put("max_llm_candidates_per_group", maxLlmCandidatesPerGroup)
-        .put("auto_delete", autoDelete)
-        .put("auto_hide_low_score", autoHideLowScore)
-        .put("mark_best", markBest)
-        .put("keep_raw_pairs", keepRawPairs)
-        .put("llm_enabled", llmEnabled)
-        .put("updated_at_ms", updatedAtMs)
-
 internal fun mapModelProviderSettings(value: JSONObject): ModelProviderSettingsUi =
     ModelProviderSettingsUi(
+        settingsId = value.optString("settings_id").ifBlank { "global" },
         providerKind = value.optString("provider_kind").ifBlank { "none" },
         providerLabel = value.optString("provider_label").ifBlank { "Model provider" },
         baseUrl = value.optString("base_url"),
@@ -795,8 +784,20 @@ internal fun mapModelProviderSettings(value: JSONObject): ModelProviderSettingsU
         updatedAtMs = value.optLong("updated_at_ms"),
     )
 
+internal fun mapModelProviderSettingsList(settings: JSONArray?): List<ModelProviderSettingsUi> {
+    if (settings == null) {
+        return emptyList()
+    }
+    return buildList {
+        for (index in 0 until settings.length()) {
+            settings.optJSONObject(index)?.let { add(mapModelProviderSettings(it)) }
+        }
+    }
+}
+
 internal fun ModelProviderSettingsUi.toModelProviderSettingsJson(): JSONObject =
     JSONObject()
+        .put("settings_id", settingsId.ifBlank { "global" })
         .put("provider_kind", providerKind.ifBlank { "none" })
         .put("provider_label", providerLabel)
         .put("base_url", baseUrl)
@@ -819,6 +820,7 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
         autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
         projectRecommendationMode = "manual",
         promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
+        modelProviderSettingsId = jsonStringOrNull(value, "model_provider_settings_id"),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
         cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
         allowRiskyModelSelects = value.optBoolean("allow_risky_model_selects", false),
@@ -835,6 +837,7 @@ internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSON
         .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
         .put("project_recommendation_mode", "manual")
         .put("prompt_profile_id", promptProfileId ?: JSONObject.NULL)
+        .put("model_provider_settings_id", modelProviderSettingsId ?: JSONObject.NULL)
         .put("scene_profile", sceneProfile.ifBlank { "general" })
         .put("cv_policy", cvPolicy.ifBlank { "standard" })
         .put("allow_risky_model_selects", allowRiskyModelSelects)
@@ -853,8 +856,14 @@ internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
     }
 }
 
-internal fun mapPromptProfile(value: JSONObject): PromptProfileUi =
-    PromptProfileUi(
+internal fun mapPromptProfile(value: JSONObject): PromptProfileUi {
+    val activePromptText = jsonStringOrNull(value, "active_prompt_text")
+    val promptContent = parsePromptProfileContent(activePromptText)
+    val sharedPreference = promptContent?.optString("shared_preference")
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: activePromptText
+    return PromptProfileUi(
         promptProfileId = value.optString("prompt_profile_id"),
         scope = value.optString("scope").ifBlank { "global" },
         projectId = jsonStringOrNull(value, "project_id"),
@@ -864,8 +873,19 @@ internal fun mapPromptProfile(value: JSONObject): PromptProfileUi =
         activeVersionId = jsonStringOrNull(value, "active_version_id"),
         builtIn = value.optBoolean("built_in", false),
         enabled = value.optBoolean("enabled", true),
-        activePromptText = jsonStringOrNull(value, "active_prompt_text"),
+        activePromptText = sharedPreference,
+        sharedPreference = sharedPreference,
+        evaluationInstruction = jsonStringOrNull(promptContent, "evaluation_instruction"),
+        burstSelectionInstruction = jsonStringOrNull(promptContent, "burst_selection_instruction"),
+        projectSelectionInstruction = jsonStringOrNull(promptContent, "project_selection_instruction"),
     )
+}
+
+private fun parsePromptProfileContent(value: String?): JSONObject? =
+    value
+        ?.trim()
+        ?.takeIf { it.startsWith("{") }
+        ?.let { runCatching { JSONObject(it) }.getOrNull() }
 
 internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
     EvaluationRunUi(

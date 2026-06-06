@@ -1,5 +1,6 @@
 package com.cameraconnector.app.ui
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -27,6 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DEFAULT_LISTEN_HOST
@@ -34,15 +36,20 @@ import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
-import com.cameraconnector.app.core.StrategyProfileUi
+import com.cameraconnector.app.core.SelectionCandidateVisualInput
+import com.cameraconnector.app.media.loadPreviewSampleJson
 import com.cameraconnector.app.storage.AndroidStorageGateway
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 @Composable
 fun CameraConnectorApp(
@@ -50,9 +57,9 @@ fun CameraConnectorApp(
     storageGateway: AndroidStorageGateway,
     notificationPermissionRequired: Boolean,
     notificationPermissionGranted: Flow<Boolean>,
-    selectedInboxLabel: Flow<String?>,
+    selectedOutputLabel: Flow<String?>,
     onRequestNotificationPermission: () -> Unit,
-    onChooseInboxDirectory: () -> Unit,
+    onChooseOutputDirectory: () -> Unit,
 ) {
     val dashboard by coreGateway.observeDashboard().collectAsState(
         initial = DashboardState(
@@ -68,7 +75,7 @@ fun CameraConnectorApp(
                 message = null,
             ),
             accounts = emptyList(),
-            inbox = emptyList(),
+            assets = emptyList(),
             transfers = emptyList(),
         ),
     )
@@ -76,14 +83,16 @@ fun CameraConnectorApp(
         initial = ProjectState(projects = emptyList(), activeProjectId = null),
     )
     val notificationsGranted by notificationPermissionGranted.collectAsState(initial = true)
-    val selectedInbox by selectedInboxLabel.collectAsState(initial = null)
+    val selectedOutput by selectedOutputLabel.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     var destination by remember { mutableStateOf(GlobalDestination.Projects) }
     var projectWorkspaceOpen by remember { mutableStateOf(false) }
     var projectConfigId by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsDiagnosticsOpen by remember { mutableStateOf(false) }
+    var settingsModelProvidersOpen by remember { mutableStateOf(false) }
     var settingsPromptProfilesOpen by remember { mutableStateOf(false) }
     var editingPromptProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var creatingPromptProfile by rememberSaveable { mutableStateOf(false) }
     var accountDetail by remember { mutableStateOf<DeviceAccount?>(null) }
     var addingAccount by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -94,15 +103,13 @@ fun CameraConnectorApp(
     var cameraConnectHost by rememberSaveable {
         mutableStateOf(normalizeCameraConnectHost(storageGateway.cameraConnectHost()))
     }
-    var strategyProfiles by remember { mutableStateOf<List<StrategyProfileUi>>(emptyList()) }
-    var selectedStrategyProfileId by rememberSaveable {
-        mutableStateOf(storageGateway.smartSelectionStrategyProfileId())
-    }
     var modelProviderSettings by remember { mutableStateOf(ModelProviderSettingsUi()) }
+    var modelProviderSettingsList by remember { mutableStateOf<List<ModelProviderSettingsUi>>(emptyList()) }
     var globalPromptProfiles by remember { mutableStateOf<List<PromptProfileUi>>(emptyList()) }
     var projectConfigEvaluationSettings by remember { mutableStateOf<ProjectEvaluationSettingsUi?>(null) }
     var projectConfigPromptProfiles by remember { mutableStateOf<List<PromptProfileUi>>(emptyList()) }
     var projectConfigLatestRecommendationRun by remember { mutableStateOf<EvaluationRunUi?>(null) }
+    val context = LocalContext.current
 
     fun saveCameraConnectHost(host: String) {
         val normalized = normalizeCameraConnectHost(host)
@@ -148,8 +155,10 @@ fun CameraConnectorApp(
         projectWorkspaceOpen = true
         projectConfigId = null
         settingsDiagnosticsOpen = false
+        settingsModelProvidersOpen = false
         settingsPromptProfilesOpen = false
         editingPromptProfileId = null
+        creatingPromptProfile = false
         accountDetail = null
         addingAccount = false
         runAction("正在进入项目") {
@@ -162,8 +171,10 @@ fun CameraConnectorApp(
         projectWorkspaceOpen = false
         projectConfigId = projectId
         settingsDiagnosticsOpen = false
+        settingsModelProvidersOpen = false
         settingsPromptProfilesOpen = false
         editingPromptProfileId = null
+        creatingPromptProfile = false
         accountDetail = null
         addingAccount = false
     }
@@ -172,18 +183,13 @@ fun CameraConnectorApp(
         runCatching {
             Triple(
                 coreGateway.loadModelProviderSettings(),
-                coreGateway.loadStrategyProfiles(),
+                coreGateway.loadModelProviderSettingsList(),
                 coreGateway.loadGlobalPromptProfiles(),
             )
-        }.onSuccess { (providerSettings, profiles, prompts) ->
+        }.onSuccess { (providerSettings, providerSettingsList, prompts) ->
             modelProviderSettings = providerSettings
-            strategyProfiles = profiles
+            modelProviderSettingsList = providerSettingsList
             globalPromptProfiles = prompts
-            val selected = selectedStrategyProfile(strategyProfiles, selectedStrategyProfileId)
-            if (selected != null && selected.profileId != selectedStrategyProfileId) {
-                selectedStrategyProfileId = selected.profileId
-                storageGateway.persistSmartSelectionStrategyProfileId(selected.profileId)
-            }
         }.onFailure { error ->
             if (!error.isUiCancellationNoise()) {
                 actionError = error.message ?: error::class.java.simpleName
@@ -209,7 +215,7 @@ fun CameraConnectorApp(
         }.onSuccess { (settings, profiles, latestRun) ->
             projectConfigEvaluationSettings = settings
             projectConfigPromptProfiles = profiles
-            projectConfigLatestRecommendationRun = scopedProjectRecommendationRun(latestRun, projectId)
+            projectConfigLatestRecommendationRun = activeProjectRecommendationRun(latestRun, projectId)
         }.onFailure { error ->
             if (!error.isUiCancellationNoise()) {
                 actionError = error.message ?: error::class.java.simpleName
@@ -226,11 +232,18 @@ fun CameraConnectorApp(
     BackHandler(enabled = destination == GlobalDestination.Settings && settingsDiagnosticsOpen) {
         settingsDiagnosticsOpen = false
     }
+    BackHandler(enabled = destination == GlobalDestination.Settings && settingsModelProvidersOpen) {
+        settingsModelProvidersOpen = false
+    }
     BackHandler(enabled = destination == GlobalDestination.Settings && settingsPromptProfilesOpen) {
         settingsPromptProfilesOpen = false
     }
-    BackHandler(enabled = destination == GlobalDestination.Settings && editingPromptProfileId != null) {
+    BackHandler(
+        enabled = destination == GlobalDestination.Settings &&
+            (editingPromptProfileId != null || creatingPromptProfile),
+    ) {
         editingPromptProfileId = null
+        creatingPromptProfile = false
     }
 
     MaterialTheme(
@@ -253,8 +266,10 @@ fun CameraConnectorApp(
                                     projectWorkspaceOpen = false
                                     projectConfigId = null
                                     settingsDiagnosticsOpen = false
+                                    settingsModelProvidersOpen = false
                                     settingsPromptProfilesOpen = false
                                     editingPromptProfileId = null
+                                    creatingPromptProfile = false
                                     accountDetail = null
                                     addingAccount = false
                                 },
@@ -276,6 +291,9 @@ fun CameraConnectorApp(
                         ProjectSettingsScreen(
                             project = targetProjectId?.let { id -> projectState.projects.firstOrNull { it.id == id } },
                             provider = modelProviderSettings,
+                            providerOptions = modelProviderSettingsList.ifEmpty {
+                                listOf(modelProviderSettings).filter { it.configured }
+                            },
                             settings = projectConfigEvaluationSettings,
                             promptProfiles = globalPromptProfiles.ifEmpty { projectConfigPromptProfiles },
                             latestRun = projectConfigLatestRecommendationRun,
@@ -294,8 +312,20 @@ fun CameraConnectorApp(
                             onGenerateProjectRecommendation = {
                                 val projectId = projectConfigId
                                 if (!projectId.isNullOrBlank()) {
-                                    runAction("正在生成项目优选") {
-                                        val run = coreGateway.generateProjectRecommendation(projectId)
+                                    runAction("\u6b63\u5728\u751f\u6210\u9879\u76ee\u4f18\u9009") {
+                                        val candidateVisuals = if (projectState.activeProjectId == projectId) {
+                                            projectRecommendationCandidateVisuals(context, dashboard.assets)
+                                        } else {
+                                            emptyList()
+                                        }
+                                        val run = if (candidateVisuals.isNotEmpty()) {
+                                            coreGateway.generateProjectRecommendationWithCandidateVisuals(
+                                                projectId,
+                                                candidateVisuals,
+                                            )
+                                        } else {
+                                            coreGateway.generateProjectRecommendation(projectId)
+                                        }
                                         if (projectConfigId == projectId) {
                                             projectConfigLatestRecommendationRun = run
                                         }
@@ -341,6 +371,9 @@ fun CameraConnectorApp(
                             onOpenProjects = {
                                 projectWorkspaceOpen = false
                             },
+                            onOpenProjectIntelligence = {
+                                projectState.activeProjectId?.let(::openProjectConfig)
+                            },
                             onConfigureAccount = {
                                 destination = GlobalDestination.Accounts
                                 projectWorkspaceOpen = false
@@ -369,7 +402,7 @@ fun CameraConnectorApp(
                                 }
                             },
                             onMoveProjectGroup = { sourceProjectId, groupId, targetProjectId ->
-                                runAction("正在移动文件组") {
+                                runAction("正在移动文件") {
                                     coreGateway.moveProjectGroup(sourceProjectId, groupId, targetProjectId)
                                 }
                             },
@@ -399,10 +432,10 @@ fun CameraConnectorApp(
                     }
 
                     GlobalDestination.Accounts -> {
-                        val selectedAccount = accountDetail
-                        if (selectedAccount != null || addingAccount) {
+                        val accountForDetail = accountDetail
+                        if (accountForDetail != null || addingAccount) {
                             AccountDetailScreen(
-                                account = selectedAccount,
+                                account = accountForDetail,
                                 actionError = actionError,
                                 actionInFlight = actionInFlight,
                                 onClearActionError = { actionError = null },
@@ -449,16 +482,43 @@ fun CameraConnectorApp(
                             onBack = { settingsDiagnosticsOpen = false },
                             modifier = Modifier.padding(padding),
                         )
-                    } else if (editingPromptProfileId != null) {
-                        val editingProfile = globalPromptProfiles.firstOrNull {
-                            it.promptProfileId == editingPromptProfileId
+                    } else if (settingsModelProvidersOpen) {
+                        ModelProviderProfilesScreen(
+                            modelProviderSettings = modelProviderSettings,
+                            modelProviderSettingsList = modelProviderSettingsList,
+                            actionError = actionError,
+                            actionInFlight = actionInFlight,
+                            onClearActionError = { actionError = null },
+                            onBack = { settingsModelProvidersOpen = false },
+                            onSaveModelProviderSettings = { settings ->
+                                runAction("正在保存模型服务设置") {
+                                    val saved = coreGateway.saveModelProviderSettings(settings)
+                                    modelProviderSettings = saved
+                                    modelProviderSettingsList = coreGateway.loadModelProviderSettingsList()
+                                }
+                            },
+                            onDeleteModelProviderSettings = { settingsId ->
+                                runAction("正在删除模型服务设置") {
+                                    coreGateway.deleteModelProviderSettings(settingsId)
+                                    modelProviderSettingsList = coreGateway.loadModelProviderSettingsList()
+                                    modelProviderSettings = coreGateway.loadModelProviderSettings()
+                                }
+                            },
+                            modifier = Modifier.padding(padding),
+                        )
+                    } else if (editingPromptProfileId != null || creatingPromptProfile) {
+                        val editingProfile = editingPromptProfileId?.let { promptId ->
+                            globalPromptProfiles.firstOrNull { it.promptProfileId == promptId }
                         }
                         PromptProfileEditorScreen(
                             profile = editingProfile,
                             actionError = actionError,
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
-                            onBack = { editingPromptProfileId = null },
+                            onBack = {
+                                editingPromptProfileId = null
+                                creatingPromptProfile = false
+                            },
                             onSave = { profile, name, promptText ->
                                 runAction(if (profile.builtIn) "正在复制提示词" else "正在保存提示词") {
                                     val saved = if (profile.builtIn) {
@@ -485,6 +545,20 @@ fun CameraConnectorApp(
                                     editingPromptProfileId = saved.promptProfileId
                                 }
                             },
+                            onCreate = { name, styleTags, sceneProfile, promptText ->
+                                runAction("正在创建提示词") {
+                                    coreGateway.createGlobalPromptProfile(
+                                        name = name,
+                                        styleTags = styleTags,
+                                        sceneProfile = sceneProfile,
+                                        promptText = promptText,
+                                    )
+                                    globalPromptProfiles = coreGateway.loadGlobalPromptProfiles()
+                                    creatingPromptProfile = false
+                                    editingPromptProfileId = null
+                                    settingsPromptProfilesOpen = true
+                                }
+                            },
                             modifier = Modifier.padding(padding),
                         )
                     } else if (settingsPromptProfilesOpen) {
@@ -494,6 +568,10 @@ fun CameraConnectorApp(
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
                             onBack = { settingsPromptProfilesOpen = false },
+                            onCreatePromptProfile = {
+                                editingPromptProfileId = null
+                                creatingPromptProfile = true
+                            },
                             onOpenPromptProfile = { promptId -> editingPromptProfileId = promptId },
                             modifier = Modifier.padding(padding),
                         )
@@ -506,26 +584,17 @@ fun CameraConnectorApp(
                             actionError = actionError,
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
-                            selectedInboxLabel = selectedInbox,
-                            onChooseInboxDirectory = onChooseInboxDirectory,
+                            selectedOutputLabel = selectedOutput,
+                            onChooseOutputDirectory = onChooseOutputDirectory,
                             onOpenDiagnostics = { settingsDiagnosticsOpen = true },
                             onOpenPromptProfiles = { settingsPromptProfilesOpen = true },
+                            onOpenModelProviders = { settingsModelProvidersOpen = true },
                             projectPhotoGridColumnCount = projectPhotoGridColumnCount,
                             onProjectPhotoGridColumnCountChange = { count ->
                                 projectPhotoGridColumnCount = count
                                 storageGateway.persistProjectPhotoGridColumnCount(count)
                             },
-                            modelProviderSettings = modelProviderSettings,
-                            onSaveModelProviderSettings = { settings ->
-                                runAction("正在保存模型服务设置") {
-                                    val saved = coreGateway.saveModelProviderSettings(settings)
-                                    modelProviderSettings = saved
-                                    storageGateway.persistModelProviderConfigured(
-                                        configured = saved.configured,
-                                        keyAlias = saved.keyAlias,
-                                    )
-                                }
-                            },
+                            modelProviderSettingsList = modelProviderSettingsList,
                             modifier = Modifier.padding(padding),
                         )
                     }
@@ -538,6 +607,46 @@ fun CameraConnectorApp(
 private fun Throwable.isUiCancellationNoise(): Boolean =
     this is CancellationException ||
         message?.contains("coroutine scope left the composition", ignoreCase = true) == true
+
+private suspend fun projectRecommendationCandidateVisuals(
+    context: Context,
+    assets: List<ProjectAsset>,
+): List<SelectionCandidateVisualInput> =
+    withContext(Dispatchers.IO) {
+        projectRecommendationVisualCandidates(assets)
+            .mapNotNull { asset ->
+                val imageDataUrl = runCatching {
+                    JSONObject(loadPreviewSampleJson(context, asset.previewLocation))
+                        .optString("image_data_url")
+                        .takeIf { it.isNotBlank() && it != "null" }
+                }.getOrNull()
+                imageDataUrl?.let {
+                    SelectionCandidateVisualInput(
+                        assetGroupId = asset.id,
+                        imageDataUrl = it,
+                    )
+                }
+            }
+    }
+
+private fun projectRecommendationVisualCandidates(assets: List<ProjectAsset>): List<ProjectAsset> =
+    assets
+        .asSequence()
+        .filter { asset ->
+            asset.isModelSelect ||
+                asset.modelScore != null ||
+                asset.modelStatus?.equals("ready", ignoreCase = true) == true
+        }
+        .distinctBy { it.id }
+        .sortedWith(
+            compareByDescending<ProjectAsset> { it.isModelSelect }
+                .thenByDescending { it.modelScore ?: Int.MIN_VALUE }
+                .thenByDescending { it.receivedAt.toLongOrNull() ?: Long.MIN_VALUE },
+        )
+        .take(PROJECT_RECOMMENDATION_VISUAL_LIMIT)
+        .toList()
+
+private const val PROJECT_RECOMMENDATION_VISUAL_LIMIT = 48
 
 private fun GlobalDestination.icon(): ImageVector = when (this) {
     GlobalDestination.Projects -> Icons.Outlined.Home

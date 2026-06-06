@@ -40,13 +40,16 @@ internal fun ReceiverHeroControl(
     onRetryFailedPublishes: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val busy = receiverPhaseBusy(phase)
     Column(
         modifier = modifier.padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         PowerButton(
             running = running,
-            enabled = enabled,
+            phase = phase,
+            busy = busy,
+            enabled = enabled && !busy,
             onClick = onToggleReceiver,
         )
         Spacer(Modifier.height(12.dp))
@@ -56,7 +59,7 @@ internal fun ReceiverHeroControl(
                 color = if (running) ElementSuccess else ElementInfo,
             )
             ElementTag(
-                text = if (onlineConnections > 0) "在线连接 $onlineConnections" else "未连接",
+                text = if (onlineConnections > 0) "\u5728\u7ebf\u8fde\u63a5 $onlineConnections" else "\u672a\u8fde\u63a5",
                 color = if (onlineConnections > 0) ElementSuccess else ElementInfo,
             )
             ElementTag(text = "已配置账号 $accountCount", color = ElementBlue)
@@ -94,6 +97,8 @@ internal fun ReceiverHeroControl(
 @Composable
 internal fun PowerButton(
     running: Boolean,
+    phase: String,
+    busy: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
@@ -110,12 +115,22 @@ internal fun PowerButton(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                if (running) "停止" else "启动",
+                when {
+                    running -> "\u505c\u6b62"
+                    busy -> receiverPhaseLabel(phase)
+                    else -> "\u542f\u52a8"
+                },
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(4.dp))
-            Text(if (running) "接收服务" else "开始接收")
+            Text(
+                when {
+                    running -> "\u63a5\u6536\u670d\u52a1"
+                    busy -> "\u8bf7\u7a0d\u5019"
+                    else -> "\u5f00\u59cb\u63a5\u6536"
+                },
+            )
         }
     }
 }

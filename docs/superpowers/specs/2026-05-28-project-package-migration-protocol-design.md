@@ -4,13 +4,13 @@
 
 Define a future project-level migration protocol for moving Camera Connector project context between Android and PC without changing the current SQLite storage model.
 
-The protocol should let Android export a project package containing asset, group, score, and selection context. A PC importer can then load the package, ask the user to choose the photo library root, scan local files, and map the package records back to real files and groups.
+The protocol should let Android export a project package containing asset, group, model evaluation, model recommendation, and user-mark context. A PC importer can then load the package, ask the user to choose the photo library root, scan local files, and map the package records back to real files and groups.
 
 This is a spec only. It is not part of the current storage implementation priority.
 
 ## Decisions
 
-- Migration is project-scoped. The transferable unit is a project package, not a standalone score file and not a global gallery export.
+- Migration is project-scoped. The transferable unit is a project package, not a standalone score file, recommendation file, or global gallery export.
 - SQLite remains the source of local truth. It stores factual fields and local ids; it does not store extra `portable_asset_key` or `portable_group_key` columns.
 - Matching keys are protocol rules derived at export/import time from existing fields such as `original_path`, `original_parent_path`, `normalized_stem`, `format`, `size_bytes`, and capture time.
 - `asset_id` and `group_id` may appear in the package as package-local references, but they are not the cross-platform matching authority.
@@ -33,8 +33,9 @@ project-package/
   manifest.json
   assets.json
   groups.json
-  scores.json
-  selections.json
+  model_evaluations.json
+  selection_recommendations.json
+  user_marks.json
   thumbnails/
 ```
 
@@ -76,7 +77,13 @@ project-package/
 - `has_jpeg`
 - `has_video`
 
-`scores.json` and `selections.json` reference package-local `asset_id` and `group_id`. They should not reference platform paths.
+`model_evaluations.json`, `selection_recommendations.json`, and `user_marks.json` reference package-local `asset_id`, `group_id`, or recommendation `subject_id` values. They should not reference platform paths.
+
+`model_evaluations.json` contains model-produced photographic judgments. It is not a local-CV score export. Technical gate details may be included as warnings or as a separate future index, but they must not become the package's final aesthetic result.
+
+`selection_recommendations.json` contains model recommendation records only. Burst-level and project-level recommendation scopes should stay explicit.
+
+`user_marks.json` contains human marks such as favorite and marked. It must stay separate from model recommendation records.
 
 ## Matching Policy
 
@@ -113,7 +120,7 @@ package_asset_id -> local_asset_or_file
 package_group_id -> local_group
 ```
 
-7. Importer applies score and selection records to matched local groups/assets.
+7. Importer applies model evaluation, model recommendation, and user-mark records to matched local groups/assets.
 8. Unmatched and ambiguous records are shown as an import report.
 
 The temporary mapping may be persisted by the PC app if its local product model needs it, but the Android/core storage model does not require it.
@@ -123,7 +130,7 @@ The temporary mapping may be persisted by the PC app if its local product model 
 - Unsupported `schema_version`: reject with an explicit version error.
 - Missing package file: reject as corrupt package.
 - Missing local photo root: allow package inspection, but mark all asset bindings unresolved.
-- No match: keep score/selection data in the package import report but do not attach it to a local file.
+- No match: keep model evaluation, recommendation, and user-mark data in the package import report but do not attach it to a local file.
 - Multiple matches: require manual confirmation.
 - Partial group match: import matched members and mark the group as incomplete.
 

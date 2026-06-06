@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $vsDevCmd = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
@@ -18,7 +18,7 @@ if ($serviceSource -match "pub fn dashboard\(") {
 }
 
 $unscopedServiceReadNames = @(
-    "inbox_groups",
+    "received_asset_groups",
     "transfer_asset_groups",
     "transfer_asset_groups_with_query",
     "transfer_asset_summary_with_query",
@@ -346,10 +346,10 @@ if (($sftpStoppedStatus | Where-Object { $_ -like "phase: Stopped*" }).Count -lt
 }
 Write-Output $sftpStoppedStatus
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --project-id $projectId --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "receive-file smoke failed" }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
+& (Join-Path $root "target\debug\camera-connector.exe") receive-file --input $sample --output $pushOutput --project-id $projectId --state $pushState --source ftp --username "verify" --source-name "Verify Camera"
 if ($LASTEXITCODE -ne 0) { throw "duplicate receive-file smoke failed" }
 
 $transferLog = Join-Path $pushState "transfer-log.jsonl"
@@ -360,7 +360,6 @@ $failedTransfer = [ordered]@{
     status = "Failed"
     original_path = "IMG_9999.CR3"
     final_filename = "IMG_9999.CR3"
-    final_path = $null
     final_location = $null
     size_bytes = 0
     username = "verify"
@@ -372,54 +371,54 @@ $failedTransfer = [ordered]@{
 }
 ($failedTransfer | ConvertTo-Json -Compress) | Add-Content -LiteralPath $transferLog
 
-& (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushOutput --source ftp
-if ($LASTEXITCODE -ne 0) { throw "inbox smoke failed" }
+& (Join-Path $root "target\debug\camera-connector.exe") assets --diagnostic --path $pushOutput --source ftp
+if ($LASTEXITCODE -ne 0) { throw "assets smoke failed" }
 
-$logBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushState --from-transfers --summary
-if ($LASTEXITCODE -ne 0) { throw "log-backed inbox smoke failed" }
-if (($logBackedInboxOutput | Where-Object { $_ -like "summary*groups=2*raw_groups=2*sources=Verify Camera:2*" }).Count -lt 1) {
-    throw "log-backed inbox did not expose summary counts"
+$logBackedAssetsOutput = & (Join-Path $root "target\debug\camera-connector.exe") assets --diagnostic --path $pushState --from-transfers --summary
+if ($LASTEXITCODE -ne 0) { throw "log-backed assets smoke failed" }
+if (($logBackedAssetsOutput | Where-Object { $_ -like "summary*groups=2*raw_groups=2*sources=Verify Camera:2*" }).Count -lt 1) {
+    throw "log-backed assets did not expose summary counts"
 }
-if (($logBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.CR3*" }).Count -lt 1) {
-    throw "log-backed inbox did not group transfers"
+if (($logBackedAssetsOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.CR3*" }).Count -lt 1) {
+    throw "log-backed assets did not group transfers"
 }
-if (($logBackedInboxOutput | Where-Object { $_ -like "*primary_location_kind=local_path*" }).Count -lt 1) {
-    throw "log-backed inbox did not expose primary storage location"
+if (($logBackedAssetsOutput | Where-Object { $_ -like "*primary_location_kind=local_path*" }).Count -lt 1) {
+    throw "log-backed assets did not expose primary storage location"
 }
-if (($logBackedInboxOutput | Where-Object { $_ -like "*username=verify*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
-    throw "log-backed inbox did not expose transfer metadata"
+if (($logBackedAssetsOutput | Where-Object { $_ -like "*username=verify*source=Verify Camera*display=Verify Camera/IMG_1234.CR3*" }).Count -lt 1) {
+    throw "log-backed assets did not expose transfer metadata"
 }
-if (($logBackedInboxOutput | Where-Object { $_ -like "*IMG_1234 (1)*duplicate=2/2*" }).Count -lt 1) {
-    throw "log-backed inbox did not expose duplicate metadata"
+if (($logBackedAssetsOutput | Where-Object { $_ -like "*IMG_1234 (1)*duplicate=2/2*" }).Count -lt 1) {
+    throw "log-backed assets did not expose duplicate metadata"
 }
-Write-Output $logBackedInboxOutput
+Write-Output $logBackedAssetsOutput
 
-$pagedLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --diagnostic --path $pushState --from-transfers --summary --offset 1 --limit 1
-if ($LASTEXITCODE -ne 0) { throw "paged log-backed inbox smoke failed" }
-if (($pagedLogBackedInboxOutput | Where-Object { $_ -like "summary*offset=1*limit=1*total_groups=2*has_more=False*" }).Count -lt 1) {
-    throw "paged log-backed inbox did not expose paging state"
+$pagedLogBackedAssetsOutput = & (Join-Path $root "target\debug\camera-connector.exe") assets --diagnostic --path $pushState --from-transfers --summary --offset 1 --limit 1
+if ($LASTEXITCODE -ne 0) { throw "paged log-backed assets smoke failed" }
+if (($pagedLogBackedAssetsOutput | Where-Object { $_ -like "summary*offset=1*limit=1*total_groups=2*has_more=False*" }).Count -lt 1) {
+    throw "paged log-backed assets did not expose paging state"
 }
-if (($pagedLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.CR3*" }).Count -lt 1) {
-    throw "paged log-backed inbox did not return expected second page"
+if (($pagedLogBackedAssetsOutput | Where-Object { $_ -like "IMG_1234*primary=IMG_1234.CR3*" }).Count -lt 1) {
+    throw "paged log-backed assets did not return expected second page"
 }
-Write-Output $pagedLogBackedInboxOutput
+Write-Output $pagedLogBackedAssetsOutput
 
-$filteredLogBackedInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --diagnostic --path $pushState --from-transfers --username "verify" --source-name "Verify Camera" --original-path IMG_1234 --format cr3
-if ($LASTEXITCODE -ne 0) { throw "filtered log-backed inbox smoke failed" }
-if (($filteredLogBackedInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
-    throw "filtered log-backed inbox did not include expected group"
+$filteredLogBackedAssetsOutput = & (Join-Path $root "target\debug\camera-connector.exe") assets --config $configPath --diagnostic --path $pushState --from-transfers --username "verify" --source-name "Verify Camera" --original-path IMG_1234 --format cr3
+if ($LASTEXITCODE -ne 0) { throw "filtered log-backed assets smoke failed" }
+if (($filteredLogBackedAssetsOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
+    throw "filtered log-backed assets did not include expected group"
 }
-Write-Output $filteredLogBackedInboxOutput
+Write-Output $filteredLogBackedAssetsOutput
 
-$projectInboxOutput = & (Join-Path $root "target\debug\camera-connector.exe") inbox --config $configPath --project-id $projectId --summary --username "verify" --limit 1
-if ($LASTEXITCODE -ne 0) { throw "project inbox smoke failed" }
-if (($projectInboxOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
-    throw "project inbox did not expose paged project asset summary"
+$projectAssetsOutput = & (Join-Path $root "target\debug\camera-connector.exe") assets --config $configPath --project-id $projectId --summary --username "verify" --limit 1
+if ($LASTEXITCODE -ne 0) { throw "project assets smoke failed" }
+if (($projectAssetsOutput | Where-Object { $_ -like "summary*groups=2*offset=0*limit=1*total_groups=2*has_more=true*" }).Count -lt 1) {
+    throw "project assets did not expose paged project asset summary"
 }
-if (($projectInboxOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
-    throw "project inbox did not expose project asset rows"
+if (($projectAssetsOutput | Where-Object { $_ -like "IMG_1234*username=verify*source=Verify Camera*" }).Count -lt 1) {
+    throw "project assets did not expose project asset rows"
 }
-Write-Output $projectInboxOutput
+Write-Output $projectAssetsOutput
 
 $projectTransfersOutput = & (Join-Path $root "target\debug\camera-connector.exe") transfers --config $configPath --project-id $projectId --status completed --username "verify"
 if ($LASTEXITCODE -ne 0) { throw "project transfers smoke failed" }

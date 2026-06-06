@@ -78,14 +78,6 @@ char *camera_connector_mobile_core_project_asset_group_page_json(
     uint32_t limit
 );
 
-char *camera_connector_mobile_core_project_selects_asset_group_page_json(
-    const CameraConnectorMobileCore *core,
-    const char *project_id,
-    const char *strategy_profile_id,
-    uint32_t offset,
-    uint32_t limit
-);
-
 char *camera_connector_mobile_core_project_group_assets_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,
@@ -145,68 +137,34 @@ char *camera_connector_mobile_core_drain_analysis_jobs_with_provider_configured_
     bool provider_configured
 );
 
-char *camera_connector_mobile_core_score_asset_group_preview_json(
+char *camera_connector_mobile_core_enqueue_model_evaluation_for_asset_groups_json(
     const CameraConnectorMobileCore *core,
-    const char *asset_group_id,
-    const char *sample_json,
-    const char *scorer_version
+    const char *request_json
 );
 
-char *camera_connector_mobile_core_score_asset_group_preview_with_provider_configured_json(
+char *camera_connector_mobile_core_evaluate_asset_groups_with_model_inputs_json(
+    const CameraConnectorMobileCore *core,
+    const char *request_json
+);
+
+char *camera_connector_mobile_core_recommend_burst_group_with_candidate_visuals_json(
+    const CameraConnectorMobileCore *core,
+    const char *request_json
+);
+
+char *camera_connector_mobile_core_assess_asset_group_preview_json(
     const CameraConnectorMobileCore *core,
     const char *asset_group_id,
     const char *sample_json,
-    const char *scorer_version,
+    const char *assessor_version
+);
+
+char *camera_connector_mobile_core_assess_asset_group_preview_with_provider_configured_json(
+    const CameraConnectorMobileCore *core,
+    const char *asset_group_id,
+    const char *sample_json,
+    const char *assessor_version,
     bool provider_configured
-);
-
-char *camera_connector_mobile_core_recommend_burst_group_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_accept_recommended_best_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_mark_burst_needs_review_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_restore_automatic_recommendation_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_clear_recommendation_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_keep_all_candidates_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_hide_low_score_candidates_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *strategy_profile_id
-);
-
-char *camera_connector_mobile_core_override_recommended_best_json(
-    const CameraConnectorMobileCore *core,
-    const char *burst_group_id,
-    const char *best_asset_group_id,
-    const char *strategy_profile_id
 );
 
 char *camera_connector_mobile_core_split_burst_member_json(
@@ -225,9 +183,18 @@ char *camera_connector_mobile_core_model_provider_settings_json(
     const CameraConnectorMobileCore *core
 );
 
+char *camera_connector_mobile_core_model_provider_settings_list_json(
+    const CameraConnectorMobileCore *core
+);
+
 char *camera_connector_mobile_core_save_model_provider_settings_json(
     const CameraConnectorMobileCore *core,
     const char *settings_json
+);
+
+char *camera_connector_mobile_core_delete_model_provider_settings_json(
+    const CameraConnectorMobileCore *core,
+    const char *settings_id
 );
 
 char *camera_connector_mobile_core_project_evaluation_settings_json(
@@ -244,6 +211,24 @@ char *camera_connector_mobile_core_save_project_evaluation_settings_json(
 char *camera_connector_mobile_core_prompt_profiles_for_project_json(
     const CameraConnectorMobileCore *core,
     const char *project_id
+);
+
+char *camera_connector_mobile_core_global_prompt_profiles_json(
+    const CameraConnectorMobileCore *core
+);
+
+char *camera_connector_mobile_core_create_global_prompt_profile_json(
+    const CameraConnectorMobileCore *core,
+    const char *name,
+    const char *style_tags_json,
+    const char *scene_profile,
+    const char *prompt_text
+);
+
+char *camera_connector_mobile_core_save_global_prompt_version_json(
+    const CameraConnectorMobileCore *core,
+    const char *prompt_profile_id,
+    const char *prompt_text
 );
 
 char *camera_connector_mobile_core_fork_prompt_profile_json(
@@ -265,6 +250,11 @@ char *camera_connector_mobile_core_generate_project_recommendation_json(
     const char *project_id
 );
 
+char *camera_connector_mobile_core_generate_project_recommendation_with_candidate_visuals_json(
+    const CameraConnectorMobileCore *core,
+    const char *request_json
+);
+
 char *camera_connector_mobile_core_latest_project_recommendation_run_status_json(
     const CameraConnectorMobileCore *core,
     const char *project_id
@@ -284,21 +274,6 @@ char *camera_connector_mobile_core_subject_assessments_for_asset_groups_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,
     const char *group_ids_json
-);
-
-char *camera_connector_mobile_core_strategy_profiles_json(
-    const CameraConnectorMobileCore *core
-);
-
-char *camera_connector_mobile_core_save_strategy_profile_json(
-    const CameraConnectorMobileCore *core,
-    const char *profile_json
-);
-
-char *camera_connector_mobile_core_review_queue_summary_json(
-    const CameraConnectorMobileCore *core,
-    const char *project_id,
-    const char *strategy_profile_id
 );
 
 char *camera_connector_mobile_core_save_receiver_settings_json(

@@ -6,7 +6,7 @@ Approved direction from product discussion on 2026-05-31.
 
 This document extends `2026-05-31-smart-selection-evaluation-redesign.md`.
 The earlier smart-selection redesign defines the split between local technical
-gate, model evaluation, scoped recommendations, and user marks. This document
+gate, model evaluation, selection recommendations, and user marks. This document
 locks down how those abilities are configured, how prompts are managed, when
 recommendations run, and how portrait-specific local CV fits the project model.
 
@@ -100,27 +100,35 @@ Model recommendations must never imply user acceptance.
 ## Data Model
 
 The project is still in development, so schema changes can replace current
-development-stage smart-selection tables without historical compatibility logic.
+development-stage smart-selection tables directly around the current model.
 
-### Non-Secret Global Model Settings
+### App-Private Model Provider Resources
 
-Store non-secret global defaults in app/core settings.
+Model provider resources are app-level configuration, not project data and not
+SQLite models. Store them in the app-private core config JSON so the user can
+create, update, delete, and name multiple provider/model profiles.
 
 ```text
-model_provider_settings
+model_providers[]
   settings_id TEXT PRIMARY KEY
   provider_kind TEXT NOT NULL        -- none | openai | custom | imported
   provider_label TEXT NOT NULL
+  base_url TEXT NOT NULL
   default_model TEXT NOT NULL
   default_max_image_side INTEGER NOT NULL
-  default_send_mode TEXT NOT NULL    -- preview_only | review_image
+  default_send_mode TEXT NOT NULL    -- preview_only | detail_image
   default_batch_size INTEGER NOT NULL
+  api_key TEXT NULL                  -- app-private plaintext for current dev stage
+  key_alias TEXT NULL
   configured INTEGER NOT NULL        -- provider usable from app point of view
   updated_at_ms INTEGER NOT NULL
 ```
 
-Sensitive API keys are not stored in SQLite. Android stores them in encrypted
-app storage / keystore and passes only capability state into core APIs.
+API keys are not stored in SQLite and are not returned through UI/FFI read
+models. Current product decision: no encryption layer yet; Android stores the
+config in app-private files via the core config path and exposes only
+`api_key_configured` back to UI. Projects do not inherit a provider implicitly;
+project evaluation settings must select a `model_provider_settings_id`.
 
 ### Prompt Profiles
 
@@ -259,7 +267,7 @@ subject_assessments
   detector_kind TEXT NOT NULL         -- android_mlkit | opencv | imported | none
   detector_version TEXT NOT NULL
   status TEXT NOT NULL                -- pending | ready | failed | skipped
-  gate_status TEXT NOT NULL           -- pass | warn | reject | needs_review | unsupported
+  gate_status TEXT NOT NULL           -- pass | warn | reject | inconclusive | unsupported
   regions_json TEXT NOT NULL          -- face boxes and landmarks if available
   signals_json TEXT NOT NULL          -- closed eyes, face exposure, face color cast, face sharpness
   summary TEXT NOT NULL
@@ -305,13 +313,13 @@ publish completed
 ### Manual Project Recommendation
 
 ```text
-user taps Generate Project Selects
+user taps Generate Project Recommendation
   -> verify provider configured
   -> create evaluation_run(run_type = project_recommendation, trigger = manual)
   -> candidate set = non-burst asset groups + burst winners
   -> optionally include marked/favorite context as user signals, not as truth
   -> call model provider or imported evaluator
-  -> write scoped selection_recommendation(scope = project)
+  -> write selection_recommendation(scope = project)
 ```
 
 If provider is missing, the action is disabled with a direct settings CTA.
@@ -338,7 +346,7 @@ Global settings show:
 - Provider connection status.
 - API key configuration entry.
 - Default model.
-- Default send mode: preview only / larger review image.
+- Default send mode: preview only / larger detail image.
 - Prompt library management.
 
 ### Project Settings
@@ -359,15 +367,15 @@ Project settings show:
 Photo grid filters remain concise:
 
 - All.
-- Model Selects.
+- Model Recommendations.
 - Favorites.
 - Marked.
 - Quality Risk.
 - Pending Analysis.
 
-The Model Selects filter means project-scope selected works. Burst winners can
+The Model Recommendations filter means project-scope selected works. Burst winners can
 drive burst covers and group-detail badges, but they must not appear in the
-project-level Model Selects filter unless a project recommendation selected them.
+project-level Model Recommendations filter unless a project recommendation selected them.
 Project recommendation is visible as a normal filter/collection and is not
 merged into favorites.
 
@@ -383,7 +391,7 @@ When API key/provider is missing:
 - Existing imported evaluations remain readable.
 - Development local stub can be used only when explicitly enabled as a dev
   evaluator; it must show source `local_stub`.
-- Project-level "Generate Project Selects" remains disabled until provider
+- Project-level "Generate Project Recommendation" remains disabled until provider
   capability exists.
 
 ## Acceptance Criteria
@@ -418,7 +426,7 @@ When API key/provider is missing:
 ### Recommendation Semantics
 
 - Group recommendation and project recommendation use separate scopes.
-- A burst winner does not automatically become a project select.
+- A burst winner does not automatically become a project-level model recommendation.
 - User favorite and marked state do not mutate model recommendation rows.
 - Project recommendation regeneration creates a new run snapshot.
 
@@ -437,5 +445,4 @@ When API key/provider is missing:
 - Auto-deleting photos.
 - Treating local CV as final aesthetic judgment.
 - Running project-level recommendation automatically in the background.
-- Implementing historical migration for older development-stage smart-selection
-  data.
+- Migrating discarded development snapshots.

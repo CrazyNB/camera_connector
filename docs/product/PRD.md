@@ -8,6 +8,11 @@ One-line positioning:
 
 > A local camera push import receiver.
 
+Current product direction extends that receiver into a project-scoped photo
+triage tool: imports are grouped under shooting projects, local CV catches
+obvious technical risks, configured models evaluate photography quality, and
+users keep their own favorites/marks separate from algorithm results.
+
 ## 2. Current Technical Decision
 
 The previous brand-specific PTP/IP pull route is deprecated for this project. Real-camera validation showed that an already-paired workflow can reject a generic direct PTP/IP client and may be owned by an official receiver process. We will not continue reverse pairing or authentication work.
@@ -33,7 +38,7 @@ Current priorities:
 2. App shows receiver IP, port, protocol, username, and import save location.
 3. User configures the camera FTP upload profile.
 4. Camera sends files to the receiver.
-5. App atomically publishes completed files into a flat inbox, keeps receiver state/logs outside the upload location, and groups RAW/JPEG pairs.
+5. App atomically publishes completed files into a flat output location, keeps receiver state/logs outside that output location, and groups RAW/JPEG pairs under an explicit project.
 
 ### 4.2 Desktop Batch Receiver
 
@@ -45,6 +50,19 @@ Current priorities:
 ### 4.3 AP Mode
 
 AP mode still means the camera creates its own Wi-Fi AP and the phone/computer joins it. This is not part of the current implementation milestone.
+
+### 4.4 Project Photo Triage
+
+1. User opens a shooting project and browses grouped photos.
+2. Local CV always records technical gate results such as blur, clipping, noise,
+   color cast, unsupported input, and portrait-specific subject risks when the
+   project profile requires them.
+3. If the project enables model evaluation and a provider profile is configured,
+   upload/background jobs can evaluate single photos and burst groups.
+4. Burst-group model recommendation can run automatically when enabled for the
+   project. Project-level model recommendation is manual-only.
+5. User favorites and user marks are independent human choices; they never
+   rewrite model recommendations.
 
 ## 5. MVP Scope
 
@@ -61,7 +79,7 @@ P0:
 - Group RAW/JPEG/video assets by filename stem.
 - Recognize common RAW formats across vendors: NEF/NRW, CR2/CR3, ARW/SRF/SR2, RAF, RW2/RWL, ORF, PEF, and DNG.
 - Preserve duplicate uploads without overwriting completed files.
-- Scan the receiver inbox as the product's import source.
+- Index completed receiver output into an explicit shooting project.
 - Record a transfer log for filtering by login username, transfer id, original path, final filename, source name, and remote address.
 - Display files as virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF` while keeping local storage flat.
 - Let users configure camera accounts with camera login username, password, and device name.
@@ -71,6 +89,14 @@ P0:
 - Persist receiver runtime status as receiver metadata and detect stale `Running` status when the listener is no longer reachable.
 - Expose an app dashboard read-model that combines receiver status, connected devices, asset summary, and a paged asset list.
 - Provide the same account model, flat sink, transfer log, connected-device metadata, runtime status, and temporary-file publish behavior for SFTP core receiver validation.
+- Keep project photos as the primary browsing surface with burst groups, compact
+  preview tiles, detail carousel browsing, model evaluation summaries, technical
+  risk indicators, and independent user favorite/mark actions.
+- Run local technical CV as an objective gate only; do not expose it as the
+  final photographic score.
+- Support model evaluation and model recommendations only when a selected model
+  provider profile is configured for the project. Missing provider/API key must
+  be explicit rather than silently replaced by fake model output.
 - Record real-camera compatibility results.
 
 P1:
@@ -103,7 +129,7 @@ P2:
 | RX-003 | Accept passive FTP upload | P0 | A client can upload a file through `PASV` + `STOR` |
 | RX-004 | Atomic publish | P0 | Final file appears only after full upload succeeds |
 | RX-005 | Flat safe path handling | P0 | `/DCIM/100CANON/IMG_1001.CR3` lands as `IMG_1001.CR3`; traversal and unsafe filename characters cannot escape output folder |
-| RX-005A | Storage separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload inbox contains camera files and temporary upload files only |
+| RX-005A | Storage separation | P0 | Account config, receiver state/logs, and uploaded assets are stored separately; upload output contains camera files and temporary upload files only |
 | RX-006 | Asset grouping | P0 | Matching JPG and RAW stems such as `IMG_1001.JPG` and `IMG_1001.CR3` appear as one group |
 | RX-007 | Project asset scan | P0 | Receiver output can be indexed into grouped assets under an explicit shooting project |
 | RX-008 | Duplicate policy | P0 | Re-uploading `IMG_1001.CR3` creates `IMG_1001 (1).CR3` |
@@ -118,6 +144,14 @@ P2:
 | RX-014A | Dashboard read-model | P0 | Core exposes one dashboard query for UI shells with config/state/output paths, safe account summaries, per-account current connection state, receiver status, transfer health counts, recent failed transfers with error text, connected devices, filtered asset summary, and paged asset groups; CLI can emit the same model as JSON for app shells and automation |
 | RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, connected-device metadata, runtime status model, and temporary-file publish behavior as FTP |
 | RX-016 | Cross-platform storage backend | P1 | Core write flow uses a storage backend contract; desktop uses local paths, while Android/iOS can save through media/document/photo APIs without leaking platform URIs into receiver protocol logic |
+| INT-001 | Technical gate | P0 | Every published asset group can receive a local technical assessment; the result is risk/gate context, not a final aesthetic score |
+| INT-002 | Model provider profiles | P0 | App config can create, update, delete, and select named provider profiles with URL, model name, send mode, batch size, and API-key configured state |
+| INT-003 | Project evaluation settings | P0 | Each project chooses whether automatic model evaluation and automatic burst recommendation are enabled, which provider profile to use, and which prompt profile/version applies |
+| INT-004 | Prompt profiles | P0 | Prompt profiles are named, style-tagged, versioned, and user-editable while the locked request/response protocol remains system-owned |
+| INT-005 | Model evaluation | P0 | Model evaluation rows store model score/tier/summary/source for single-photo and burst work units when provider capability exists |
+| INT-006 | Model recommendation | P0 | `selection_recommendations` stores model recommendations only; burst recommendations may be automatic, project recommendations are manual-only |
+| INT-007 | User marks | P0 | User favorite and user mark state is stored independently and never mutates model evaluation or recommendation rows |
+| INT-008 | No-key behavior | P0 | With no configured provider/API key, upload, thumbnails, grouping, publishing, and technical CV continue; model evaluation/recommendation is skipped or disabled with a visible setup state |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -130,6 +164,8 @@ P2:
 - Duplicate uploads do not overwrite earlier completed files.
 - Transfer log filters can group files by source name, original path, remote address, and transfer id.
 - User can configure the camera using only the receiver settings shown by the app.
+- Project photo browsing distinguishes model recommendation, model score,
+  technical risk, user favorite, and user mark without merging those concepts.
 
 ## 9. Architecture
 
@@ -155,7 +191,7 @@ flowchart LR
   UI --> Runtime
 ```
 
-The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, inbox, storage-location model, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading inbox groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
+The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, project asset model, storage-location model, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading project asset groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
 
 ## 10. Milestones
 

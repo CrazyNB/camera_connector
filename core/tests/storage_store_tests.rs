@@ -30,6 +30,20 @@ fn table_exists(connection: &Connection, table_name: &str) -> bool {
 }
 
 #[test]
+fn sqlite_store_opens_in_wal_mode() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let db_path = temp_dir.path().join("state.sqlite");
+    let _store = SqliteStore::open(&db_path).expect("store should open");
+    let connection = Connection::open(db_path).expect("sqlite connection should open");
+
+    let journal_mode: String = connection
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .expect("journal mode should query");
+
+    assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+}
+
+#[test]
 fn sqlite_store_schema_does_not_persist_rank_columns() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let db_path = temp_dir.path().join("state.sqlite");
@@ -53,6 +67,86 @@ fn sqlite_store_schema_excludes_app_runtime_configuration_tables() {
 
     assert!(!table_exists(&connection, "app_state"));
     assert!(!table_exists(&connection, "model_provider_settings"));
+}
+
+#[test]
+fn sqlite_store_schema_uses_selection_recommendations_for_model_results_only() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let db_path = temp_dir.path().join("state.sqlite");
+    let _store = SqliteStore::open(&db_path).expect("store should open");
+    let connection = Connection::open(&db_path).expect("connection should open");
+
+    for column in [
+        "recommendation_id",
+        "run_id",
+        "scope",
+        "project_id",
+        "subject_id",
+        "selected_asset_group_ids_json",
+        "candidate_asset_group_ids_json",
+        "rejected_asset_group_ids_json",
+        "source",
+        "status",
+        "confidence",
+        "reason",
+        "created_at_ms",
+        "updated_at_ms",
+    ] {
+        assert!(
+            table_has_column(&connection, "selection_recommendations", column),
+            "selection_recommendations should have model recommendation column {column}"
+        );
+    }
+}
+
+#[test]
+fn sqlite_store_resets_legacy_selection_recommendations_table() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let db_path = temp_dir.path().join("state.sqlite");
+    let connection = Connection::open(&db_path).expect("legacy connection should open");
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE selection_recommendations (
+                recommendation_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL,
+                selected_group_id TEXT,
+                status TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                created_at_ms INTEGER NOT NULL
+            );
+            INSERT INTO selection_recommendations (
+                recommendation_id, subject_id, selected_group_id, status, reason, created_at_ms
+            ) VALUES (
+                'legacy-recommendation', 'legacy-burst', 'legacy-group', 'ready', 'old shape', 1
+            );
+            ",
+        )
+        .expect("legacy selection table should create");
+    drop(connection);
+
+    let _store =
+        SqliteStore::open(&db_path).expect("store should reset legacy recommendation table");
+    let connection = Connection::open(&db_path).expect("connection should reopen");
+    let count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM selection_recommendations",
+            [],
+            |row| row.get(0),
+        )
+        .expect("recommendation count should query");
+
+    assert!(table_has_column(
+        &connection,
+        "selection_recommendations",
+        "project_id"
+    ));
+    assert!(table_has_column(
+        &connection,
+        "selection_recommendations",
+        "selected_asset_group_ids_json"
+    ));
+    assert_eq!(count, 0);
 }
 
 #[test]
@@ -1087,7 +1181,6 @@ fn completed_transfer(
         status: TransferStatus::Completed,
         original_path: original_path.to_string(),
         final_filename: final_filename.clone(),
-        final_path: None,
         final_location: Some(StoredObjectLocation::local_path(final_filename)),
         size_bytes: 100,
         username: Some("z5".to_string()),

@@ -25,7 +25,7 @@ fn stub_evaluation_scores_passed_asset_group_as_good_candidate() {
 }
 
 #[test]
-fn stub_evaluation_rejects_local_cv_rejects() {
+fn stub_evaluation_rejects_technical_gate_rejects() {
     let evaluation = evaluate_asset_group_with_stub(
         "project-1",
         "group-reject",
@@ -61,6 +61,7 @@ fn assessment(asset_group_id: &str, gate_status: TechnicalGateStatus) -> Technic
         gate_status,
         defect_flags: Vec::new(),
         preview_source: Some("test".to_string()),
+        visual_signature: None,
         analyzed_at_ms: 4_000,
     }
 }

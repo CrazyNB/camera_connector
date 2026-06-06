@@ -120,7 +120,7 @@ The same crate also exports a narrow C ABI:
 - `camera_connector_mobile_core_save_device_account_json`
 - `camera_connector_mobile_core_remove_device_account_json`
 - `camera_connector_mobile_core_drain_analysis_jobs_with_provider_configured_json`
-- `camera_connector_mobile_core_score_asset_group_preview_with_provider_configured_json`
+- `camera_connector_mobile_core_assess_asset_group_preview_with_provider_configured_json`
 - `camera_connector_mobile_core_model_provider_settings_json`
 - `camera_connector_mobile_core_save_model_provider_settings_json`
 - `camera_connector_mobile_core_project_evaluation_settings_json`
@@ -161,7 +161,7 @@ The Android source now has the Kotlin side of that bridge:
 - `NativeMobileCore` owns the native handle, loads `camera_connector_ffi`, calls external functions, and unwraps the JSON envelope.
 - `NativeCoreGateway` ensures an active project and adapts project dashboard JSON into the existing `CoreGateway` model used by Compose.
 - Project correction actions stay project-scoped through the gateway: Android can move an asset group from one project to another while Rust rewrites assets, transfers, publish queue rows, and group rollups transactionally.
-- `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`; release-facing verification builds use the native gateway.
+- `CoreGatewayFactory` chooses either `PreviewCoreGateway` or `NativeCoreGateway` through `BuildConfig.USE_NATIVE_CORE`; release-facing verification builds use the native gateway. `PreviewCoreGateway` is an empty UI shell with no seeded project/account data, and native failures only fall back to preview when `cameraConnector.nativeCoreFallbackToPreview=true` is set explicitly.
 - `ReceiverServiceController` sends receiver start/stop commands to `ReceiverForegroundService`.
 - `ReceiverForegroundService` owns the long-running native receiver lifecycle and foreground notification.
 - The foreground notification deep-links back into `MainActivity` and exposes a Stop action backed by an immutable service `PendingIntent`.
@@ -170,11 +170,12 @@ The Android source now has the Kotlin side of that bridge:
 - Emulator FTP verification covers native account creation, receiver start, passive upload of RAW/JPEG pairs, project photo-grid display, photo detail navigation, transfer rows, and adb diagnostics through `scripts\verify_android_emulator_ftp_upload.ps1`.
 - The same upload verifier accepts `-RealAssetDirectory`, selects a matching RAW/JPEG filename stem from the folder, and uploads the real bytes. It has been exercised with Nikon `.NEF + .JPG` files from `D:\ps\Photos\2026\5\5.4`.
 - Device account setup flows through the same gateway: Compose collects device name, camera login username, and a write-only password; `NativeCoreGateway` passes that password to the Rust core so the persisted config stores the core-generated password hash rather than plaintext.
-- Model provider setup also flows through the gateway without exposing secret text in core DTOs. Android stores provider credential capability or key aliases at the platform storage boundary, while core receives explicit configured/unconfigured provider state.
+- Model provider setup also flows through the gateway. Provider profiles are app-level configuration: profile id, provider kind, label, base URL, model name, send mode, batch size, and API key are persisted in the app-private core config JSON, not in SQLite project tables. Core DTOs returned to UI expose `api_key_configured` and optional key alias rather than echoing secret text.
 - Project intelligence settings are project-scoped. Global provider/model defaults can prefill new projects, but `NativeCoreGateway` must not apply a global default change by silently changing existing project evaluation settings.
 - Prompt profiles exposed through the gateway are named, style-tagged, and versioned. Built-in profiles are read-only; editing one forks a project-scoped profile and saving prompt text creates a new immutable version. Evaluation and recommendation runs record prompt profile id, version id, and hash.
 - Project recommendation is a manual gateway action. Upload drains, background analysis drains, and burst-stable processing can evaluate assets or burst groups, but they must not create project-scope recommendations.
 - No-key behavior is provider-aware: upload, thumbnail generation, grouping, publishing, and local technical CV continue; model evaluation and manual project recommendation are skipped or disabled when provider capability is missing. A development `local_stub` result must remain labelled as `local_stub`.
+- Semantic boundaries are deliberately separate: `technical_assessments` contains local CV risk/gate context, `model_evaluations` contains photographic model scores and summaries, `selection_recommendations` contains model recommendations only, and user favorite/mark state is independent human state. Accepting, clearing, or favoriting a photo must not mutate algorithm recommendation rows.
 - Portrait subject assessment is a Core/FFI storage and interpretation contract, surfaced through subject assessment APIs. It is scheduled only for projects with `scene_profile = portrait`, acts as risk/gate/context for evaluation, and does not require Android to add an ML dependency in the current slice.
 - Receiver setup also flows through the gateway: the project receiver panel edits protocol, bind host, one unified camera-facing port, and the camera-facing setup IP. Pressing Start applies the current form and starts the foreground receiver; there is no separate save button. The Android UI deliberately hides separate FTP/SFTP port fields; the selected port is written to both core fields.
 - The native dashboard includes both runtime status and saved receiver settings. Android uses runtime status while the receiver is running, and falls back to saved settings while stopped so protocol/host/port changes are reflected immediately in the project receiver panel and collapsed running status.
@@ -188,7 +189,7 @@ The Android source now has the Kotlin side of that bridge:
 - UI actions that call the gateway are wrapped with local error handling. Native exceptions from start, stop, receiver settings, or account save operations appear as a dismissible local error card on the relevant project, account, or settings surface.
 - UI actions also publish an in-flight label while native gateway calls are running. Related controls are disabled during that window to avoid duplicate start, stop, settings, or account operations.
 - The Android shell follows a two-level project model. Global navigation owns Projects, Accounts, and Settings. Settings owns diagnostics as a secondary page. Projects opens the Figma-aligned Project Management surface by default; entering a project opens the photo-first workspace. Receiver start/stop and receiver setup live at the top of that project workspace so imports always have an explicit project scope.
-- The Project Photos UI is photo-first: grid density is configured from Settings, tile metadata stays compact, JPEG previews are used when available, and group detail opens by tapping the preview. Long press enters selection mode for bulk group movement. Newly received and unresolved material is represented through project-scoped filters and diagnostics rather than a separate Inbox tab.
+- The Project Photos UI is photo-first: grid density is configured from Settings, tile metadata stays compact, JPEG previews are used when available, and group detail opens by tapping the preview. Long press enters selection mode for bulk group movement. Newly received and unresolved material is represented through project-scoped filters and diagnostics rather than a separate receive tab.
 
 The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 
@@ -213,7 +214,7 @@ The Rust side now exports JNI symbols for Kotlin `NativeMobileCore`:
 - `saveDeviceAccountJson`
 - `removeDeviceAccountJson`
 - `drainAnalysisJobsWithProviderConfiguredJson`
-- `scoreAssetGroupPreviewWithProviderConfiguredJson`
+- `assessAssetGroupPreviewWithProviderConfiguredJson`
 - `modelProviderSettingsJson`
 - `saveModelProviderSettingsJson`
 - `projectEvaluationSettingsJson`
@@ -266,13 +267,13 @@ Android 13+ notification permission is treated as a receiver start prerequisite.
 MVP strategy:
 
 - Config/state: app-private storage.
-- Current native smoke inbox: app-private `filesDir/inbox`.
-- User-facing output/inbox: user-selected SAF document tree when configured, otherwise app-private fallback.
+- Current native smoke output: app-private `filesDir/output`.
+- User-facing output: user-selected SAF document tree when configured, otherwise app-private fallback.
 - Display path: virtual camera path from transfer log, not Android filesystem path.
 
 The Android bootstrap only seeds `output_dir` and `state_dir` into native receiver settings. It must not reset protocol, host, or ports on app startup because those are user-configurable receiver settings.
 
-Android URI values stay inside the storage gateway. The dashboard and inbox still use product concepts: source name, username, transfer id, original path, format, duplicate count, and final location kind.
+Android URI values stay inside the storage gateway. The dashboard and project asset views still use product concepts: source name, username, transfer id, original path, format, duplicate count, and final location kind.
 
 Cross-platform project package migration is not part of the Android storage model. It remains a deferred protocol over exported project facts, documented in `docs/superpowers/specs/2026-05-28-project-package-migration-protocol-design.md`.
 

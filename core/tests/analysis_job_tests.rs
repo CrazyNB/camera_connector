@@ -48,8 +48,8 @@ fn analysis_job_type_round_trips_evaluation_pipeline_values() {
         "evaluate_asset_group_with_model"
     );
     assert_eq!(
-        AnalysisJobType::from_str("recommend_project_selects"),
-        AnalysisJobType::RecommendProjectSelects
+        AnalysisJobType::from_str("generate_project_recommendation"),
+        AnalysisJobType::GenerateProjectRecommendation
     );
     assert_eq!(AnalysisEntityType::Project.as_str(), "project");
     assert_eq!(
@@ -67,10 +67,10 @@ fn analysis_jobs_claim_in_priority_order() {
         .expect("project should create");
     let mut low = NewAnalysisJob::new(
         &project.project_id,
-        AnalysisJobType::ScoreAssetGroup,
+        AnalysisJobType::AssessAssetGroupTechnicalQuality,
         AnalysisEntityType::AssetGroup,
         "group-low",
-        "score:group-low:local-v1",
+        "technical:group-low:technical-v1",
     );
     low.priority = 5;
     let mut high = NewAnalysisJob::new(
@@ -106,10 +106,10 @@ fn analysis_job_failure_sets_next_attempt() {
     let job = store
         .enqueue_analysis_job(NewAnalysisJob::new(
             &project.project_id,
-            AnalysisJobType::ScoreAssetGroup,
+            AnalysisJobType::AssessAssetGroupTechnicalQuality,
             AnalysisEntityType::AssetGroup,
             "group-1",
-            "score:group-1:local-v1",
+            "technical:group-1:technical-v1",
         ))
         .expect("job should enqueue");
 
@@ -223,7 +223,7 @@ fn service_analysis_drain_persists_burst_summary_for_asset_page() {
 }
 
 #[test]
-fn scoring_preview_enqueues_and_drains_recommendation_job() {
+fn preview_assessment_drains_recommendation_job_without_model_selection() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
     let project = service
@@ -259,10 +259,14 @@ fn scoring_preview_enqueues_and_drains_recommendation_job() {
         .expect("sharp group id should exist")
         .clone();
     service
-        .score_asset_group_preview(&soft_group_id, flat_sample(16, 16, 128), "local-v1")
+        .assess_asset_group_preview(&soft_group_id, flat_sample(16, 16, 128), "technical-v1")
         .expect("soft score should save");
     service
-        .score_asset_group_preview(&sharp_group_id, balanced_detail_sample(16, 16), "local-v1")
+        .assess_asset_group_preview(
+            &sharp_group_id,
+            balanced_detail_sample(16, 16),
+            "technical-v1",
+        )
         .expect("sharp score should save");
 
     let summary = service
@@ -281,35 +285,32 @@ fn scoring_preview_enqueues_and_drains_recommendation_job() {
         .as_ref()
         .expect("burst summary should exist");
 
-    assert_eq!(burst.recommendation_status, "ready");
-    assert_eq!(
-        burst.best_asset_group_id.as_deref(),
-        Some(sharp_group_id.as_str())
-    );
-    let scoped = service
+    assert_eq!(burst.recommendation_status, "pending");
+    assert_eq!(burst.best_asset_group_id, None);
+    let burst_recommendation = service
         .storage_store()
         .expect("store should open")
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::BurstGroup,
             &burst.burst_group_id,
         )
-        .expect("scoped recommendation should query");
+        .expect("selection recommendation should query");
     assert!(
-        scoped.is_none(),
-        "model-scoped burst recommendation should wait for model evaluations"
+        burst_recommendation.is_none(),
+        "model burst recommendation should wait for model evaluations"
     );
-    let project_scoped = service
+    let project_recommendation = service
         .storage_store()
         .expect("store should open")
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::Project,
             &project.project_id,
         )
-        .expect("project scoped recommendation should query");
+        .expect("project recommendation should query");
     assert!(
-        project_scoped.is_none(),
+        project_recommendation.is_none(),
         "automatic drains must not produce project-scope recommendations"
     );
 }
@@ -347,6 +348,7 @@ fn model_evaluation_job_uses_saved_technical_assessment() {
             gate_status: TechnicalGateStatus::Pass,
             defect_flags: Vec::new(),
             preview_source: Some("test".to_string()),
+            visual_signature: None,
             analyzed_at_ms: 10_000,
         })
         .expect("assessment should save");
@@ -385,6 +387,80 @@ fn model_evaluation_job_uses_saved_technical_assessment() {
 }
 
 #[test]
+fn manual_model_evaluation_enqueues_selected_asset_groups_even_when_auto_upload_is_disabled() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let project = service
+        .create_project("Manual Model Evaluation")
+        .expect("project should create");
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:manual-eval-1", "DCIM/100/IMG_4401.JPG", 1000),
+        )
+        .expect("first transfer should record");
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:manual-eval-2", "DCIM/101/IMG_4402.JPG", 20_000),
+        )
+        .expect("second transfer should record");
+    service
+        .drain_analysis_jobs(10)
+        .expect("burst detection should drain");
+    save_configured_provider(&service);
+    enable_upload_model_evaluation(&service, &project.project_id, false);
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("asset page should load");
+    let group_ids = page
+        .groups
+        .iter()
+        .map(|group| {
+            group
+                .group_id
+                .as_ref()
+                .expect("group id should exist")
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    let store = service.storage_store().expect("store should open");
+    for group_id in &group_ids {
+        store
+            .save_technical_assessment(TechnicalAssessment {
+                asset_group_id: group_id.clone(),
+                assessor_version: "technical-v1".to_string(),
+                status: TechnicalAssessmentStatus::Ready,
+                gate_status: TechnicalGateStatus::Pass,
+                defect_flags: Vec::new(),
+                preview_source: Some("manual-test".to_string()),
+                visual_signature: None,
+                analyzed_at_ms: 10_000,
+            })
+            .expect("assessment should save");
+    }
+
+    let enqueued_count = service
+        .enqueue_model_evaluation_for_asset_groups(&project.project_id, &group_ids)
+        .expect("manual model evaluation jobs should enqueue");
+    let summary = service
+        .drain_analysis_jobs_with_provider_configured(10, true)
+        .expect("manual model evaluation jobs should drain");
+    let evaluations = store
+        .model_evaluations_for_asset_groups(&group_ids, "model-stub-v1")
+        .expect("model evaluations should query");
+    let run = store
+        .latest_evaluation_run(&project.project_id, EvaluationRunType::AssetEvaluation)
+        .expect("run should query")
+        .expect("run should exist");
+
+    assert_eq!(enqueued_count, 2);
+    assert_eq!(summary.completed_count, 2);
+    assert_eq!(evaluations.len(), 2);
+    assert_eq!(run.trigger, EvaluationRunTrigger::Manual);
+}
+
+#[test]
 fn model_evaluation_job_skips_when_project_model_evaluation_is_disabled() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
@@ -400,6 +476,7 @@ fn model_evaluation_job_skips_when_project_model_evaluation_is_disabled() {
             gate_status: TechnicalGateStatus::Pass,
             defect_flags: Vec::new(),
             preview_source: Some("test".to_string()),
+            visual_signature: None,
             analyzed_at_ms: 10_000,
         })
         .expect("assessment should save");
@@ -425,7 +502,7 @@ fn model_evaluation_job_skips_when_project_model_evaluation_is_disabled() {
 }
 
 #[test]
-fn score_preview_without_provider_keeps_technical_assessment_but_skips_model_evaluation() {
+fn preview_assessment_without_provider_keeps_technical_assessment_but_skips_model_evaluation() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
     let project = service
@@ -451,10 +528,10 @@ fn score_preview_without_provider_keeps_technical_assessment_but_skips_model_eva
         .clone();
 
     service
-        .score_asset_group_preview_with_provider_configured(
+        .assess_asset_group_preview_with_provider_configured(
             &group_id,
             balanced_detail_sample(16, 16),
-            "local-v1",
+            "technical-v1",
             false,
         )
         .expect("score should save");
@@ -499,10 +576,10 @@ fn automatic_burst_model_recommendation_creates_run_snapshot() {
         .expect("asset page should load");
     for group in &page.groups {
         service
-            .score_asset_group_preview_with_provider_configured(
+            .assess_asset_group_preview_with_provider_configured(
                 group.group_id.as_ref().expect("group id should exist"),
                 balanced_detail_sample(16, 16),
-                "local-v1",
+                "technical-v1",
                 true,
             )
             .expect("score should save");
@@ -518,13 +595,13 @@ fn automatic_burst_model_recommendation_creates_run_snapshot() {
         .burst_group_id
         .clone();
     let recommendation = store
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::BurstGroup,
             &burst_id,
         )
         .expect("recommendation should query")
-        .expect("scoped recommendation should exist");
+        .expect("selection recommendation should exist");
     let run_id = recommendation
         .run_id
         .as_deref()
@@ -546,7 +623,7 @@ fn automatic_burst_model_recommendation_creates_run_snapshot() {
 }
 
 #[test]
-fn scoring_preview_obeys_auto_burst_recommendation_setting() {
+fn preview_assessment_obeys_auto_burst_recommendation_setting() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
     let project = service
@@ -590,10 +667,14 @@ fn scoring_preview_obeys_auto_burst_recommendation_setting() {
         .clone();
 
     service
-        .score_asset_group_preview(&first_group_id, flat_sample(16, 16, 128), "local-v1")
+        .assess_asset_group_preview(&first_group_id, flat_sample(16, 16, 128), "technical-v1")
         .expect("first score should save");
     service
-        .score_asset_group_preview(&second_group_id, balanced_detail_sample(16, 16), "local-v1")
+        .assess_asset_group_preview(
+            &second_group_id,
+            balanced_detail_sample(16, 16),
+            "technical-v1",
+        )
         .expect("second score should save");
     let summary = service
         .drain_analysis_jobs(10)
@@ -603,7 +684,7 @@ fn scoring_preview_obeys_auto_burst_recommendation_setting() {
     assert!(service
         .storage_store()
         .expect("store should open")
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::BurstGroup,
             page.groups[0]
@@ -618,11 +699,11 @@ fn scoring_preview_obeys_auto_burst_recommendation_setting() {
 }
 
 #[test]
-fn scoring_preview_does_not_enqueue_or_drain_project_model_selects_job() {
+fn preview_assessment_does_not_enqueue_or_drain_project_recommendation_job() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
     let project = service
-        .create_project("Project Model Select Job")
+        .create_project("Project Recommendation Job")
         .expect("project should create");
     service
         .record_project_transfer(
@@ -643,15 +724,15 @@ fn scoring_preview_does_not_enqueue_or_drain_project_model_selects_job() {
         .clone();
 
     service
-        .score_asset_group_preview(&group_id, balanced_detail_sample(16, 16), "local-v1")
-        .expect("score should save");
+        .assess_asset_group_preview(&group_id, balanced_detail_sample(16, 16), "technical-v1")
+        .expect("technical assessment should save");
     let summary = service
         .drain_analysis_jobs(10)
-        .expect("automatic drain should not run project selects");
+        .expect("automatic drain should not run project recommendations");
     let recommendation = service
         .storage_store()
         .expect("store should open")
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::Project,
             &project.project_id,
@@ -663,28 +744,28 @@ fn scoring_preview_does_not_enqueue_or_drain_project_model_selects_job() {
 }
 
 #[test]
-fn project_selects_analysis_job_is_ignored_as_manual_only_without_retry() {
+fn project_recommendation_analysis_job_is_ignored_as_manual_only_without_retry() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
     let project = service
-        .create_project("Manual Only Project Select Job")
+        .create_project("Manual Only Project Recommendation Job")
         .expect("project should create");
     let store = service.storage_store().expect("store should open");
     store
         .enqueue_analysis_job(NewAnalysisJob::new(
             &project.project_id,
-            AnalysisJobType::RecommendProjectSelects,
+            AnalysisJobType::GenerateProjectRecommendation,
             AnalysisEntityType::Project,
             &project.project_id,
-            "recommend-project-selects:manual-only-test",
+            "generate-project-recommendation:manual-only-test",
         ))
-        .expect("project selects job should enqueue");
+        .expect("project recommendation job should enqueue");
 
     let summary = service
         .drain_analysis_jobs(10)
-        .expect("drain should ignore stale project selects job");
+        .expect("drain should ignore project recommendation job");
     let recommendation = store
-        .latest_scoped_selection_recommendation(
+        .latest_selection_recommendation(
             &project.project_id,
             SelectionRecommendationScope::Project,
             &project.project_id,
@@ -732,6 +813,7 @@ fn enable_upload_model_evaluation(
     settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = auto_evaluate_on_upload;
     settings.prompt_profile_id = Some("general-default".to_string());
+    settings.model_provider_settings_id = Some("global".to_string());
     service
         .save_project_evaluation_settings(settings)
         .expect("settings should save");
@@ -749,7 +831,6 @@ fn completed_transfer(
         status: TransferStatus::Completed,
         original_path: original_path.to_string(),
         final_filename,
-        final_path: None,
         final_location: Some(StoredObjectLocation::local_path(original_path)),
         size_bytes: 100,
         username: Some("z5".to_string()),
