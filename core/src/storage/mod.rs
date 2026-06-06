@@ -1448,6 +1448,71 @@ impl SqliteStore {
         self.with_connection(|connection| desktop_scan_run_by_id(connection, scan_id))
     }
 
+    pub fn latest_desktop_scan_run(&self, project_id: &str) -> Result<Option<DesktopScanRun>> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            connection
+                .query_row(
+                    "SELECT scan_id, project_id, root_path, root_key, root_label, phase,
+                            files_seen, assets_indexed, groups_updated, started_at_ms, updated_at_ms,
+                            completed_at_ms, error
+                     FROM desktop_scan_runs
+                     WHERE project_id = ?1
+                     ORDER BY updated_at_ms DESC, started_at_ms DESC, scan_id DESC
+                     LIMIT 1",
+                    params![project_id],
+                    desktop_scan_run_from_row,
+                )
+                .optional()
+        })
+    }
+
+    pub fn update_desktop_scan_run(
+        &self,
+        scan_id: &str,
+        phase: DesktopScanPhase,
+        files_seen: usize,
+        assets_indexed: usize,
+        groups_updated: usize,
+        error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<DesktopScanRun> {
+        self.with_connection(|connection| {
+            let completed_at_ms = match phase {
+                DesktopScanPhase::Completed
+                | DesktopScanPhase::Failed
+                | DesktopScanPhase::Cancelled => Some(now_ms),
+                _ => None,
+            };
+            let changed = connection.execute(
+                "UPDATE desktop_scan_runs
+                 SET phase = ?2,
+                     files_seen = ?3,
+                     assets_indexed = ?4,
+                     groups_updated = ?5,
+                     updated_at_ms = ?6,
+                     completed_at_ms = ?7,
+                     error = ?8
+                 WHERE scan_id = ?1",
+                params![
+                    scan_id,
+                    phase.as_str(),
+                    files_seen as i64,
+                    assets_indexed as i64,
+                    groups_updated as i64,
+                    now_ms,
+                    completed_at_ms,
+                    error,
+                ],
+            )?;
+            if changed == 0 {
+                return Err(sqlite_data_error("desktop scan run not found"));
+            }
+            desktop_scan_run_by_id(connection, scan_id)?
+                .ok_or_else(|| sqlite_data_error("desktop scan run not found"))
+        })
+    }
+
     pub fn record_desktop_scan_files(
         &self,
         scan_id: &str,

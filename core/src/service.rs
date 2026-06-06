@@ -4,18 +4,19 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    append_transfer_record, assess_preview_sample, evaluate_asset_group_with_model_provider,
-    evaluate_asset_group_with_stub, group_received_assets, read_connected_devices,
-    read_receiver_runtime_status, read_transfer_log, recommend_burst_group_from_model_evaluations,
-    recommend_project_model_selections, recommend_selection_with_model_provider,
-    scan_received_asset_groups, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
-    AssetUserMarks, BurstGroup, BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice,
-    EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource,
-    ModelProviderKind, ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode,
-    NewAnalysisJob, ObjectFormat, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, ProjectStatus, PromptProfile, PromptProfileContent,
-    PromptProfileVersion, PromptScope, PublishQueueItem, PublishQueueSummary, PushProtocol,
-    PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    append_transfer_record, assess_preview_sample, discover_desktop_media_files,
+    evaluate_asset_group_with_model_provider, evaluate_asset_group_with_stub,
+    group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
+    recommend_burst_group_from_model_evaluations, recommend_project_model_selections,
+    recommend_selection_with_model_provider, scan_received_asset_groups, AnalysisEntityType,
+    AnalysisJob, AnalysisJobType, AssetFormatRole, AssetUserMarks, BurstGroup,
+    BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice, DesktopScanIndexResult,
+    DesktopScanPhase, DesktopScanRun, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger,
+    EvaluationRunType, ImportSource, ModelProviderKind, ModelProviderSettings,
+    ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob, ObjectFormat, PreviewSample,
+    ProjectEvaluationSettings, ProjectRecommendationMode, ProjectStatus, PromptProfile,
+    PromptProfileContent, PromptProfileVersion, PromptScope, PublishQueueItem, PublishQueueSummary,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
     ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
     SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
     SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
@@ -186,6 +187,12 @@ pub struct AnalysisDrainSummary {
     pub claimed_count: usize,
     pub completed_count: usize,
     pub failed_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopProjectScanResult {
+    pub scan: DesktopScanRun,
+    pub index: DesktopScanIndexResult,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -359,6 +366,74 @@ impl CameraConnectorService {
 
     pub fn list_projects(&self) -> Result<Vec<crate::Project>> {
         self.storage_store()?.list_projects()
+    }
+
+    pub fn create_desktop_project_scan(
+        &self,
+        project_id: &str,
+        root_path: impl AsRef<Path>,
+    ) -> Result<DesktopScanRun> {
+        self.storage_store()?
+            .create_desktop_scan_run(project_id, root_path, current_time_ms())
+    }
+
+    pub fn latest_desktop_project_scan(&self, project_id: &str) -> Result<Option<DesktopScanRun>> {
+        self.storage_store()?.latest_desktop_scan_run(project_id)
+    }
+
+    pub fn run_desktop_project_scan(&self, scan_id: &str) -> Result<DesktopProjectScanResult> {
+        let store = self.storage_store()?;
+        let scan = store.desktop_scan_run(scan_id)?.ok_or_else(|| {
+            crate::ImporterError::internal(format!("desktop scan not found: {scan_id}"))
+        })?;
+        let result: Result<DesktopProjectScanResult> = (|| {
+            store.update_desktop_scan_run(
+                scan_id,
+                DesktopScanPhase::Scanning,
+                0,
+                0,
+                0,
+                None,
+                current_time_ms(),
+            )?;
+            let files = discover_desktop_media_files(&scan.root_path)?;
+            store.update_desktop_scan_run(
+                scan_id,
+                DesktopScanPhase::Indexing,
+                files.len(),
+                0,
+                0,
+                None,
+                current_time_ms(),
+            )?;
+            let index = store.record_desktop_scan_files(scan_id, &files, current_time_ms())?;
+            self.enqueue_desktop_scan_analysis_jobs(&scan.project_id, &index.group_ids)?;
+            let completed = store.update_desktop_scan_run(
+                scan_id,
+                DesktopScanPhase::Completed,
+                files.len(),
+                index.assets_indexed,
+                index.group_ids.len(),
+                None,
+                current_time_ms(),
+            )?;
+            Ok(DesktopProjectScanResult {
+                scan: completed,
+                index,
+            })
+        })();
+        if let Err(error) = result.as_ref() {
+            let _ = store.update_desktop_scan_run(
+                scan_id,
+                DesktopScanPhase::Failed,
+                0,
+                0,
+                0,
+                Some(&error.to_string()),
+                current_time_ms(),
+            );
+        }
+        result
     }
 
     pub fn model_provider_settings(&self) -> Result<Option<crate::ModelProviderSettings>> {
@@ -1238,6 +1313,59 @@ impl CameraConnectorService {
     ) -> Result<Option<BurstGroup>> {
         self.storage_store()?
             .merge_burst_member(target_burst_group_id, member_group_id)
+    }
+
+    fn enqueue_desktop_scan_analysis_jobs(
+        &self,
+        project_id: &str,
+        group_ids: &[String],
+    ) -> Result<usize> {
+        let store = self.storage_store()?;
+        let settings = store
+            .project_evaluation_settings(project_id)?
+            .unwrap_or_else(|| {
+                ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
+            });
+        let providers = self.runtime_model_providers()?;
+        let provider_configured = providers.iter().any(|provider| {
+            model_provider_ready_for_work(&provider.settings)
+                && provider_has_required_secret(provider)
+        });
+        let model_jobs_enabled = settings.model_evaluation_enabled
+            && settings.auto_evaluate_on_upload
+            && provider_configured
+            && provider_configured_for_project_from_list(&store, project_id, &providers)?;
+        let mut enqueued = 0;
+        let mut seen = BTreeSet::new();
+        for group_id in group_ids {
+            if !seen.insert(group_id.clone()) {
+                continue;
+            }
+            let mut technical = NewAnalysisJob::new(
+                project_id,
+                AnalysisJobType::AssessAssetGroupTechnicalQuality,
+                AnalysisEntityType::AssetGroup,
+                group_id,
+                &format!("desktop-scan-technical:{project_id}:{group_id}:technical-v1"),
+            );
+            technical.priority = 20;
+            store.enqueue_analysis_job(technical)?;
+            enqueued += 1;
+
+            if model_jobs_enabled {
+                let mut model = NewAnalysisJob::new(
+                    project_id,
+                    AnalysisJobType::EvaluateAssetGroupWithModel,
+                    AnalysisEntityType::AssetGroup,
+                    group_id,
+                    &format!("desktop-scan-model:{project_id}:{group_id}"),
+                );
+                model.priority = 30;
+                store.enqueue_analysis_job(model)?;
+                enqueued += 1;
+            }
+        }
+        Ok(enqueued)
     }
 
     fn provider_configured_for_model_work(&self) -> Result<bool> {

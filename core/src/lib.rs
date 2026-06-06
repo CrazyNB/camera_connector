@@ -26,8 +26,8 @@ pub use analysis::{
 };
 pub use desktop_scan::{
     desktop_scan_root_key, desktop_scan_root_label, desktop_scan_transfer_id,
-    DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun, DesktopScannedFile,
-    DesktopSourceStatus, DESKTOP_SCAN_PROTOCOL,
+    discover_desktop_media_files, DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun,
+    DesktopScannedFile, DesktopSourceStatus, DESKTOP_SCAN_PROTOCOL,
 };
 pub use error::{ImporterError, Result};
 pub use model::{
@@ -57,8 +57,8 @@ pub use runtime::{
 pub use service::{
     AccountView, AssetFacetCount, AssetGroupModelEvaluationInput, AssetGroupPage, AssetGroupQuery,
     AssetGroupSort, AssetGroupSummary, CameraConnectorDashboard, CameraConnectorService,
-    ConnectedDeviceView, PublishQueueFailureView, ReceiverConfigRequest, ReceiverSettingsUpdate,
-    SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
+    ConnectedDeviceView, DesktopProjectScanResult, PublishQueueFailureView, ReceiverConfigRequest,
+    ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
     LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectCapabilities,

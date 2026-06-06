@@ -1,6 +1,10 @@
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
+
+use crate::ObjectFormat;
 
 pub const DESKTOP_SCAN_PROTOCOL: &str = "desktop_scan";
 
@@ -125,6 +129,68 @@ pub fn desktop_scan_root_label(root_path: impl AsRef<Path>) -> String {
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| root_path.as_ref().display().to_string())
+}
+
+pub fn discover_desktop_media_files(
+    root: impl AsRef<Path>,
+) -> crate::Result<Vec<DesktopScannedFile>> {
+    let root = root.as_ref();
+    let mut files = Vec::new();
+    visit_media_dir(root, root, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(files)
+}
+
+fn visit_media_dir(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<DesktopScannedFile>,
+) -> crate::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            visit_media_dir(root, &path, files)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let filename = entry.file_name().to_string_lossy().into_owned();
+        let format = ObjectFormat::from_filename(&filename);
+        if !format.is_supported_media() {
+            continue;
+        }
+
+        let relative_path = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let normalized_stem = filename
+            .rsplit_once('.')
+            .map(|(stem, _)| stem.to_ascii_uppercase())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| filename.to_ascii_uppercase());
+        let modified_at_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or_default();
+        files.push(DesktopScannedFile {
+            local_path: path,
+            relative_path,
+            original_filename: filename,
+            normalized_stem,
+            size_bytes: metadata.len(),
+            modified_at_ms,
+            capture_time_ms: None,
+        });
+    }
+    Ok(())
 }
 
 fn normalize_path_for_identity(path: &Path) -> String {
