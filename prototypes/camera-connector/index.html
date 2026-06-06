@@ -1,0 +1,1057 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera Connector Prototype</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --surface-2: #fafafa;
+      --ink: #303133;
+      --muted: #606266;
+      --line: #dcdfe6;
+      --strong-line: #c0c4cc;
+      --blue: #409eff;
+      --blue-soft: #ecf5ff;
+      --green: #67c23a;
+      --green-soft: #f0f9eb;
+      --amber: #e6a23c;
+      --amber-soft: #fdf6ec;
+      --red: #f56c6c;
+      --red-soft: #fef0f0;
+      --purple: #909399;
+      --purple-soft: #f4f4f5;
+      --shadow: 0 14px 38px rgba(48, 49, 51, 0.14);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 250, 0.96)),
+        var(--bg);
+      color: var(--ink);
+      letter-spacing: 0;
+      display: grid;
+      grid-template-columns: minmax(260px, 340px) minmax(380px, 430px);
+      gap: 32px;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .brief {
+      max-width: 330px;
+    }
+
+    .brief h1 {
+      margin: 0 0 10px;
+      font-size: 34px;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .brief p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .route-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .route-section {
+      margin: 14px 0 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .route-list button {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      align-items: center;
+      min-height: 46px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.78);
+      color: var(--ink);
+      text-align: left;
+      font-weight: 750;
+    }
+
+    .route-list button span:first-child {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: grid;
+      place-items: center;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .route-list small {
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .route-list button.active {
+      border-color: var(--blue);
+      background: var(--surface);
+      box-shadow: inset 0 0 0 1px var(--blue);
+    }
+
+    .route-list button.secondary-route {
+      background: rgba(248, 250, 252, 0.76);
+    }
+
+    .phone {
+      width: min(100%, 414px);
+      height: 844px;
+      border-radius: 32px;
+      padding: 12px;
+      background: #111827;
+      box-shadow: var(--shadow);
+    }
+
+    .screen {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border-radius: 22px;
+      background: var(--bg);
+    }
+
+    .view {
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .topbar {
+      min-height: 70px;
+      padding: 14px 16px 12px;
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .topbar.secondary-topbar {
+      grid-template-columns: auto 1fr auto;
+    }
+
+    .topbar h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .topbar small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .content {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+      padding-bottom: 8px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 13px;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .panel-title h3 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .panel-title small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .status.blue {
+      color: #174ea6;
+      background: var(--blue-soft);
+    }
+
+    .status.green {
+      color: #0c6b43;
+      background: var(--green-soft);
+    }
+
+    .status.amber {
+      color: #80520b;
+      background: var(--amber-soft);
+    }
+
+    .status.red {
+      color: #9f2f12;
+      background: var(--red-soft);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .toolbar button,
+    .icon-button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .toolbar button.active {
+      border-color: var(--blue);
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .icon-button {
+      width: 38px;
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      min-height: 70px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      margin-bottom: 6px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+
+    .metric em {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-style: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 104px 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .kv:last-child {
+      border-bottom: 0;
+    }
+
+    .kv span:first-child {
+      color: var(--muted);
+      font-weight: 720;
+    }
+
+    .kv strong {
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    input,
+    select {
+      width: 100%;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 650;
+      min-width: 0;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .primary,
+    .secondary,
+    .danger {
+      min-height: 42px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 850;
+      border: 1px solid transparent;
+    }
+
+    .primary {
+      color: #fff;
+      background: var(--blue);
+    }
+
+    .secondary {
+      color: var(--ink);
+      background: var(--surface);
+      border-color: var(--line);
+    }
+
+    .danger {
+      color: var(--red);
+      background: var(--red-soft);
+      border-color: #ffd2c2;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .row strong {
+      display: block;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .row span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      max-width: 100%;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 11px;
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding-bottom: 12px;
+    }
+
+    .asset {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+    }
+
+    .thumb {
+      height: 108px;
+      display: grid;
+      place-items: center;
+      color: rgba(23, 32, 46, 0.72);
+      font-size: 12px;
+      font-weight: 900;
+      background:
+        linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(15, 138, 95, 0.10)),
+        linear-gradient(160deg, #ccd9ec 0%, #f7f9fc 48%, #d7e8db 100%);
+    }
+
+    .thumb.alt {
+      background:
+        linear-gradient(130deg, rgba(109, 40, 217, 0.14), rgba(154, 101, 18, 0.12)),
+        linear-gradient(155deg, #e7ddff 0%, #f8f3e9 54%, #dce5ee 100%);
+    }
+
+    .asset-body {
+      padding: 9px;
+    }
+
+    .asset-name {
+      margin: 0;
+      min-height: 34px;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .asset-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 21px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: var(--purple-soft);
+      color: var(--purple);
+      font-size: 10px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .pill.jpg {
+      color: #174ea6;
+      background: var(--blue-soft);
+    }
+
+    .pill.video {
+      color: #9f2f12;
+      background: var(--red-soft);
+    }
+
+    .progress {
+      height: 7px;
+      overflow: hidden;
+      background: #e6ebf2;
+      border-radius: 4px;
+      margin-top: 8px;
+    }
+
+    .progress b {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+
+    .notice {
+      border: 1px solid #f3d28b;
+      border-radius: 4px;
+      padding: 11px;
+      color: #66440a;
+      background: var(--amber-soft);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .tabbar {
+      min-height: 62px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: rgba(255, 255, 255, 0.96);
+      border-top: 1px solid var(--line);
+    }
+
+    .tabbar button {
+      display: grid;
+      gap: 3px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 820;
+    }
+
+    .tabbar button .tab-icon {
+      font-size: 19px;
+      line-height: 1;
+      font-weight: 500;
+    }
+
+    .tabbar button.active {
+      color: var(--blue);
+    }
+
+    @media (max-width: 820px) {
+      body {
+        grid-template-columns: 1fr;
+        align-items: start;
+        padding: 16px;
+      }
+
+      .brief {
+        max-width: none;
+      }
+
+      .phone {
+        height: 790px;
+        margin: 0 auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside class="brief">
+    <h1>Camera Connector</h1>
+    <p>端侧开发前的产品原型。当前版本对齐 core dashboard：receiver 设置、账号状态、设备连接、传输健康、失败记录和资产分组。</p>
+    <p>身份以账号和设备名为准，IP 只作为最近连接来源。上传目录保持扁平，原始相机路径进入日志和筛选标签。</p>
+    <div class="route-list" aria-label="prototype routes">
+      <div class="route-section">一级导航</div>
+      <button class="active" data-route="dashboard"><span>⌂</span>概览<small>dashboard</small></button>
+      <button data-route="inbox"><span>□</span>收件箱<small>assets</small></button>
+      <button data-route="transfers"><span>≡</span>传输日志<small>logs</small></button>
+      <div class="route-section">二级页面</div>
+      <button class="secondary-route" data-route="receiver"><span>⚙</span>接收设置<small>settings</small></button>
+      <button class="secondary-route" data-route="devices"><span>＋</span>设备账号<small>accounts</small></button>
+    </div>
+  </aside>
+
+  <main class="phone">
+    <section class="screen" aria-live="polite">
+      <div id="dashboard" class="view">
+        <header class="topbar">
+          <div>
+            <h2>概览</h2>
+            <small>FTP · Running · 1 个账号在线</small>
+          </div>
+          <span class="status green">健康</span>
+        </header>
+        <div class="content">
+          <div class="stack">
+            <section class="panel">
+              <div class="panel-title">
+                <h3>Receiver</h3>
+                <span class="status green">Running</span>
+              </div>
+              <div class="metric-grid">
+                <div class="metric">
+                  <span>Protocol</span>
+                  <strong>FTP</strong>
+                  <em>0.0.0.0:2121</em>
+                </div>
+                <div class="metric">
+                  <span>Camera Host</span>
+                  <strong>192.168.137.1</strong>
+                  <em>被动模式</em>
+                </div>
+                <div class="metric">
+                  <span>Transfers</span>
+                  <strong>126 / 1</strong>
+                  <em>completed / failed</em>
+                </div>
+                <div class="metric">
+                  <span>Assets</span>
+                  <strong>84 groups</strong>
+                  <em>RAW 62 · JPG 73 · Video 4</em>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>当前账号</h3>
+                <button class="secondary" data-route="devices">管理</button>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>Z5_2</strong>
+                  <span>username z5 · 192.168.137.56:50123 · last seen 12 秒前</span>
+                </div>
+                <span class="status green">online</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>X-T5</strong>
+                  <span>username xt5 · 192.168.137.44 · last seen 昨天 18:20</span>
+                </div>
+                <span class="status amber">recent</span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>最近失败</h3>
+                <span class="status red">1</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>IMG_9999.CR3</strong>
+                  <span>ftp:verify-failed · connection reset · Verify Camera/IMG_9999.CR3</span>
+                </div>
+                <button class="secondary" data-route="transfers">查看</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>路径</h3>
+                <button class="secondary" data-route="receiver">编辑</button>
+              </div>
+              <div class="kv"><span>config</span><strong>AppData/CameraConnector/config.json</strong></div>
+              <div class="kv"><span>state</span><strong>AppData/CameraConnector/state</strong></div>
+              <div class="kv"><span>output</span><strong>Pictures/CameraConnector</strong></div>
+            </section>
+          </div>
+        </div>
+        <nav class="tabbar">
+          <button class="active" data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
+          <button data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
+          <button data-route="transfers"><span class="tab-icon">≡</span>传输</button>
+        </nav>
+      </div>
+
+      <div id="receiver" class="view hidden">
+        <header class="topbar secondary-topbar">
+          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
+          <div>
+            <h2>接收设置</h2>
+            <small>receiver-settings · core config</small>
+          </div>
+          <span class="status blue">已保存</span>
+        </header>
+        <div class="content">
+          <div class="stack">
+            <section class="panel">
+              <div class="panel-title">
+                <h3>运行参数</h3>
+                <small>CameraConnectorConfig.receiver</small>
+              </div>
+              <div class="field-grid">
+                <label>协议
+                  <select>
+                    <option selected>FTP</option>
+                    <option>SFTP</option>
+                  </select>
+                </label>
+                <label>监听地址
+                  <input value="0.0.0.0">
+                </label>
+                <label>FTP 端口
+                  <input value="2121" inputmode="numeric">
+                </label>
+                <label>SFTP 端口
+                  <input value="2222" inputmode="numeric">
+                </label>
+              </div>
+              <div class="button-row">
+                <button class="secondary">重置</button>
+                <button class="primary">保存设置</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>相机侧信息</h3>
+                <span class="status green">FTP</span>
+              </div>
+              <div class="kv"><span>服务器</span><strong>192.168.137.1</strong></div>
+              <div class="kv"><span>端口</span><strong>2121</strong></div>
+              <div class="kv"><span>模式</span><strong>Passive</strong></div>
+              <div class="kv"><span>账号</span><strong>z5</strong></div>
+              <div class="kv"><span>密码</span><strong>已配置，不显示明文</strong></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>相关设置</h3>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>账号与设备</strong>
+                  <span>管理 username、password、device name 和最近连接来源</span>
+                </div>
+                <button class="secondary" data-route="devices">进入</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>存储与日志</h3>
+                <small>分离目录</small>
+              </div>
+              <label>上传目录
+                <input value="C:\Users\hxn\Pictures\CameraConnector">
+              </label>
+              <div style="height: 8px;"></div>
+              <label>状态目录
+                <input value="C:\Users\hxn\AppData\Roaming\CameraConnector\state">
+              </label>
+              <div class="kv"><span>config</span><strong>C:\Users\hxn\AppData\Roaming\CameraConnector\config.json</strong></div>
+              <div class="kv"><span>transfer log</span><strong>state/transfer-log.jsonl</strong></div>
+              <div class="kv"><span>device state</span><strong>state/connected-devices.json</strong></div>
+            </section>
+
+            <section class="notice">
+              上传目录只保留最终照片和传输中的临时文件；路径、账号、来源、失败信息进入状态目录。
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div id="devices" class="view hidden">
+        <header class="topbar secondary-topbar">
+          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
+          <div>
+            <h2>设备账号</h2>
+            <small>账号是身份，IP 是连接属性</small>
+          </div>
+          <button class="icon-button" title="新增账号">+</button>
+        </header>
+        <div class="content">
+          <div class="stack">
+            <section class="panel">
+              <div class="panel-title">
+                <h3>账号</h3>
+                <span class="status green">2</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>Z5_2</strong>
+                  <span>username z5 · password configured · active connections 1</span>
+                </div>
+                <span class="status green">online</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>X-T5</strong>
+                  <span>username xt5 · password configured · active connections 0</span>
+                </div>
+                <span class="status amber">offline</span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>连接记录</h3>
+                <button class="secondary">刷新</button>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>192.168.137.56:50123</strong>
+                  <span>Z5_2 · username z5 · first seen 10:26 · last seen 12 秒前</span>
+                </div>
+                <span class="status green">online</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>192.168.137.44</strong>
+                  <span>X-T5 · username xt5 · last disconnected 18:20</span>
+                </div>
+                <span class="status amber">recent</span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>编辑账号</h3>
+                <small>z5</small>
+              </div>
+              <label>设备名
+                <input value="Z5_2">
+              </label>
+              <div style="height: 8px;"></div>
+              <label>用户名
+                <input value="z5">
+              </label>
+              <div style="height: 8px;"></div>
+              <label>密码
+                <input value="••••••••" type="password">
+              </label>
+              <div class="button-row">
+                <button class="danger">删除</button>
+                <button class="primary">保存</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div id="inbox" class="view hidden">
+        <header class="topbar">
+          <div>
+            <h2>收件箱</h2>
+            <small>84 groups · flat inbox</small>
+          </div>
+          <button class="icon-button" title="刷新">R</button>
+        </header>
+        <div class="content">
+          <div class="toolbar">
+            <button class="active">全部</button>
+            <button>JPG</button>
+            <button>RAW</button>
+            <button>视频</button>
+          </div>
+          <div class="tag-row" style="margin-bottom: 12px;">
+            <span class="tag">source: Z5_2</span>
+            <span class="tag">path: BB</span>
+            <span class="tag">remote: 192.168.137.56</span>
+            <span class="tag">duplicate: visible</span>
+          </div>
+          <div class="asset-grid">
+            <article class="asset" data-route="transfers">
+              <div class="thumb"></div>
+              <div class="asset-body">
+                <p class="asset-name">Z5_2/BB/IMG_1234.JPG + CR3</p>
+                <div class="asset-meta"><span class="pill">RAW+JPG</span><span>48.2 MB</span></div>
+              </div>
+            </article>
+            <article class="asset">
+              <div class="thumb alt"></div>
+              <div class="asset-body">
+                <p class="asset-name">Z5_2/BB/IMG_1234 (1).CR3</p>
+                <div class="asset-meta"><span class="pill">2/2</span><span>39.5 MB</span></div>
+              </div>
+            </article>
+            <article class="asset">
+              <div class="thumb">RAW</div>
+              <div class="asset-body">
+                <p class="asset-name">X-T5/102_FUJI/DSC_1239.RAF</p>
+                <div class="asset-meta"><span class="pill">RAW</span><span>41.0 MB</span></div>
+              </div>
+            </article>
+            <article class="asset">
+              <div class="thumb alt">MOV</div>
+              <div class="asset-body">
+                <p class="asset-name">Z5_2/BB/DSC_1240.MOV</p>
+                <div class="asset-meta"><span class="pill video">VIDEO</span><span>212 MB</span></div>
+              </div>
+            </article>
+            <article class="asset">
+              <div class="thumb"></div>
+              <div class="asset-body">
+                <p class="asset-name">IP-044/DCIM/IMG_1241.ARW</p>
+                <div class="asset-meta"><span class="pill">RAW</span><span>38.8 MB</span></div>
+              </div>
+            </article>
+            <article class="asset">
+              <div class="thumb alt"></div>
+              <div class="asset-body">
+                <p class="asset-name">Verify Camera/IMG_1242.JPG</p>
+                <div class="asset-meta"><span class="pill jpg">JPG</span><span>8.1 MB</span></div>
+              </div>
+            </article>
+          </div>
+        </div>
+        <nav class="tabbar">
+          <button data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
+          <button class="active" data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
+          <button data-route="transfers"><span class="tab-icon">≡</span>传输</button>
+        </nav>
+      </div>
+
+      <div id="transfers" class="view hidden">
+        <header class="topbar">
+          <div>
+            <h2>传输日志</h2>
+            <small>transfer-log.jsonl · status filter</small>
+          </div>
+          <span class="status red">1 failed</span>
+        </header>
+        <div class="content">
+          <div class="toolbar">
+            <button class="active">全部</button>
+            <button>完成</button>
+            <button>失败</button>
+            <button>z5</button>
+          </div>
+          <div class="stack">
+            <section class="panel">
+              <div class="panel-title">
+                <h3>当前接收</h3>
+                <span class="status blue">42%</span>
+              </div>
+              <strong>IMG_1234.CR3</strong>
+              <div class="progress"><b style="width: 42%;"></b></div>
+              <div class="tag-row" style="margin-top: 10px;">
+                <span class="tag">username: z5</span>
+                <span class="tag">remote: 192.168.137.56</span>
+                <span class="tag">path: BB/IMG_1234.CR3</span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="row">
+                <div>
+                  <strong>IMG_1234.JPG</strong>
+                  <span>Completed · Verify Camera/IMG_1234.JPG · location local_path</span>
+                </div>
+                <span class="status green">done</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>IMG_9999.CR3</strong>
+                  <span>Failed · connection reset · remote 192.168.137.56</span>
+                </div>
+                <span class="status red">failed</span>
+              </div>
+              <div class="row">
+                <div>
+                  <strong>IMG_1234 (1).CR3</strong>
+                  <span>Completed · duplicate 2/2 · original BB/IMG_1234.CR3</span>
+                </div>
+                <span class="status green">done</span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title">
+                <h3>筛选字段</h3>
+              </div>
+              <div class="kv"><span>status</span><strong>completed / failed</strong></div>
+              <div class="kv"><span>username</span><strong>z5</strong></div>
+              <div class="kv"><span>source</span><strong>Verify Camera</strong></div>
+              <div class="kv"><span>original path</span><strong>BB/IMG_1234.CR3</strong></div>
+              <div class="kv"><span>transfer id</span><strong>ftp:1779454764767:IMG_1234.CR3</strong></div>
+            </section>
+          </div>
+        </div>
+        <nav class="tabbar">
+          <button data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
+          <button data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
+          <button class="active" data-route="transfers"><span class="tab-icon">≡</span>传输</button>
+        </nav>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const views = [...document.querySelectorAll(".view")];
+    const routeButtons = [...document.querySelectorAll("[data-route]")];
+
+    function show(route) {
+      views.forEach((view) => {
+        view.classList.toggle("hidden", view.id !== route);
+      });
+      routeButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.route === route);
+      });
+    }
+
+    routeButtons.forEach((button) => {
+      button.addEventListener("click", () => show(button.dataset.route));
+    });
+  </script>
+</body>
+</html>

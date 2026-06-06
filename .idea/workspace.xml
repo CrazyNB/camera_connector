@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ChangeListManager">
+    <list default="true" id="4be0fda3-9806-4a04-a5bc-01907ace13af" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/CoreGateway.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/CoreGateway.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/NativeCoreGateway.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/NativeCoreGateway.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/NativeMobileCore.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/core/NativeMobileCore.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/media/CameraPreviewMedia.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/media/CameraPreviewMedia.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/service/ReceiverForegroundService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/service/ReceiverForegroundService.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/service/SmartSelectionAnalysisWorker.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/service/SmartSelectionAnalysisWorker.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/storage/AndroidPublishWorker.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/storage/AndroidPublishWorker.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/AssetUiModels.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/AssetUiModels.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/CameraConnectorApp.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/CameraConnectorApp.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/PhotoDetailScreen.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/PhotoDetailScreen.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/ProjectAssetsScreen.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/ProjectAssetsScreen.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/ProjectUiModels.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/ProjectUiModels.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/main/java/com/cameraconnector/app/ui/ReviewModeScreen.kt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/core/NativeDashboardMappingTest.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/core/NativeDashboardMappingTest.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/media/PreviewLocationTest.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/media/PreviewLocationTest.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/ui/ProjectUiModelsTest.kt" beforeDir="false" afterPath="$PROJECT_DIR$/apps/android/app/src/test/java/com/cameraconnector/app/ui/ProjectUiModelsTest.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core-ffi/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core-ffi/src/lib.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core-ffi/tests/mobile_core_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core-ffi/tests/mobile_core_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core-ffi/tests/mobile_ffi_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core-ffi/tests/mobile_ffi_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/analysis/jobs.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/analysis/jobs.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/analysis/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/analysis/mod.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/analysis/recommendation.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/analysis/recommendation.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/analysis/review.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/analysis/review.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/analysis/scoring.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/analysis/scoring.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/lib.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/lib.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/model/asset_group.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/model/asset_group.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/model/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/model/mod.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/service.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/service.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/src/storage/mod.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/src/storage/mod.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/analysis_job_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/analysis_job_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/analysis_store_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/analysis_store_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/burst_grouping_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/burst_grouping_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/quality_scoring_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/quality_scoring_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/recommendation_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/recommendation_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/review_queue_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/review_queue_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/service_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/service_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/core/tests/storage_store_tests.rs" beforeDir="false" afterPath="$PROJECT_DIR$/core/tests/storage_store_tests.rs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/superpowers/plans/2026-05-30-smart-selection-implementation.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/superpowers/plans/2026-05-30-smart-selection-implementation.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/superpowers/specs/2026-05-26-smart-selection-design.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/superpowers/specs/2026-05-26-smart-selection-design.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/verify_android_emulator_ftp_upload.ps1" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/verify_android_emulator_ftp_upload.ps1" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 1
+}]]></component>
+  <component name="ProjectId" id="3EUqntiqi0Y0rTGuM1TOKLTlhdL" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.308" />
+        <option value="bundled-python-sdk-ca5e2b39c7df-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.308" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="4be0fda3-9806-4a04-a5bc-01907ace13af" name="更改" comment="" />
+      <created>1780243671396</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1780243671396</updated>
+      <workItem from="1780243673678" duration="5000" />
+    </task>
+    <servers />
+  </component>
+</project>
