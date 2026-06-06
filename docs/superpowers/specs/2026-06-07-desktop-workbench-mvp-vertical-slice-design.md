@@ -7,10 +7,10 @@ create a desktop project, choose a local photo root, scan local files into a
 project-scoped asset model, evaluate groups, generate recommendations, and show
 the results in a desktop UI.
 
-This slice must use formal desktop scan semantics. It must not pretend scanned
-desktop files are receiver transfers or Android imports. The receiver transfer
-table remains an audit trail for camera push/import workflows, not the desktop
-photo-library indexing model.
+This slice must use formal desktop scan semantics by expanding `transfers` into
+the project asset acquisition event log. Receiver FTP/SFTP transfers remain
+network acquisition events. Desktop scan records become local-library
+acquisition events with `protocol = desktop_scan`.
 
 ## Product Scope
 
@@ -19,8 +19,8 @@ The MVP proves the desktop product shape:
 - create and select a project from the desktop app;
 - select one local folder as the project scan root;
 - scan supported media files in place without moving originals;
-- write discovered files into project assets and RAW/JPEG/video groups through a
-  desktop scan source model;
+- write discovered files into project assets and RAW/JPEG/video groups through
+  `desktop_scan` transfer records;
 - show scan progress and errors;
 - show a large-screen asset grid and group detail view;
 - run technical assessment, model evaluation, and burst recommendation through
@@ -34,7 +34,9 @@ large storage rewrites that are not needed for the end-to-end slice.
 
 ## Non-Goals
 
-- Do not use transfer/import tables as a temporary desktop scan adapter.
+- Do not introduce a separate scan source model for the MVP.
+- Do not introduce a duplicate per-file desktop scanned assets table.
+- Do not use receiver-specific UI labels for desktop scan transfer records.
 - Do not implement Android package import in this slice.
 - Do not implement full preview cache tables in this slice.
 - Do not implement automatic quota eviction for cached files.
@@ -50,7 +52,8 @@ Tauri desktop app
   -> desktop command gateway
   -> CameraConnectorService
   -> SqliteStore
-  -> desktop scan source records
+  -> desktop scan runs
+  -> transfers with protocol = desktop_scan
   -> project assets and asset groups
   -> analysis jobs and recommendation read models
 ```
@@ -76,28 +79,21 @@ The gateway may be implemented in the Tauri Rust side and call core directly.
 Core remains responsible for project correctness, grouping, settings, analysis
 jobs, recommendations, and user marks.
 
-## Desktop Scan Source Model
+## Desktop Scan Acquisition Model
 
-Desktop scan is a first-class source type.
+Desktop scan is a first-class acquisition path.
 
-Core should add the smallest formal model needed to distinguish scanned local
-files from receiver transfers:
+The MVP does not add a separate `sources` model. A scan run records the
+batch-level operation. Each discovered supported file is recorded as a
+`transfers` row with `protocol = desktop_scan`, then indexed through the
+existing project asset and group path.
 
 ```text
-desktop_scan_sources
-  scan_source_id
-  project_id
-  root_path
-  root_label
-  created_at_ms
-  updated_at_ms
-  status
-
 desktop_scan_runs
   scan_id
   project_id
-  scan_source_id
   root_path
+  root_label
   phase
   files_seen
   assets_indexed
@@ -107,30 +103,36 @@ desktop_scan_runs
   completed_at_ms
   error
 
-desktop_scanned_assets
-  asset_id
+transfers
+  transfer_id              desktop-scan:<stable_root_key>:<stable_file_key>
   project_id
-  scan_source_id
-  scan_id
-  local_path
-  original_filename
-  normalized_stem
-  object_format
+  protocol                 desktop_scan
+  status                   completed | failed
+  original_path            relative path under the scanned root
+  final_filename
+  final_location           local_path absolute path
   size_bytes
-  modified_at_ms
-  capture_time_ms
-  source_status
-  indexed_at_ms
-  updated_at_ms
+  source_name              root label
+  started_at_ms            scan started time
+  completed_at_ms          file indexed time
+
+assets
+  existing project asset fields
+  source_status            available | missing | changed
+  source_modified_at_ms
+  last_seen_scan_id
 ```
 
-These records feed the existing project asset and group read models. Project
-groups should still use the same normalized-stem grouping rules as Android and
-receiver assets.
+Project groups still use the same normalized-stem grouping rules as Android and
+receiver assets. `StoredObjectLocation::local_path` remains the location
+representation for local source files.
 
-`StoredObjectLocation::local_path` remains the location representation for local
-source files, but the provenance must come from desktop scan tables rather than
-transfer records.
+This keeps the MVP model small:
+
+- no separate `desktop_scan_sources` table;
+- no separate `desktop_scanned_assets` table;
+- no nullable `assets.transfer_id` migration;
+- scan provenance remains attached to the existing transfer-backed asset path.
 
 ## Scan Status
 
@@ -158,7 +160,7 @@ visible error.
 
 The MVP must not delete project facts simply because a source file is missing.
 
-`source_status` should support:
+`assets.source_status` should support:
 
 ```text
 available | missing | changed
@@ -166,11 +168,12 @@ available | missing | changed
 
 For the first slice:
 
-- newly scanned files become `available`;
+- newly scanned files create or update a `desktop_scan` transfer and become
+  `available`;
 - unchanged matched files stay `available`;
 - a previously indexed path that is absent during a scan becomes `missing`;
-- a previously indexed path whose size or modified time changed becomes
-  `changed`;
+- a previously indexed desktop scan asset whose size or modified time changed
+  becomes `changed`;
 - user marks, model evaluations, and recommendations remain attached to still
   matched project groups.
 
@@ -233,7 +236,9 @@ ready.
 
 Core tests:
 
-- desktop scan indexes local files without creating transfer records;
+- desktop scan indexes local files by creating `desktop_scan` transfer records;
+- desktop scan records do not appear as receiver FTP/SFTP activity in desktop
+  UI summaries;
 - RAW/JPEG/video files with the same normalized stem form one project group;
 - scan status moves through scanning and completed phases;
 - missing files are marked without deleting project assets or user marks;
@@ -244,8 +249,8 @@ Core tests:
 Desktop gateway tests:
 
 - project commands return UI-friendly DTOs;
-- scan command creates a scan source and scan run;
-- asset page includes desktop source state;
+- scan command creates a scan run and `desktop_scan` transfers;
+- asset page includes source status state;
 - analysis commands call existing core evaluation and recommendation paths.
 
 Manual verification:
@@ -265,7 +270,7 @@ Manual verification:
 The first implementation plan should start with the smallest formal core
 surface that lets the Tauri app complete the product flow:
 
-1. core desktop scan source storage and service APIs;
+1. core desktop scan run storage and `desktop_scan` transfer indexing APIs;
 2. desktop command gateway;
 3. Tauri app shell and workbench UI;
 4. analysis and recommendation command wiring;
