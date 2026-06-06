@@ -3,6 +3,7 @@ members = [
     "core",
     "core-ffi",
     "tools/cli",
+    "apps/desktop/src-tauri",
 ]
 resolver = "2"
 
@@ -25,6 +26,9 @@ russh = { version = "0.61", default-features = false, features = ["ring", "rsa"]
 russh-sftp = "2.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 tempfile = "3.10"
 thiserror = "1.0"
 tokio = { version = "1.37", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

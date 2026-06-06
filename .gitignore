@@ -7,3 +7,4 @@ apps/android/.kotlin/
 apps/android/local.properties
 apps/android/**/build/
 apps/android/app/src/main/jniLibs/**/*.so
+apps/desktop/src-tauri/gen/
