@@ -2767,6 +2767,7 @@ fn import_source_from_protocol(protocol: &str) -> ImportSource {
     match protocol.to_ascii_lowercase().as_str() {
         "ftp" => ImportSource::FtpPush,
         "sftp" => ImportSource::SftpPush,
+        "desktop_scan" => ImportSource::DesktopScan,
         _ => ImportSource::ManualDrop,
     }
 }

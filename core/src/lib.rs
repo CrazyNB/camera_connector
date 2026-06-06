@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod desktop_scan;
 pub mod error;
 mod media_metadata;
 pub mod model;
@@ -22,6 +23,11 @@ pub use analysis::{
     SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
     SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus, TechnicalDefectFlag,
     TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+};
+pub use desktop_scan::{
+    desktop_scan_root_key, desktop_scan_root_label, desktop_scan_transfer_id,
+    DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun, DesktopScannedFile,
+    DesktopSourceStatus, DESKTOP_SCAN_PROTOCOL,
 };
 pub use error::{ImporterError, Result};
 pub use model::{
