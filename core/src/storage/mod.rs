@@ -4681,12 +4681,17 @@ fn insert_asset_for_transfer(
     let now = current_time_ms();
     let normalized_stem =
         normalized_stem(&record.final_filename).unwrap_or_else(|| record.final_filename.clone());
-    let original_parent_path = original_parent_path(&record.original_path);
+    let asset_original_parent_path = original_parent_path(&record.original_path);
+    let group_original_parent_path = if record.protocol == DESKTOP_SCAN_PROTOCOL {
+        None
+    } else {
+        asset_original_parent_path.clone()
+    };
     let source_identity = source_identity(record);
     let group_identity = asset_group_identity(
         project_id,
         source_identity.as_deref(),
-        original_parent_path.as_deref(),
+        group_original_parent_path.as_deref(),
         &normalized_stem,
     );
     let group_id = format!("group-{}", stable_key(&group_identity));
@@ -4720,7 +4725,7 @@ fn insert_asset_for_transfer(
             group_identity,
             normalized_stem,
             source_identity,
-            original_parent_path,
+            group_original_parent_path,
             now,
             now,
         ],
@@ -4746,7 +4751,7 @@ fn insert_asset_for_transfer(
             record.final_filename,
             normalized_stem,
             record.original_path,
-            original_parent_path,
+            asset_original_parent_path,
             final_location.as_ref().map(StoredObjectLocation::kind),
             final_location_payload,
             record.size_bytes as i64,

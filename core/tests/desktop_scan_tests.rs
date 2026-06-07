@@ -100,6 +100,37 @@ fn service_scans_folder_and_groups_raw_jpeg_video_by_stem() {
 }
 
 #[test]
+fn service_flattens_desktop_scan_subfolders_when_grouping_by_stem() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let config_path = temp_dir.path().join("config.json");
+    let root = temp_dir.path().join("photos");
+    std::fs::create_dir_all(root.join("slot-a")).expect("first folder should create");
+    std::fs::create_dir_all(root.join("slot-b")).expect("second folder should create");
+    std::fs::write(root.join("slot-a").join("DSC_2125.NEF"), [1_u8]).expect("raw should write");
+    std::fs::write(root.join("slot-b").join("DSC_2125.JPG"), [2_u8]).expect("jpeg should write");
+
+    let service = CameraConnectorService::new(Some(config_path));
+    let project = service
+        .create_project("Flattened Desktop Scan")
+        .expect("project should create");
+    let scan = service
+        .create_desktop_project_scan(&project.project_id, &root)
+        .expect("scan should queue");
+    service
+        .run_desktop_project_scan(&scan.scan_id)
+        .expect("scan should run");
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("assets should query");
+
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.groups[0].group_key, "DSC_2125");
+    assert!(page.groups[0].jpeg.is_some());
+    assert!(page.groups[0].raw.is_some());
+}
+
+#[test]
 fn rescan_marks_missing_and_changed_without_deleting_group_marks() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let config_path = temp_dir.path().join("config.json");
