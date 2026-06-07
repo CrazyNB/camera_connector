@@ -432,12 +432,19 @@ function renderTopBar(stage: WorkbenchStage) {
   const project = selectedProject();
   const title = append(
     el("div", "title-stack"),
+    renderWindowControls(),
     el("div", "product-name", "Camera Connector"),
     el("div", "project-context", project ? project.name : "No project selected"),
   );
   const status = el("div", state.error ? "status is-error" : "status", state.error ?? state.busy ?? state.status);
   append(top, title, renderStageRail(stage), status);
   return top;
+}
+
+function renderWindowControls() {
+  const controls = el("div", "window-controls");
+  append(controls, el("span", "traffic close"), el("span", "traffic minimize"), el("span", "traffic zoom"));
+  return controls;
 }
 
 function renderStageRail(stage: WorkbenchStage) {
@@ -467,12 +474,16 @@ function renderWorkflow(stage: WorkbenchStage) {
 
 function renderProjectSidebar() {
   const side = el("aside", "project-sidebar");
-  append(side, el("h2", "", "Projects"), renderProjectCreate(), renderProjectList(), renderScanMemory());
+  append(side, el("h2", "", "Projects"));
+  if (state.projects.length) {
+    append(side, renderProjectCreate("compact"));
+  }
+  append(side, renderProjectList(), renderScanMemory());
   return side;
 }
 
-function renderProjectCreate() {
-  const row = el("form", "project-create");
+function renderProjectCreate(variant: "compact" | "hero" = "compact") {
+  const row = el("form", `project-create project-create-${variant}`);
   row.addEventListener("submit", (event) => {
     event.preventDefault();
     void createProject();
@@ -482,7 +493,7 @@ function renderProjectCreate() {
     textInput(state.projectNameDraft, "New project name", (value) => {
       state.projectNameDraft = value;
     }),
-    commandButton("Create", "primary", () => void createProject(), Boolean(state.busy)),
+    commandButton(variant === "hero" ? "Create Project" : "Create", "primary", () => void createProject(), Boolean(state.busy)),
   );
   return row;
 }
@@ -541,12 +552,43 @@ function renderProjectStage() {
   const card = el("section", "focus-panel");
   append(
     card,
-    el("p", "eyebrow", "Step 1"),
-    el("h1", "", "Create or select a project"),
-    el("p", "lead", "A project owns the scan history, marks, evaluations, and recommendations for this review session."),
-    renderProjectCreate(),
+    append(
+      el("div", "project-hero-layout"),
+      append(
+        el("div", "project-intro"),
+        el("p", "eyebrow", "Step 1"),
+        el("h1", "", "Start a review workbench"),
+        el(
+          "p",
+          "lead",
+          "Create a project to hold the folder scan, grouped assets, marks, evaluations, and recommendations for this session.",
+        ),
+        renderProjectCreate("hero"),
+      ),
+      renderFlowPreview(),
+    ),
   );
   return card;
+}
+
+function renderFlowPreview() {
+  const preview = el("div", "flow-preview");
+  append(
+    preview,
+    el("h2", "", "Next actions"),
+    flowPreviewStep("Folder", "Choose a local source without importing files yet."),
+    flowPreviewStep("Scan", "Index assets into the project as a desktop scan transfer."),
+    flowPreviewStep("Review", "Inspect groups, mark keepers, and run recommendations."),
+  );
+  return preview;
+}
+
+function flowPreviewStep(title: string, detail: string) {
+  return append(
+    el("div", "flow-preview-step"),
+    el("span", "flow-dot"),
+    append(el("div", "flow-copy"), el("strong", "", title), el("span", "", detail)),
+  );
 }
 
 function renderFolderStage() {
