@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { deriveWorkbenchStage, type WorkbenchStage } from "./workflow";
 import "./styles.css";
 
 type Project = {
@@ -37,20 +38,14 @@ type ReceivedAsset = {
   source: string;
   received_time_ms?: number | null;
   capture_time_ms?: number | null;
-  width?: number | null;
-  height?: number | null;
   group_key?: string | null;
   storage_location?: StoredObjectLocation | null;
   original_path?: string | null;
-  username?: string | null;
   display_source?: string | null;
-  remote_addr?: string | null;
   virtual_display_path?: string | null;
   source_status?: string | null;
   source_modified_at_ms?: number | null;
   last_seen_scan_id?: string | null;
-  duplicate_index?: number | null;
-  duplicate_count?: number | null;
 };
 
 type AssetUserMarks = {
@@ -87,17 +82,9 @@ type ReceivedAssetGroup = {
   model_status?: string | null;
   model_score?: number | null;
   model_tier?: string | null;
-  model_evaluator_kind?: string | null;
   model_summary?: string | null;
   is_model_select: boolean;
-  is_favorite: boolean;
-  is_flagged: boolean;
   user_marks: AssetUserMarks;
-};
-
-type AssetFacetCount = {
-  value: string;
-  group_count: number;
 };
 
 type AssetGroupSummary = {
@@ -106,8 +93,6 @@ type AssetGroupSummary = {
   groups_with_jpeg: number;
   groups_with_raw: number;
   groups_with_video: number;
-  source_counts: AssetFacetCount[];
-  remote_addr_counts: AssetFacetCount[];
 };
 
 type AssetGroupPage = {
@@ -121,25 +106,13 @@ type AssetGroupPage = {
 
 type StoredAsset = {
   asset_id: string;
-  project_id: string;
-  group_id?: string | null;
   transfer_id: string;
   group_role: string;
   media_kind: string;
   format: string;
   original_filename: string;
-  final_filename: string;
-  normalized_stem: string;
   original_path: string;
-  original_parent_path?: string | null;
-  final_location?: StoredObjectLocation | null;
   size_bytes: number;
-  capture_at_ms?: number | null;
-  received_at_ms?: number | null;
-  published_at_ms?: number | null;
-  source_identity?: string | null;
-  username?: string | null;
-  remote_addr?: string | null;
   source_status: string;
   source_modified_at_ms?: number | null;
   last_seen_scan_id?: string | null;
@@ -168,6 +141,8 @@ type DesktopError = {
   message?: string;
 };
 
+type SourceFilter = "all" | "available" | "changed" | "missing";
+
 type AppState = {
   projects: Project[];
   selectedProjectId: string | null;
@@ -178,6 +153,7 @@ type AppState = {
   selectedGroupId: string | null;
   selectedGroup: ReceivedAssetGroup | null;
   groupDetail: StoredAsset[];
+  sourceFilter: SourceFilter;
   busy: string | null;
   status: string;
   error: string | null;
@@ -194,6 +170,7 @@ const state: AppState = {
   selectedGroupId: null,
   selectedGroup: null,
   groupDetail: [],
+  sourceFilter: "all",
   busy: null,
   status: "Ready",
   error: null,
@@ -216,10 +193,8 @@ const api = {
   getScanStatus(projectId: string): Promise<DesktopScanRun | null> {
     return invoke("get_scan_status", { projectId });
   },
-  getAssetPage(projectId: string, offset = 0, limit = 80): Promise<AssetGroupPage> {
-    return invoke("get_project_asset_page", {
-      request: { project_id: projectId, offset, limit },
-    });
+  getAssetPage(projectId: string, offset = 0, limit = 120): Promise<AssetGroupPage> {
+    return invoke("get_project_asset_page", { request: { project_id: projectId, offset, limit } });
   },
   getGroupDetail(projectId: string, groupId: string): Promise<StoredAsset[]> {
     return invoke("get_project_group_detail", { projectId, groupId });
@@ -251,94 +226,19 @@ if (!app) {
 }
 const appRoot = app;
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) {
-    node.className = className;
-  }
-  if (text !== undefined) {
-    node.textContent = text;
-  }
-  return node;
-}
-
-function append(parent: HTMLElement, ...children: Array<Node | null | undefined>): HTMLElement {
-  for (const child of children) {
-    if (child) {
-      parent.appendChild(child);
-    }
-  }
-  return parent;
-}
-
-function textButton(label: string, className: string, onClick: () => void, disabled = false) {
-  const node = el("button", className, label);
-  node.type = "button";
-  node.disabled = disabled;
-  node.addEventListener("click", onClick);
-  return node;
-}
-
-function input(value: string, placeholder: string, onInput: (value: string) => void) {
-  const node = el("input", "field-input") as HTMLInputElement;
-  node.value = value;
-  node.placeholder = placeholder;
-  node.addEventListener("input", () => onInput(node.value));
-  return node;
-}
-
-function selectedProject() {
-  return state.projects.find((project) => project.project_id === state.selectedProjectId) ?? null;
-}
-
-function errorMessage(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const desktopError = error as DesktopError;
-    if (desktopError.message) {
-      return desktopError.code ? `${desktopError.code}: ${desktopError.message}` : desktopError.message;
-    }
-  }
-  return "Unexpected desktop error";
-}
-
-function setStatus(message: string, error: string | null = null) {
-  state.status = message;
-  state.error = error;
-  render();
-}
-
-async function withBusy<T>(label: string, task: () => Promise<T>): Promise<T | null> {
-  state.busy = label;
-  state.error = null;
-  render();
-  try {
-    const result = await task();
-    state.busy = null;
-    render();
-    return result;
-  } catch (error) {
-    state.busy = null;
-    setStatus(label, errorMessage(error));
-    return null;
-  }
-}
+void bootstrap().catch((error) => {
+  setStatus("Startup failed", errorMessage(error));
+});
 
 async function bootstrap() {
   await loadProjects();
-  await refreshCurrentProject();
+  await refreshCurrentProject(false);
   await listen<boolean>("desktop-scan-finished", async (event) => {
     setStatus(event.payload ? "Scan completed" : "Scan failed");
-    await refreshCurrentProject();
+    await refreshCurrentProject(false);
   });
   window.setInterval(() => {
-    if (state.scan && ["queued", "scanning", "indexing"].includes(state.scan.phase)) {
+    if (state.scan && scanIsActive(state.scan.phase)) {
       void refreshCurrentProject(false);
     }
   }, 1400);
@@ -346,22 +246,24 @@ async function bootstrap() {
 }
 
 async function loadProjects() {
-  const projects = await api.listProjects();
-  state.projects = projects;
-  if (!state.selectedProjectId || !projects.some((project) => project.project_id === state.selectedProjectId)) {
-    state.selectedProjectId = projects[0]?.project_id ?? null;
+  state.projects = await api.listProjects();
+  if (!state.selectedProjectId || !state.projects.some((project) => project.project_id === state.selectedProjectId)) {
+    state.selectedProjectId = state.projects[0]?.project_id ?? null;
   }
 }
 
-async function refreshCurrentProject(showStatus = true) {
+async function refreshCurrentProject(showLoadedStatus = true) {
   const projectId = state.selectedProjectId;
   if (!projectId) {
     state.scan = null;
     state.assetPage = null;
+    state.selectedGroupId = null;
     state.selectedGroup = null;
     state.groupDetail = [];
+    render();
     return;
   }
+
   const [scan, assetPage] = await Promise.all([api.getScanStatus(projectId), api.getAssetPage(projectId)]);
   state.scan = scan;
   state.assetPage = assetPage;
@@ -369,26 +271,24 @@ async function refreshCurrentProject(showStatus = true) {
   if (state.selectedGroupId) {
     state.groupDetail = await api.getGroupDetail(projectId, state.selectedGroupId);
   }
-  if (showStatus) {
+  if (showLoadedStatus) {
     state.status = "Project loaded";
   }
   render();
 }
 
 function syncSelectedGroup() {
-  const groups = state.assetPage?.groups ?? [];
-  if (!groups.length) {
-    state.selectedGroupId = null;
+  if (!state.selectedGroupId) {
     state.selectedGroup = null;
     state.groupDetail = [];
     return;
   }
-  const selected =
-    groups.find((group) => group.group_id === state.selectedGroupId) ??
-    groups.find((group) => group.group_id) ??
-    groups[0];
-  state.selectedGroupId = selected.group_id ?? null;
+  const selected = state.assetPage?.groups.find((group) => group.group_id === state.selectedGroupId) ?? null;
   state.selectedGroup = selected;
+  if (!selected) {
+    state.selectedGroupId = null;
+    state.groupDetail = [];
+  }
 }
 
 async function createProject() {
@@ -428,7 +328,7 @@ async function chooseFolder() {
 async function startScan() {
   const projectId = state.selectedProjectId;
   if (!projectId) {
-    setStatus("Start scan", "Select or create a project first");
+    setStatus("Start scan", "Create or select a project first");
     return;
   }
   if (!state.rootPath) {
@@ -438,6 +338,9 @@ async function startScan() {
   const scan = await withBusy("Start scan", () => api.startProjectScan(projectId, state.rootPath));
   if (scan) {
     state.scan = scan;
+    state.selectedGroupId = null;
+    state.selectedGroup = null;
+    state.groupDetail = [];
     state.status = "Scan queued";
     render();
   }
@@ -481,9 +384,9 @@ async function toggleMarked() {
 }
 
 async function runAnalysisJobs() {
-  const summary = await withBusy("Run jobs", () => api.drainAnalysisJobs(40));
+  const summary = await withBusy("Run evaluation jobs", () => api.drainAnalysisJobs(50));
   if (summary) {
-    state.status = `Jobs completed ${summary.completed_count}/${summary.claimed_count}, failed ${summary.failed_count}`;
+    state.status = `Evaluation jobs: ${summary.completed_count}/${summary.claimed_count} complete, ${summary.failed_count} failed`;
     await refreshCurrentProject(false);
   }
 }
@@ -491,13 +394,13 @@ async function runAnalysisJobs() {
 async function recommendBurst() {
   const burstId = state.selectedGroup?.burst?.burst_group_id;
   if (!burstId) {
-    setStatus("Recommend burst", "Selected group is not in a burst");
+    setStatus("Recommend burst", "Selected group is not part of a burst");
     return;
   }
   const recommendation = await withBusy("Recommend burst", () => api.recommendBurstGroup(burstId));
   if (recommendation) {
     state.lastRecommendation = recommendation;
-    state.status = `Burst recommendation ${recommendation.status}`;
+    state.status = `Burst recommendation: ${readable(recommendation.status)}`;
     await refreshCurrentProject(false);
   }
 }
@@ -510,7 +413,7 @@ async function recommendProject() {
   const recommendation = await withBusy("Project recommendation", () => api.generateProjectRecommendation(projectId));
   if (recommendation) {
     state.lastRecommendation = recommendation;
-    state.status = `Project recommendation ${recommendation.status}`;
+    state.status = `Project recommendation: ${readable(recommendation.status)}`;
     await refreshCurrentProject(false);
   }
 }
@@ -520,296 +423,477 @@ function render() {
 }
 
 function renderShell() {
-  const shell = el("div", "app-shell");
-  append(shell, renderTopBar(), renderBody());
-  return shell;
+  const stage = currentStage();
+  return append(el("div", "app-shell"), renderTopBar(stage), renderWorkflow(stage));
 }
 
-function renderTopBar() {
+function renderTopBar(stage: WorkbenchStage) {
   const top = el("header", "topbar");
-  const titleBlock = el("div", "title-block");
-  append(titleBlock, el("div", "brand", "Camera Connector"), el("div", "context", selectedProject()?.name ?? "No project"));
-  const status = el("div", state.error ? "status status-error" : "status", state.error ?? state.busy ?? state.status);
-  append(top, titleBlock, status);
+  const project = selectedProject();
+  const title = append(
+    el("div", "title-stack"),
+    el("div", "product-name", "Camera Connector"),
+    el("div", "project-context", project ? project.name : "No project selected"),
+  );
+  const status = el("div", state.error ? "status is-error" : "status", state.error ?? state.busy ?? state.status);
+  append(top, title, renderStageRail(stage), status);
   return top;
 }
 
-function renderBody() {
-  const body = el("main", "workspace");
-  append(body, renderProjectRail(), renderWorkbench(), renderDetailPanel());
-  return body;
+function renderStageRail(stage: WorkbenchStage) {
+  const stages: Array<[WorkbenchStage, string]> = [
+    ["project", "Project"],
+    ["folder", "Folder"],
+    ["scan", "Scan"],
+    ["review", "Review"],
+  ];
+  const rail = el("nav", "stage-rail");
+  const activeIndex = stages.findIndex(([key]) => key === stage);
+  stages.forEach(([key, label], index) => {
+    const node = el("span", "stage-step");
+    if (index < activeIndex) node.classList.add("is-complete");
+    if (key === stage) node.classList.add("is-active");
+    append(node, el("span", "step-index", String(index + 1)), el("span", "step-label", label));
+    append(rail, node);
+  });
+  return rail;
 }
 
-function renderProjectRail() {
-  const rail = el("aside", "project-rail");
-  const header = el("div", "rail-header");
-  append(header, el("h2", "", "Projects"));
-  const createRow = el("div", "create-row");
+function renderWorkflow(stage: WorkbenchStage) {
+  const layout = el("main", "workflow-layout");
+  append(layout, renderProjectSidebar(), renderStageSurface(stage));
+  return layout;
+}
+
+function renderProjectSidebar() {
+  const side = el("aside", "project-sidebar");
+  append(side, el("h2", "", "Projects"), renderProjectCreate(), renderProjectList(), renderScanMemory());
+  return side;
+}
+
+function renderProjectCreate() {
+  const row = el("form", "project-create");
+  row.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void createProject();
+  });
   append(
-    createRow,
-    input(state.projectNameDraft, "Project name", (value) => {
+    row,
+    textInput(state.projectNameDraft, "New project name", (value) => {
       state.projectNameDraft = value;
     }),
-    textButton("New", "primary small", () => void createProject(), Boolean(state.busy)),
+    commandButton("Create", "primary", () => void createProject(), Boolean(state.busy)),
   );
+  return row;
+}
+
+function renderProjectList() {
   const list = el("div", "project-list");
   if (!state.projects.length) {
-    append(list, el("div", "empty", "No projects"));
+    append(list, el("div", "empty-note", "Create a project to begin."));
+    return list;
   }
   for (const project of state.projects) {
-    const item = textButton(project.name, "project-item", () => void selectProject(project.project_id), Boolean(state.busy));
+    const item = commandButton(project.name, "project-item", () => void selectProject(project.project_id), Boolean(state.busy));
     if (project.project_id === state.selectedProjectId) {
       item.classList.add("is-selected");
     }
     append(list, item);
   }
-  append(rail, header, createRow, list);
-  return rail;
+  return list;
 }
 
-function renderWorkbench() {
-  const section = el("section", "workbench");
-  append(section, renderScanPanel(), renderSummaryPanel(), renderAssetGrid());
-  return section;
-}
-
-function renderScanPanel() {
-  const panel = el("section", "scan-panel");
-  const row = el("div", "scan-row");
-  const root = el("div", "root-path", state.rootPath || "No folder selected");
-  const canScan = Boolean(state.selectedProjectId && state.rootPath && !state.busy);
-  append(
-    row,
-    root,
-    textButton("Folder", "secondary", () => void chooseFolder(), Boolean(state.busy)),
-    textButton("Scan", "primary", () => void startScan(), !canScan),
-  );
-  append(panel, row, renderScanProgress());
-  return panel;
-}
-
-function renderScanProgress() {
-  const scan = state.scan;
-  const wrap = el("div", "scan-progress");
-  const meta = el("div", "scan-meta");
-  const phase = scan?.phase ?? "not_started";
-  append(
-    meta,
-    pill("Phase", readable(phase), `phase-${phase}`),
-    pill("Files", String(scan?.files_seen ?? 0)),
-    pill("Assets", String(scan?.assets_indexed ?? 0)),
-    pill("Groups", String(scan?.groups_updated ?? 0)),
-  );
-  const bar = el("div", "progress-track");
-  const fill = el("div", "progress-fill");
-  fill.style.width = `${phaseProgress(phase)}%`;
-  if (phase === "failed") {
-    fill.classList.add("failed");
+function renderScanMemory() {
+  const box = el("section", "scan-memory");
+  append(box, el("h3", "", "Current Source"));
+  append(box, el("div", "path-readout", state.rootPath || "No folder chosen"));
+  if (state.scan) {
+    append(
+      box,
+      compactMetric("Phase", readable(state.scan.phase)),
+      compactMetric("Files", String(state.scan.files_seen)),
+      compactMetric("Groups", String(state.scan.groups_updated)),
+    );
   }
-  append(bar, fill);
-  append(wrap, meta, bar);
-  if (scan?.error) {
-    append(wrap, el("div", "inline-error", scan.error));
+  return box;
+}
+
+function renderStageSurface(stage: WorkbenchStage) {
+  const surface = el("section", `stage-surface stage-${stage}`);
+  switch (stage) {
+    case "project":
+      append(surface, renderProjectStage());
+      break;
+    case "folder":
+      append(surface, renderFolderStage());
+      break;
+    case "scan":
+      append(surface, renderScanStage());
+      break;
+    case "review":
+      append(surface, renderReviewStage());
+      break;
+  }
+  return surface;
+}
+
+function renderProjectStage() {
+  const card = el("section", "focus-panel");
+  append(
+    card,
+    el("p", "eyebrow", "Step 1"),
+    el("h1", "", "Create or select a project"),
+    el("p", "lead", "A project owns the scan history, marks, evaluations, and recommendations for this review session."),
+    renderProjectCreate(),
+  );
+  return card;
+}
+
+function renderFolderStage() {
+  const card = el("section", "focus-panel");
+  append(
+    card,
+    el("p", "eyebrow", "Step 2"),
+    el("h1", "", "Choose a source folder"),
+    el("p", "lead", "The scan will index local files as desktop_scan transfers while keeping marks attached to stable groups."),
+    renderFolderPicker(),
+  );
+  return card;
+}
+
+function renderFolderPicker() {
+  const picker = el("div", "folder-picker");
+  append(
+    picker,
+    el("div", "folder-icon", "DIR"),
+    append(
+      el("div", "folder-copy"),
+      el("strong", "", state.rootPath ? "Selected folder" : "No folder selected"),
+      el("span", "", state.rootPath || "Pick a local photo folder to continue."),
+    ),
+    commandButton(state.rootPath ? "Change Folder" : "Choose Folder", "secondary", () => void chooseFolder(), Boolean(state.busy)),
+    commandButton("Continue", "primary", () => render(), !state.rootPath),
+  );
+  return picker;
+}
+
+function renderScanStage() {
+  const card = el("section", "focus-panel scan-focus");
+  const scan = state.scan;
+  const scanLabel = scan ? readable(scan.phase) : "Ready";
+  append(
+    card,
+    el("p", "eyebrow", "Step 3"),
+    el("h1", "", scanIsActive(scan?.phase) ? "Scanning source folder" : "Scan the selected folder"),
+    el("p", "lead", state.rootPath || "Choose a folder before scanning."),
+    renderScanProgress(),
+  );
+  const actions = el("div", "primary-actions");
+  append(
+    actions,
+    commandButton(scan?.assets_indexed ? "Rescan Folder" : "Start Scan", "primary large", () => void startScan(), !canStartScan()),
+    commandButton("Change Folder", "secondary large", () => void chooseFolder(), Boolean(state.busy)),
+  );
+  append(card, actions, el("div", "scan-caption", `Status: ${scanLabel}`));
+  return card;
+}
+
+function renderReviewStage() {
+  const wrap = el("div", state.selectedGroup ? "review-stage has-inspector" : "review-stage");
+  append(wrap, renderReviewMain());
+  if (state.selectedGroup) {
+    append(wrap, renderInspector(state.selectedGroup));
   }
   return wrap;
 }
 
-function renderSummaryPanel() {
+function renderReviewMain() {
+  const main = el("section", "review-main");
+  append(main, renderReviewHeader(), renderSourceTabs(), renderGroupBoard());
+  return main;
+}
+
+function renderReviewHeader() {
+  const header = el("div", "review-header");
   const summary = state.assetPage?.summary;
-  const panel = el("section", "summary-panel");
+  const copy = append(
+    el("div", "review-title"),
+    el("p", "eyebrow", "Step 4"),
+    el("h1", "", "Review scanned groups"),
+    el("p", "lead", `${summary?.group_count ?? 0} groups, ${summary?.asset_count ?? 0} files indexed from the current source.`),
+  );
+  const actions = el("div", "review-actions");
+  append(
+    actions,
+    commandButton("Run Evaluation", "secondary", () => void runAnalysisJobs(), Boolean(state.busy)),
+    commandButton("Project Recommend", "primary", () => void recommendProject(), Boolean(state.busy)),
+    commandButton("Rescan", "secondary", () => void startScan(), !canStartScan()),
+  );
+  append(header, copy, actions);
+  return header;
+}
+
+function renderSourceTabs() {
+  const tabs = el("div", "source-tabs");
+  const filters: Array<[SourceFilter, string]> = [
+    ["all", "All"],
+    ["available", "Available"],
+    ["changed", "Changed"],
+    ["missing", "Missing"],
+  ];
+  for (const [filter, label] of filters) {
+    const count = filter === "all" ? allGroups().length : allGroups().filter((group) => sourceStatus(group) === filter).length;
+    const tab = commandButton(`${label} ${count}`, "source-tab", () => {
+      state.sourceFilter = filter;
+      state.selectedGroupId = null;
+      state.selectedGroup = null;
+      state.groupDetail = [];
+      render();
+    });
+    if (state.sourceFilter === filter) {
+      tab.classList.add("is-active");
+    }
+    append(tabs, tab);
+  }
+  return tabs;
+}
+
+function renderGroupBoard() {
+  const groups = filteredGroups();
+  const board = el("div", "group-board");
+  if (!groups.length) {
+    append(board, el("div", "empty-board", "No groups match this state."));
+    return board;
+  }
+  for (const group of groups) {
+    append(board, renderGroupCard(group));
+  }
+  return board;
+}
+
+function renderGroupCard(group: ReceivedAssetGroup) {
+  const card = commandButton("", "group-card", () => void selectGroup(group));
+  if (group.group_id === state.selectedGroupId) {
+    card.classList.add("is-selected");
+  }
+  const thumb = append(el("div", `asset-thumb ${sourceStatus(group)}`), el("span", "", group.group_key.slice(0, 2)));
+  const body = el("div", "group-card-body");
+  append(
+    body,
+    append(el("div", "group-card-title"), el("strong", "", group.group_key), renderFormatBadges(group)),
+    append(
+      el("div", "group-card-meta"),
+      statusChip(sourceStatus(group), "source"),
+      statusChip(group.technical_gate_status ?? group.technical_status ?? "technical_pending", "technical"),
+      statusChip(modelLabel(group), "model"),
+    ),
+    renderMarks(group),
+  );
+  append(card, thumb, body);
+  return card;
+}
+
+function renderInspector(group: ReceivedAssetGroup) {
+  const panel = el("aside", "inspector");
   append(
     panel,
-    metric("Groups", summary?.group_count ?? 0),
-    metric("Assets", summary?.asset_count ?? 0),
-    metric("JPEG", summary?.groups_with_jpeg ?? 0),
-    metric("RAW", summary?.groups_with_raw ?? 0),
-    metric("Video", summary?.groups_with_video ?? 0),
+    append(
+      el("div", "inspector-head"),
+      append(el("div", ""), el("p", "eyebrow", "Selected Group"), el("h2", "", group.group_key)),
+      commandButton("Close", "ghost", () => {
+        state.selectedGroupId = null;
+        state.selectedGroup = null;
+        state.groupDetail = [];
+        render();
+      }),
+    ),
+    renderInspectorActions(group),
+    renderEvaluationPanel(group),
+    renderFilesPanel(),
+    renderRecommendationPanel(),
   );
   return panel;
 }
 
-function renderAssetGrid() {
-  const panel = el("section", "asset-grid");
-  const header = el("div", "section-header");
-  const count = state.assetPage ? `${state.assetPage.total_groups} groups` : "No assets";
-  append(header, el("h2", "", "Assets"), el("span", "muted", count));
-  append(panel, header);
-  const groups = state.assetPage?.groups ?? [];
-  if (!groups.length) {
-    append(panel, el("div", "empty-grid", "No scanned assets"));
-    return panel;
+function renderInspectorActions(group: ReceivedAssetGroup) {
+  const actions = el("div", "inspector-actions");
+  append(
+    actions,
+    commandButton(group.user_marks.favorite ? "Unfavorite" : "Favorite", "secondary", () => void toggleFavorite(), Boolean(state.busy)),
+    commandButton(group.user_marks.marked ? "Unmark" : "Mark", "secondary", () => void toggleMarked(), Boolean(state.busy)),
+    commandButton("Recommend Burst", "primary", () => void recommendBurst(), Boolean(state.busy || !group.burst)),
+  );
+  return actions;
+}
+
+function renderEvaluationPanel(group: ReceivedAssetGroup) {
+  const panel = el("section", "detail-panel");
+  append(
+    panel,
+    el("h3", "", "Evaluation"),
+    kvGrid([
+      ["Source", readable(sourceStatus(group))],
+      ["Technical", readable(group.technical_gate_status ?? group.technical_status ?? "Pending")],
+      ["Model", modelLabel(group)],
+      ["Tier", readable(group.model_tier ?? "None")],
+      ["Burst", group.burst ? `${group.burst.member_count} groups` : "None"],
+      ["Recommendation", readable(group.burst?.recommendation_status ?? "None")],
+    ]),
+  );
+  if (group.model_summary) {
+    append(panel, el("p", "summary-text", group.model_summary));
   }
-  const list = el("div", "group-list");
-  for (const group of groups) {
-    append(list, renderGroupRow(group));
+  if (group.technical_defects.length) {
+    const defects = el("div", "defects");
+    for (const defect of group.technical_defects) {
+      append(defects, el("div", "defect", `${readable(defect.defect_type)} / ${readable(defect.severity)}`));
+    }
+    append(panel, defects);
+  }
+  return panel;
+}
+
+function renderFilesPanel() {
+  const panel = el("section", "detail-panel");
+  append(panel, el("h3", "", "Files"));
+  const list = el("div", "file-list");
+  if (!state.groupDetail.length) {
+    append(list, el("div", "empty-note", "Select a group to load file details."));
+  }
+  for (const asset of state.groupDetail) {
+    append(
+      list,
+      append(
+        el("div", "file-item"),
+        append(el("div", "file-name"), el("strong", "", asset.original_filename), el("span", "", asset.original_path)),
+        statusChip(asset.source_status, "source"),
+        el("span", "file-size", formatBytes(asset.size_bytes)),
+      ),
+    );
   }
   append(panel, list);
   return panel;
 }
 
-function renderGroupRow(group: ReceivedAssetGroup) {
-  const row = textButton("", "group-row", () => void selectGroup(group));
-  if (group.group_id && group.group_id === state.selectedGroupId) {
-    row.classList.add("is-selected");
-  }
-  const title = el("div", "group-title");
-  append(title, el("strong", "", group.group_key), renderFormatBadges(group));
-  const states = el("div", "group-states");
-  append(
-    states,
-    stateBadge(sourceStatus(group), "source"),
-    stateBadge(group.technical_gate_status ?? group.technical_status ?? "technical_pending", "technical"),
-    stateBadge(modelLabel(group), "model"),
-    stateBadge(group.burst?.recommendation_status ?? "no_burst", "recommendation"),
-  );
-  const marks = el("div", "marks");
-  if (group.user_marks.favorite) {
-    append(marks, el("span", "mark", "Favorite"));
-  }
-  if (group.user_marks.marked) {
-    append(marks, el("span", "mark", "Marked"));
-  }
-  append(row, title, states, marks);
-  return row;
-}
-
-function renderFormatBadges(group: ReceivedAssetGroup) {
-  const badges = el("div", "format-badges");
-  if (group.jpeg) append(badges, el("span", "format jpeg", "JPG"));
-  if (group.raw) append(badges, el("span", "format raw", "RAW"));
-  if (group.video) append(badges, el("span", "format video", "MOV"));
-  return badges;
-}
-
-function renderDetailPanel() {
-  const panel = el("aside", "detail-panel");
-  const group = state.selectedGroup;
-  if (!group) {
-    append(panel, el("h2", "", "Detail"), el("div", "empty", "No group selected"));
+function renderRecommendationPanel() {
+  const panel = el("section", "detail-panel");
+  append(panel, el("h3", "", "Latest Recommendation"));
+  const recommendation = state.lastRecommendation;
+  if (!recommendation) {
+    append(panel, el("div", "empty-note", "No recommendation has been generated in this session."));
     return panel;
   }
-  append(panel, renderDetailHeader(group), renderDetailActions(group), renderEvaluationBlock(group), renderAssetDetailList(), renderRecommendationBlock());
+  append(
+    panel,
+    kvGrid([
+      ["Scope", readable(recommendation.scope)],
+      ["Status", readable(recommendation.status)],
+      ["Confidence", `${Math.round(recommendation.confidence * 100)}%`],
+      ["Selected", String(recommendation.selected_asset_group_ids.length)],
+    ]),
+    el("p", "summary-text", recommendation.reason),
+  );
   return panel;
 }
 
-function renderDetailHeader(group: ReceivedAssetGroup) {
-  const header = el("div", "detail-header");
-  append(header, el("h2", "", group.group_key), renderFormatBadges(group));
-  const path = group.primary.original_path ?? group.primary.virtual_display_path ?? group.primary.filename;
-  append(header, el("div", "detail-path", path));
-  return header;
-}
-
-function renderDetailActions(group: ReceivedAssetGroup) {
-  const actions = el("div", "detail-actions");
+function renderScanProgress() {
+  const scan = state.scan;
+  const phase = scan?.phase ?? "not_started";
+  const box = el("div", "scan-progress");
+  const track = el("div", "scan-track");
+  const fill = el("div", `scan-fill ${phase}`);
+  fill.style.width = `${phaseProgress(phase)}%`;
+  append(track, fill);
   append(
-    actions,
-    textButton(group.user_marks.favorite ? "Unfavorite" : "Favorite", "secondary", () => void toggleFavorite(), Boolean(state.busy)),
-    textButton(group.user_marks.marked ? "Unmark" : "Mark", "secondary", () => void toggleMarked(), Boolean(state.busy)),
-    textButton("Jobs", "secondary", () => void runAnalysisJobs(), Boolean(state.busy)),
-    textButton("Burst", "secondary", () => void recommendBurst(), Boolean(state.busy || !group.burst)),
-    textButton("Project", "primary", () => void recommendProject(), Boolean(state.busy || !state.selectedProjectId)),
-  );
-  return actions;
-}
-
-function renderEvaluationBlock(group: ReceivedAssetGroup) {
-  const block = el("section", "detail-block");
-  append(block, el("h3", "", "Evaluation"));
-  const grid = el("div", "kv-grid");
-  append(
-    grid,
-    kv("Source", readable(sourceStatus(group))),
-    kv("Technical", readable(group.technical_gate_status ?? group.technical_status ?? "pending")),
-    kv("Model", modelLabel(group)),
-    kv("Tier", readable(group.model_tier ?? "none")),
-    kv("Burst", group.burst ? `${group.burst.member_count} files` : "None"),
-  );
-  append(block, grid);
-  if (group.model_summary) {
-    append(block, el("p", "summary-text", group.model_summary));
-  }
-  if (group.technical_defects.length) {
-    const defects = el("div", "defect-list");
-    for (const defect of group.technical_defects) {
-      append(defects, el("div", "defect", `${readable(defect.defect_type)} / ${defect.severity}`));
-    }
-    append(block, defects);
-  }
-  return block;
-}
-
-function renderAssetDetailList() {
-  const block = el("section", "detail-block");
-  append(block, el("h3", "", "Files"));
-  const table = el("div", "file-table");
-  if (!state.groupDetail.length) {
-    append(table, el("div", "empty", "No file detail"));
-  }
-  for (const asset of state.groupDetail) {
-    const row = el("div", "file-row");
+    box,
     append(
-      row,
-      el("span", "file-name", asset.original_filename),
-      el("span", "file-meta", asset.format),
-      el("span", `file-status ${asset.source_status}`, readable(asset.source_status)),
-      el("span", "file-size", formatBytes(asset.size_bytes)),
-    );
-    append(table, row);
-  }
-  append(block, table);
-  return block;
-}
-
-function renderRecommendationBlock() {
-  const block = el("section", "detail-block");
-  append(block, el("h3", "", "Recommendation"));
-  const recommendation = state.lastRecommendation;
-  if (!recommendation) {
-    append(block, el("div", "empty", "No recommendation"));
-    return block;
-  }
-  const grid = el("div", "kv-grid");
-  append(
-    grid,
-    kv("Scope", readable(recommendation.scope)),
-    kv("Status", readable(recommendation.status)),
-    kv("Confidence", `${Math.round(recommendation.confidence * 100)}%`),
-    kv("Selected", String(recommendation.selected_asset_group_ids.length)),
+      el("div", "scan-metrics"),
+      metric("Phase", readable(phase)),
+      metric("Files Seen", scan?.files_seen ?? 0),
+      metric("Assets", scan?.assets_indexed ?? 0),
+      metric("Groups", scan?.groups_updated ?? 0),
+    ),
+    track,
   );
-  append(block, grid, el("p", "summary-text", recommendation.reason));
-  return block;
+  if (scan?.error) {
+    append(box, el("div", "inline-error", scan.error));
+  }
+  return box;
 }
 
-function pill(label: string, value: string, extraClass = "") {
-  const node = el("span", `pill ${extraClass}`);
-  append(node, el("span", "pill-label", label), el("span", "pill-value", value));
-  return node;
+function selectedProject() {
+  return state.projects.find((project) => project.project_id === state.selectedProjectId) ?? null;
 }
 
-function metric(label: string, value: number) {
-  const node = el("div", "metric");
-  append(node, el("span", "metric-value", String(value)), el("span", "metric-label", label));
-  return node;
+function currentStage(): WorkbenchStage {
+  return deriveWorkbenchStage({
+    hasProject: Boolean(state.selectedProjectId),
+    hasRootPath: Boolean(state.rootPath),
+    scanPhase: state.scan?.phase ?? null,
+    groupCount: state.assetPage?.total_groups ?? 0,
+  });
 }
 
-function kv(label: string, value: string) {
-  const node = el("div", "kv");
-  append(node, el("span", "kv-label", label), el("span", "kv-value", value));
-  return node;
+function allGroups() {
+  return state.assetPage?.groups ?? [];
 }
 
-function stateBadge(value: string, kind: string) {
-  return el("span", `state-badge ${kind} ${value}`, readable(value));
+function filteredGroups() {
+  const groups = allGroups();
+  if (state.sourceFilter === "all") {
+    return groups;
+  }
+  return groups.filter((group) => sourceStatus(group) === state.sourceFilter);
+}
+
+function canStartScan() {
+  return Boolean(state.selectedProjectId && state.rootPath && !state.busy && !scanIsActive(state.scan?.phase));
+}
+
+function scanIsActive(phase?: string | null) {
+  return Boolean(phase && ["queued", "scanning", "indexing"].includes(phase));
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const desktopError = error as DesktopError;
+    if (desktopError.message) {
+      return desktopError.code ? `${desktopError.code}: ${desktopError.message}` : desktopError.message;
+    }
+  }
+  return "Unexpected desktop error";
+}
+
+function setStatus(message: string, error: string | null = null) {
+  state.status = message;
+  state.error = error;
+  render();
+}
+
+async function withBusy<T>(label: string, task: () => Promise<T>): Promise<T | null> {
+  state.busy = label;
+  state.error = null;
+  render();
+  try {
+    const result = await task();
+    state.busy = null;
+    render();
+    return result;
+  } catch (error) {
+    state.busy = null;
+    setStatus(label, errorMessage(error));
+    return null;
+  }
 }
 
 function membersOf(group: ReceivedAssetGroup) {
   const members = [group.primary, group.jpeg, group.raw, group.video].filter(Boolean) as ReceivedAsset[];
   const seen = new Set<string>();
   return members.filter((member) => {
-    if (seen.has(member.id)) {
-      return false;
-    }
+    if (seen.has(member.id)) return false;
     seen.add(member.id);
     return true;
   });
@@ -819,22 +903,22 @@ function sourceStatus(group: ReceivedAssetGroup) {
   const statuses = membersOf(group).map((asset) => asset.source_status ?? "available");
   if (statuses.includes("missing")) return "missing";
   if (statuses.includes("changed")) return "changed";
-  return statuses[0] ?? "available";
+  return "available";
 }
 
 function modelLabel(group: ReceivedAssetGroup) {
   if (typeof group.model_score === "number") {
     return `${group.model_score} ${readable(group.model_tier ?? "model")}`;
   }
-  return readable(group.model_status ?? "model_pending");
+  return readable(group.model_status ?? "pending");
 }
 
 function phaseProgress(phase: string) {
   switch (phase) {
     case "queued":
-      return 15;
+      return 18;
     case "scanning":
-      return 45;
+      return 48;
     case "indexing":
       return 72;
     case "completed":
@@ -846,6 +930,76 @@ function phaseProgress(phase: string) {
   }
 }
 
+function renderFormatBadges(group: ReceivedAssetGroup) {
+  const badges = el("div", "format-badges");
+  if (group.jpeg) append(badges, el("span", "format-badge jpeg", "JPG"));
+  if (group.raw) append(badges, el("span", "format-badge raw", "RAW"));
+  if (group.video) append(badges, el("span", "format-badge video", "MOV"));
+  return badges;
+}
+
+function renderMarks(group: ReceivedAssetGroup) {
+  const marks = el("div", "marks");
+  if (group.user_marks.favorite) append(marks, el("span", "mark", "Favorite"));
+  if (group.user_marks.marked) append(marks, el("span", "mark", "Marked"));
+  if (group.is_model_select) append(marks, el("span", "mark model", "Model Select"));
+  return marks;
+}
+
+function kvGrid(rows: Array<[string, string]>) {
+  const grid = el("div", "kv-grid");
+  for (const [label, value] of rows) {
+    append(grid, append(el("div", "kv"), el("span", "kv-label", label), el("strong", "", value)));
+  }
+  return grid;
+}
+
+function metric(label: string, value: string | number) {
+  return append(el("div", "metric"), el("strong", "", String(value)), el("span", "", label));
+}
+
+function compactMetric(label: string, value: string) {
+  return append(el("div", "compact-metric"), el("span", "", label), el("strong", "", value));
+}
+
+function statusChip(value: string, kind: string) {
+  return el("span", `status-chip ${kind} ${cssToken(value)}`, readable(value));
+}
+
+function commandButton(label: string, className: string, onClick: () => void, disabled = false) {
+  const node = el("button", className, label);
+  node.type = "button";
+  node.disabled = disabled;
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+function textInput(value: string, placeholder: string, onInput: (value: string) => void) {
+  const node = el("input", "text-input") as HTMLInputElement;
+  node.value = value;
+  node.placeholder = placeholder;
+  node.addEventListener("input", () => onInput(node.value));
+  return node;
+}
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function append<T extends HTMLElement>(parent: T, ...children: Array<Node | null | undefined>) {
+  for (const child of children) {
+    if (child) parent.appendChild(child);
+  }
+  return parent;
+}
+
 function readable(value: string) {
   return value
     .replace(/_/g, " ")
@@ -853,10 +1007,12 @@ function readable(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function cssToken(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
 function formatBytes(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
+  if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024;
   let unit = units[0];
@@ -866,7 +1022,3 @@ function formatBytes(bytes: number) {
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
-
-void bootstrap().catch((error) => {
-  setStatus("Startup failed", errorMessage(error));
-});
