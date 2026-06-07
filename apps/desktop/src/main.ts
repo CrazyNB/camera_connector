@@ -432,19 +432,12 @@ function renderTopBar(stage: WorkbenchStage) {
   const project = selectedProject();
   const title = append(
     el("div", "title-stack"),
-    renderWindowControls(),
     el("div", "product-name", "Camera Connector"),
     el("div", "project-context", project ? project.name : "No project selected"),
   );
   const status = el("div", state.error ? "status is-error" : "status", state.error ?? state.busy ?? state.status);
   append(top, title, renderStageRail(stage), status);
   return top;
-}
-
-function renderWindowControls() {
-  const controls = el("div", "window-controls");
-  append(controls, el("span", "traffic close"), el("span", "traffic minimize"), el("span", "traffic zoom"));
-  return controls;
 }
 
 function renderStageRail(stage: WorkbenchStage) {

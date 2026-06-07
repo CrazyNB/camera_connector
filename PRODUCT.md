@@ -18,7 +18,7 @@ Quiet, precise, capable.
 
 ## Anti-references
 
-Do not feel like a backend demo, command dashboard, marketing landing page, or decorative AI-generated interface. Avoid flat button sprawl, oversized empty cards, purple gradients, novelty motion, and dense panels without workflow hierarchy.
+Do not feel like a backend demo, command dashboard, marketing landing page, or decorative AI-generated interface. Avoid flat button sprawl, oversized empty cards, purple gradients, novelty motion, fake operating-system chrome, and dense panels without workflow hierarchy.
 
 ## Design Principles
 

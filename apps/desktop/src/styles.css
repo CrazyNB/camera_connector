@@ -87,40 +87,9 @@ button {
 
 .title-stack {
   display: grid;
-  grid-template-columns: auto minmax(0, auto);
-  grid-template-rows: auto auto;
-  align-items: center;
-  column-gap: 12px;
+  align-content: center;
+  gap: 2px;
   min-width: 0;
-}
-
-.window-controls {
-  display: flex;
-  grid-row: 1 / span 2;
-  gap: 7px;
-  align-items: center;
-}
-
-.traffic {
-  display: block;
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  box-shadow:
-    inset 0 0 0 1px oklch(0.2 0.02 250 / 0.14),
-    0 1px 1px oklch(0.2 0.02 250 / 0.08);
-}
-
-.traffic.close {
-  background: oklch(0.68 0.22 29);
-}
-
-.traffic.minimize {
-  background: oklch(0.78 0.16 82);
-}
-
-.traffic.zoom {
-  background: oklch(0.7 0.17 145);
 }
 
 .product-name {
