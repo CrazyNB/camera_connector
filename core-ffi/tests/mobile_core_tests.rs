@@ -1,4 +1,4 @@
-use camera_connector_core::{
+﻿use camera_connector_core::{
     AssetGroupQuery, CameraConnectorService, ModelProviderKind, ModelProviderSettings,
     ModelSendMode, PublishTransferMetadata, StoredObjectLocation, TransferRecord, TransferStatus,
 };
@@ -111,7 +111,6 @@ fn mobile_core_asset_group_json_exposes_model_evaluator_kind() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -218,23 +217,23 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
     let config_path = temp.path().join("config.json");
     let service = CameraConnectorService::new(Some(config_path.clone()));
     let project = service.create_project("Evaluation Settings").unwrap();
+    let project_id = project.project_id.clone();
     let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
 
     let default_settings: Value = serde_json::from_str(
         &core
-            .project_evaluation_settings_json(project.project_id.clone())
+            .project_evaluation_settings_json(project_id.clone())
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(default_settings["model_evaluation_enabled"], false);
     assert_eq!(default_settings["project_recommendation_mode"], "manual");
+    assert!(default_settings["cv_policy_overrides"].is_null());
 
     let saved: Value = serde_json::from_str(
         &core
             .save_project_evaluation_settings_json(
-                project.project_id.clone(),
+                project_id.clone(),
                 r#"{
-                    "model_evaluation_enabled":false,
                     "auto_evaluate_on_upload":true,
                     "auto_burst_recommendation_enabled":false,
                     "project_recommendation_mode":"manual",
@@ -244,7 +243,24 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
                     "cv_policy":"strict",
                     "allow_risky_model_selects":true,
                     "max_image_side":2048,
-                    "batch_size":8
+                    "batch_size":8,
+                    "cv_policy_overrides":{
+                        "blur_severe_edge_threshold":0.06,
+                        "blur_severe_frequency_threshold":0.06,
+                        "blur_high_edge_threshold":0.16,
+                        "blur_high_frequency_threshold":0.16,
+                        "highlight_clip_threshold":242,
+                        "shadow_clip_threshold":13,
+                        "clipping_high_ratio":0.09,
+                        "clipping_high_connected_ratio":0.14,
+                        "clipping_severe_ratio":0.40,
+                        "clipping_severe_connected_ratio":0.40,
+                        "color_cast_high_threshold":0.32,
+                        "color_cast_severe_threshold":0.55,
+                        "face_eye_open_warn_threshold":0.45,
+                        "face_exposure_warn_ratio":0.16,
+                        "face_color_cast_warn_threshold":0.32
+                    }
                 }"#
                 .to_string(),
             )
@@ -253,7 +269,7 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
     .unwrap();
     let loaded: Value = serde_json::from_str(
         &core
-            .project_evaluation_settings_json(project.project_id)
+            .project_evaluation_settings_json(project_id.clone())
             .unwrap(),
     )
     .unwrap();
@@ -265,6 +281,66 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
     assert_eq!(loaded["cv_policy"], "strict");
     assert_eq!(loaded["max_image_side"], 2048);
     assert_eq!(loaded["batch_size"], 8);
+    assert_eq!(
+        loaded["cv_policy_overrides"]["clipping_high_ratio"],
+        serde_json::json!(0.09)
+    );
+    assert_eq!(
+        loaded["cv_policy_overrides"]["clipping_high_connected_ratio"],
+        serde_json::json!(0.14)
+    );
+    assert_eq!(
+        loaded["cv_policy_overrides"]["color_cast_high_threshold"],
+        serde_json::json!(0.32)
+    );
+    assert_eq!(
+        loaded["cv_policy_overrides"]["face_eye_open_warn_threshold"],
+        serde_json::json!(0.45)
+    );
+    assert_eq!(
+        loaded["cv_policy_overrides"]["face_exposure_warn_ratio"],
+        serde_json::json!(0.16)
+    );
+    assert_eq!(
+        loaded["cv_policy_overrides"]["face_color_cast_warn_threshold"],
+        serde_json::json!(0.32)
+    );
+
+    let preserved: Value = serde_json::from_str(
+        &core
+            .save_project_evaluation_settings_json(
+                project_id.clone(),
+                r#"{
+                    "cv_policy":"loose"
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(preserved["cv_policy"], "loose");
+    assert_eq!(
+        preserved["cv_policy_overrides"]["clipping_high_ratio"],
+        serde_json::json!(0.09)
+    );
+    assert_eq!(
+        preserved["cv_policy_overrides"]["color_cast_high_threshold"],
+        serde_json::json!(0.32)
+    );
+
+    let cleared: Value = serde_json::from_str(
+        &core
+            .save_project_evaluation_settings_json(
+                project_id,
+                r#"{
+                    "cv_policy_overrides":null
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(cleared["cv_policy_overrides"].is_null());
 }
 
 #[test]
@@ -365,7 +441,6 @@ fn mobile_core_rejects_invalid_settings_enum_json() {
         ("project_recommendation_mode", "automatic"),
     ] {
         let patch = serde_json::json!({
-            "model_evaluation_enabled": false,
             "auto_evaluate_on_upload": false,
             "auto_burst_recommendation_enabled": true,
             "project_recommendation_mode": "manual",
@@ -525,7 +600,6 @@ fn mobile_core_generates_project_recommendation_with_candidate_visuals_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
@@ -637,7 +711,6 @@ fn mobile_core_round_trips_subject_assessment_json() {
     core.save_project_evaluation_settings_json(
         project.project_id.clone(),
         r#"{
-            "model_evaluation_enabled":false,
             "auto_evaluate_on_upload":false,
             "auto_burst_recommendation_enabled":true,
             "project_recommendation_mode":"manual",
@@ -1274,7 +1347,6 @@ fn mobile_core_exposes_model_evaluation_and_technical_gate_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -1355,7 +1427,6 @@ fn mobile_core_enqueues_manual_model_evaluation_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = false;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -1430,7 +1501,6 @@ fn mobile_core_evaluates_manual_model_inputs_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = false;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -1514,7 +1584,6 @@ fn mobile_core_recommends_burst_group_with_candidate_visuals_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = false;
     settings.auto_burst_recommendation_enabled = true;
     settings.prompt_profile_id = Some("general-default".to_string());

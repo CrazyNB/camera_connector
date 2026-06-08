@@ -26,6 +26,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     fun moveProjectGroup(sourceProjectId: String, groupId: String, targetProjectId: String): JSONObject =
         call { moveProjectGroupJson(handle, sourceProjectId, groupId, targetProjectId) }
 
+    fun deleteProjectGroup(projectId: String, groupId: String): JSONObject =
+        call { deleteProjectGroupJson(handle, projectId, groupId) }
+
     fun setAssetGroupUserMarks(
         projectId: String,
         groupId: String,
@@ -347,6 +350,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         groupId: String,
         targetProjectId: String,
     ): String
+    private external fun deleteProjectGroupJson(handle: Long, projectId: String, groupId: String): String
     private external fun setAssetGroupUserMarksJson(
         handle: Long,
         projectId: String,

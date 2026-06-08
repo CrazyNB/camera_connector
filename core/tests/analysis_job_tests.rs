@@ -810,7 +810,6 @@ fn enable_upload_model_evaluation(
         .project_evaluation_settings(project_id)
         .expect("settings should load")
         .expect("settings should exist");
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = auto_evaluate_on_upload;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -847,6 +846,9 @@ fn flat_sample(width: usize, height: usize, value: u8) -> PreviewSample {
         width,
         height,
         luma: vec![value; width * height],
+        red: None,
+        green: None,
+        blue: None,
         preview_source: Some("test".to_string()),
     }
 }
@@ -862,6 +864,9 @@ fn balanced_detail_sample(width: usize, height: usize) -> PreviewSample {
         width,
         height,
         luma,
+        red: None,
+        green: None,
+        blue: None,
         preview_source: Some("test".to_string()),
     }
 }

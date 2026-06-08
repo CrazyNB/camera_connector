@@ -3,7 +3,7 @@ use camera_connector_core::{
     EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ModelProviderKind,
     ModelProviderSettings, ModelSendMode, ProjectRecommendationMode, PromptProfile,
     PromptProfileVersion, PromptScope, SceneProfile, SqliteStore, StoredObjectLocation,
-    SubjectAssessment, TransferRecord, TransferStatus,
+    SubjectAssessment, TechnicalAssessmentPolicy, TransferRecord, TransferStatus,
 };
 use rusqlite::{params, Connection};
 
@@ -425,7 +425,6 @@ fn profile_style_tags(profiles: &[PromptProfile], profile_id: &str) -> Vec<Strin
 fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEvaluationSettings {
     camera_connector_core::ProjectEvaluationSettings {
         project_id: project_id.to_string(),
-        model_evaluation_enabled: false,
         auto_evaluate_on_upload: false,
         auto_burst_recommendation_enabled: true,
         project_recommendation_mode: ProjectRecommendationMode::Manual,
@@ -433,6 +432,7 @@ fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEval
         model_provider_settings_id: None,
         scene_profile: SceneProfile::General,
         cv_policy: CvPolicy::Standard,
+        cv_policy_overrides: None,
         allow_risky_model_selects: false,
         max_image_side: None,
         batch_size: None,
@@ -441,8 +441,7 @@ fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEval
 }
 
 #[test]
-fn evaluation_config_tests_new_project_gets_default_evaluation_settings_with_model_evaluation_disabled(
-) {
+fn evaluation_config_tests_new_project_gets_default_concrete_evaluation_actions_disabled() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
     let project = store
@@ -455,7 +454,6 @@ fn evaluation_config_tests_new_project_gets_default_evaluation_settings_with_mod
         .expect("settings should exist");
 
     assert_eq!(settings.project_id, project.project_id);
-    assert!(!settings.model_evaluation_enabled);
     assert!(!settings.auto_evaluate_on_upload);
     assert!(settings.auto_burst_recommendation_enabled);
     assert_eq!(
@@ -669,13 +667,11 @@ fn evaluation_config_tests_rejects_inconsistent_project_evaluation_settings() {
         .expect("second project profile should save");
 
     let mut settings = base_project_settings(&first_project.project_id);
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = None;
-    assert!(store
+    store
         .save_project_evaluation_settings(settings.clone())
-        .is_err());
+        .expect("prompt profile may be omitted");
 
-    settings.model_evaluation_enabled = false;
     settings.prompt_profile_id = Some("missing-profile".to_string());
     assert!(store
         .save_project_evaluation_settings(settings.clone())
@@ -686,7 +682,6 @@ fn evaluation_config_tests_rejects_inconsistent_project_evaluation_settings() {
         .save_project_evaluation_settings(settings.clone())
         .is_err());
 
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     store
         .save_project_evaluation_settings(settings.clone())
@@ -722,6 +717,42 @@ fn evaluation_config_tests_rejects_inconsistent_project_evaluation_settings() {
     store
         .save_project_evaluation_settings(settings)
         .expect("same project prompt profile should be accepted");
+}
+
+#[test]
+fn evaluation_config_tests_project_settings_round_trip_cv_policy_overrides() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Custom CV Policy")
+        .expect("project should create");
+    let mut settings = base_project_settings(&project.project_id);
+    let mut policy = TechnicalAssessmentPolicy::standard();
+    policy.clipping_high_ratio = 0.07;
+    policy.clipping_high_connected_ratio = 0.11;
+    settings.cv_policy_overrides = Some(policy);
+
+    let saved = store
+        .save_project_evaluation_settings(settings.clone())
+        .expect("settings should save");
+    let reloaded = store
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should query")
+        .expect("settings should exist");
+
+    assert_eq!(saved.cv_policy_overrides, Some(policy));
+    assert_eq!(reloaded.cv_policy_overrides, Some(policy));
+
+    settings.cv_policy_overrides = None;
+    store
+        .save_project_evaluation_settings(settings)
+        .expect("settings should clear override");
+    let cleared = store
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should reload")
+        .expect("settings should exist");
+
+    assert_eq!(cleared.cv_policy_overrides, None);
 }
 
 #[test]
@@ -790,34 +821,25 @@ fn evaluation_config_tests_project_settings_require_usable_prompt_profiles() {
         .expect("no-active profile should save");
 
     let mut settings = base_project_settings(&project.project_id);
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("disabled-project-profile".to_string());
     assert!(store
         .save_project_evaluation_settings(settings.clone())
         .is_err());
 
-    settings.model_evaluation_enabled = false;
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("no-active-project-profile".to_string());
     assert!(store
         .save_project_evaluation_settings(settings.clone())
         .is_err());
 
-    settings.model_evaluation_enabled = false;
     settings.prompt_profile_id = None;
     store
         .save_project_evaluation_settings(settings.clone())
-        .expect("disabled model evaluation may omit prompt");
+        .expect("prompt profile may be omitted");
 
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     store
         .save_project_evaluation_settings(settings.clone())
-        .expect("enabled model evaluation accepts usable global prompt");
+        .expect("usable global prompt should be accepted");
 
     let project_profile = PromptProfile {
         prompt_profile_id: "usable-project-profile".to_string(),

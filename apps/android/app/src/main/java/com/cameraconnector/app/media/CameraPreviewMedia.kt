@@ -247,17 +247,30 @@ fun loadPreviewSampleJson(
     val sampleHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
     val imageDataUrl = bitmapJpegDataUrl(bitmap)
     val luma = JSONArray()
+    val red = JSONArray()
+    val green = JSONArray()
+    val blue = JSONArray()
     for (y in 0 until sampleHeight) {
         val sourceY = (y * sourceHeight / sampleHeight).coerceIn(0, sourceHeight - 1)
         for (x in 0 until sampleWidth) {
             val sourceX = (x * sourceWidth / sampleWidth).coerceIn(0, sourceWidth - 1)
-            luma.put(pixelLuma(bitmap.getPixel(sourceX, sourceY)))
+            val pixel = bitmap.getPixel(sourceX, sourceY)
+            val pixelRed = pixelRed(pixel)
+            val pixelGreen = pixelGreen(pixel)
+            val pixelBlue = pixelBlue(pixel)
+            luma.put(pixelLuma(pixelRed, pixelGreen, pixelBlue))
+            red.put(pixelRed)
+            green.put(pixelGreen)
+            blue.put(pixelBlue)
         }
     }
     return JSONObject()
         .put("width", sampleWidth)
         .put("height", sampleHeight)
         .put("luma", luma)
+        .put("red", red)
+        .put("green", green)
+        .put("blue", blue)
         .put("image_data_url", imageDataUrl ?: JSONObject.NULL)
         .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         .toString()
@@ -268,6 +281,9 @@ private fun unsupportedPreviewSampleJson(location: String?): String =
         .put("width", 0)
         .put("height", 0)
         .put("luma", JSONArray())
+        .put("red", JSONArray())
+        .put("green", JSONArray())
+        .put("blue", JSONArray())
         .put("image_data_url", JSONObject.NULL)
         .put("preview_source", location?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         .toString()
@@ -279,10 +295,13 @@ private fun bitmapJpegDataUrl(bitmap: Bitmap): String? =
         "data:image/jpeg;base64," + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
     }.getOrNull()
 
-private fun pixelLuma(pixel: Int): Int {
-    val red = pixel shr 16 and 0xff
-    val green = pixel shr 8 and 0xff
-    val blue = pixel and 0xff
+private fun pixelRed(pixel: Int): Int = pixel shr 16 and 0xff
+
+private fun pixelGreen(pixel: Int): Int = pixel shr 8 and 0xff
+
+private fun pixelBlue(pixel: Int): Int = pixel and 0xff
+
+private fun pixelLuma(red: Int, green: Int, blue: Int): Int {
     return (red * 0.2126 + green * 0.7152 + blue * 0.0722).roundToInt().coerceIn(0, 255)
 }
 

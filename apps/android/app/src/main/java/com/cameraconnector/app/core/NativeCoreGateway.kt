@@ -106,6 +106,13 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun deleteProjectGroup(projectId: String, groupId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteProjectGroup(projectId, groupId)
+        }
+        refresh()
+    }
+
     override suspend fun setAssetGroupUserMarks(
         projectId: String,
         groupId: String,
@@ -815,7 +822,6 @@ internal fun ModelProviderSettingsUi.toModelProviderSettingsJson(): JSONObject =
 internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationSettingsUi =
     ProjectEvaluationSettingsUi(
         projectId = value.optString("project_id"),
-        modelEvaluationEnabled = value.optBoolean("model_evaluation_enabled", false),
         autoEvaluateOnUpload = value.optBoolean("auto_evaluate_on_upload", false),
         autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
         projectRecommendationMode = "manual",
@@ -823,6 +829,7 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
         modelProviderSettingsId = jsonStringOrNull(value, "model_provider_settings_id"),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
         cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
+        cvPolicyOverrides = value.optJSONObject("cv_policy_overrides")?.toTechnicalAssessmentPolicyUi(),
         allowRiskyModelSelects = value.optBoolean("allow_risky_model_selects", false),
         maxImageSide = value.optIntOrNull("max_image_side"),
         batchSize = value.optIntOrNull("batch_size"),
@@ -832,7 +839,6 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
 internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSONObject =
     JSONObject()
         .put("project_id", projectId)
-        .put("model_evaluation_enabled", modelEvaluationEnabled)
         .put("auto_evaluate_on_upload", autoEvaluateOnUpload)
         .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
         .put("project_recommendation_mode", "manual")
@@ -840,10 +846,48 @@ internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSON
         .put("model_provider_settings_id", modelProviderSettingsId ?: JSONObject.NULL)
         .put("scene_profile", sceneProfile.ifBlank { "general" })
         .put("cv_policy", cvPolicy.ifBlank { "standard" })
+        .put("cv_policy_overrides", cvPolicyOverrides?.toJson() ?: JSONObject.NULL)
         .put("allow_risky_model_selects", allowRiskyModelSelects)
         .put("max_image_side", maxImageSide ?: JSONObject.NULL)
         .put("batch_size", batchSize ?: JSONObject.NULL)
         .put("updated_at_ms", updatedAtMs)
+
+private fun JSONObject.toTechnicalAssessmentPolicyUi(): TechnicalAssessmentPolicyUi =
+    TechnicalAssessmentPolicyUi(
+        blurSevereEdgeThreshold = optDouble("blur_severe_edge_threshold"),
+        blurSevereFrequencyThreshold = optDouble("blur_severe_frequency_threshold"),
+        blurHighEdgeThreshold = optDouble("blur_high_edge_threshold"),
+        blurHighFrequencyThreshold = optDouble("blur_high_frequency_threshold"),
+        highlightClipThreshold = optInt("highlight_clip_threshold"),
+        shadowClipThreshold = optInt("shadow_clip_threshold"),
+        clippingHighRatio = optDouble("clipping_high_ratio"),
+        clippingHighConnectedRatio = optDouble("clipping_high_connected_ratio"),
+        clippingSevereRatio = optDouble("clipping_severe_ratio"),
+        clippingSevereConnectedRatio = optDouble("clipping_severe_connected_ratio"),
+        colorCastHighThreshold = optDouble("color_cast_high_threshold"),
+        colorCastSevereThreshold = optDouble("color_cast_severe_threshold"),
+        faceEyeOpenWarnThreshold = optDouble("face_eye_open_warn_threshold", 0.35),
+        faceExposureWarnRatio = optDouble("face_exposure_warn_ratio", 0.25),
+        faceColorCastWarnThreshold = optDouble("face_color_cast_warn_threshold", 0.42),
+    )
+
+private fun TechnicalAssessmentPolicyUi.toJson(): JSONObject =
+    JSONObject()
+        .put("blur_severe_edge_threshold", blurSevereEdgeThreshold)
+        .put("blur_severe_frequency_threshold", blurSevereFrequencyThreshold)
+        .put("blur_high_edge_threshold", blurHighEdgeThreshold)
+        .put("blur_high_frequency_threshold", blurHighFrequencyThreshold)
+        .put("highlight_clip_threshold", highlightClipThreshold)
+        .put("shadow_clip_threshold", shadowClipThreshold)
+        .put("clipping_high_ratio", clippingHighRatio)
+        .put("clipping_high_connected_ratio", clippingHighConnectedRatio)
+        .put("clipping_severe_ratio", clippingSevereRatio)
+        .put("clipping_severe_connected_ratio", clippingSevereConnectedRatio)
+        .put("color_cast_high_threshold", colorCastHighThreshold)
+        .put("color_cast_severe_threshold", colorCastSevereThreshold)
+        .put("face_eye_open_warn_threshold", faceEyeOpenWarnThreshold)
+        .put("face_exposure_warn_ratio", faceExposureWarnRatio)
+        .put("face_color_cast_warn_threshold", faceColorCastWarnThreshold)
 
 internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
     if (profiles == null) {

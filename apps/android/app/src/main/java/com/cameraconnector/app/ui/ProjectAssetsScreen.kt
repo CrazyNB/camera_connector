@@ -105,7 +105,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -176,6 +175,8 @@ internal fun ProjectAssetsScreen(
     var selectedPhoto by remember { mutableStateOf<ProjectAsset?>(null) }
     var selectedBurstPreview by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
     var detailNavigationDirection by remember { mutableStateOf<DetailNavigationDirection?>(null) }
+    var deleteCandidate by remember { mutableStateOf<ProjectAsset?>(null) }
+    var deleteInFlight by remember { mutableStateOf(false) }
     var selectedAssetIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var movePickerOpen by remember { mutableStateOf(false) }
     var filterExpanded by remember { mutableStateOf(false) }
@@ -274,11 +275,9 @@ internal fun ProjectAssetsScreen(
                     detailNavigationDirection = null
                     selectedPhoto = null
                 },
-                actionsEnabled = actionsEnabled,
+                actionsEnabled = actionsEnabled && !deleteInFlight,
                 onSplitBurstMember = { burstGroupId, memberGroupId ->
-                    val nextMember = detailBurstMembers
-                        .map { it.asset }
-                        .firstOrNull { it.assetSelectionId() != photo.assetSelectionId() }
+                    val nextMember = photoDetailSelectionAfterSplit(photo, detailBurstMembers)
                     onSplitBurstMember(burstGroupId, memberGroupId)
                     if (nextMember != null) {
                         detailNavigationDirection = if (
@@ -376,8 +375,68 @@ internal fun ProjectAssetsScreen(
                         }
                     }
                 },
+                onDeleteAsset = {
+                    deleteCandidate = photo
+                },
                 modifier = Modifier.fillMaxSize(),
             )
+            deleteCandidate?.let { candidate ->
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!deleteInFlight) {
+                            deleteCandidate = null
+                        }
+                    },
+                    title = { Text("\u5220\u9664\u7167\u7247\uff1f") },
+                    text = {
+                        Text(
+                            "\u5c06\u5220\u9664\u8be5\u7167\u7247\u7684\u6240\u6709\u683c\u5f0f\u6587\u4ef6\u3001\u8bc4\u4ef7\u3001\u63a8\u8350\u548c\u5206\u7ec4\u4fe1\u606f\u3002",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = actionsEnabled && !deleteInFlight,
+                            onClick = {
+                                val projectId = projectState.activeProjectId ?: return@TextButton
+                                if (deleteInFlight) {
+                                    return@TextButton
+                                }
+                                val deletedSelectionId = candidate.assetSelectionId()
+                                deleteCandidate = null
+                                deleteInFlight = true
+                                showProjectFeedback("\u6b63\u5728\u5220\u9664")
+                                coroutineScope.launch {
+                                    runCatching {
+                                        coreGateway.deleteProjectGroup(projectId, deletedSelectionId)
+                                        withContext(Dispatchers.IO) {
+                                            coreGateway.loadProjectAssets(assetQuery)
+                                        }
+                                        photoDetailSelectionAfterDelete(candidate, detailBurstMembers)
+                                    }.onSuccess {
+                                        selectedPhoto = null
+                                        detailNavigationDirection = null
+                                        showProjectFeedback("\u5df2\u5220\u9664")
+                                    }.onFailure {
+                                        showProjectFeedback("\u5220\u9664\u5931\u8d25")
+                                    }
+                                    deleteInFlight = false
+                                }
+                            },
+                        ) {
+                            Text("\u5220\u9664", color = ElementDanger)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            enabled = !deleteInFlight,
+                            onClick = { deleteCandidate = null },
+                        ) {
+                            Text("\u53d6\u6d88")
+                        }
+                    },
+                )
+            }
             projectFeedbackMessage?.let { message ->
                 ProjectFeedbackToast(
                     message = message,
@@ -1210,16 +1269,18 @@ private suspend fun burstRecommendationCandidateVisuals(
             }
     }
 
-private fun projectEvaluationFeedback(
+internal fun projectEvaluationFeedback(
     evaluatedCount: Int,
     recommendedBurstCount: Int,
 ): String =
     when {
         evaluatedCount > 0 && recommendedBurstCount > 0 ->
-            "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount \u00b7 \u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
+            "\u5df2\u5b8c\u6210\u5355\u5f20\u8bc4\u4ef7 $evaluatedCount \u00b7 \u8fde\u62cd\u8bc4\u4ef7 $recommendedBurstCount"
         recommendedBurstCount > 0 ->
-            "\u5df2\u5b8c\u6210\u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
-        else -> "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount"
+            "\u5df2\u5b8c\u6210\u8fde\u62cd\u8bc4\u4ef7 $recommendedBurstCount"
+        evaluatedCount > 0 ->
+            "\u5df2\u5b8c\u6210\u5355\u5f20\u8bc4\u4ef7 $evaluatedCount"
+        else -> "\u6ca1\u6709\u53ef\u8bc4\u4ef7\u9879"
     }
 
 @Composable
@@ -1296,62 +1357,70 @@ internal fun SelectedAssetsActionBar(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.animateContentSize(),
         color = ElementPanel.copy(alpha = 0.96f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.35f)),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "\u5df2\u9009 $selectedCount/$totalCount",
+                    "\u5df2\u9009 $selectedCount \u9879",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
-                    onClick = onSelectAll,
-                    enabled = selectedCount < totalCount,
+                    onClick = if (selectedCount < totalCount) onSelectAll else onCancel,
+                    enabled = totalCount > 0,
                 ) {
-                    Text("\u5168\u9009")
+                    Text(if (selectedCount < totalCount) "\u5168\u9009" else "\u6e05\u7a7a")
                 }
                 TextButton(onClick = onCancel) {
-                    Text("\u53d6\u6d88")
+                    Text("\u5b8c\u6210")
                 }
             }
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SelectionActionButton(
+                    icon = Icons.Outlined.PhotoLibrary,
                     text = "\u6253\u5f00",
                     enabled = canOpen,
                     primary = true,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     onClick = onOpen,
                 )
                 SelectionActionButton(
+                    icon = Icons.Outlined.AutoAwesome,
                     text = "\u8bc4\u4ef7",
                     enabled = canEvaluate,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     accent = ElementBlue,
                     onClick = onEvaluate,
                 )
                 SelectionActionButton(
+                    icon = Icons.Outlined.SyncAlt,
                     text = "\u79fb\u52a8",
                     enabled = canMove,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     onClick = onMove,
                 )
                 SelectionActionButton(
+                    icon = Icons.Outlined.PhotoLibrary,
                     text = "\u5408\u5e76",
                     enabled = canMerge,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     accent = ElementPurple,
                     onClick = onMerge,
                 )
@@ -1362,42 +1431,69 @@ internal fun SelectedAssetsActionBar(
 
 @Composable
 private fun SelectionActionButton(
+    icon: ImageVector,
     text: String,
     enabled: Boolean,
-    width: Dp,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     primary: Boolean = false,
     accent: Color = MaterialTheme.colorScheme.onSurface,
 ) {
+    val buttonModifier = modifier.height(44.dp)
     if (primary) {
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.width(width),
+            modifier = buttonModifier,
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElementBlue,
                 contentColor = ElementOnAccent,
             ),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         ) {
-            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SelectionActionButtonContent(icon = icon, text = text)
         }
     } else {
         OutlinedButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.width(width),
+            modifier = buttonModifier,
             shape = RoundedCornerShape(10.dp),
             border = BorderStroke(1.dp, if (enabled) accent.copy(alpha = 0.45f) else ElementBorder),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = ElementControlSurface,
                 contentColor = accent,
             ),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         ) {
-            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SelectionActionButtonContent(icon = icon, text = text)
         }
+    }
+}
+
+@Composable
+private fun SelectionActionButtonContent(
+    icon: ImageVector,
+    text: String,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+        )
+        Text(
+            text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

@@ -28,6 +28,7 @@ interface CoreGateway {
         groupId: String,
         targetProjectId: String,
     )
+    suspend fun deleteProjectGroup(projectId: String, groupId: String)
     suspend fun startReceiver()
     suspend fun stopReceiver()
     suspend fun saveReceiverSettings(settings: ReceiverSettings)
@@ -230,7 +231,6 @@ data class PromptProfileUi(
 
 data class ProjectEvaluationSettingsUi(
     val projectId: String,
-    val modelEvaluationEnabled: Boolean = false,
     val autoEvaluateOnUpload: Boolean = false,
     val autoBurstRecommendationEnabled: Boolean = true,
     val projectRecommendationMode: String = "manual",
@@ -238,10 +238,29 @@ data class ProjectEvaluationSettingsUi(
     val modelProviderSettingsId: String? = null,
     val sceneProfile: String = "general",
     val cvPolicy: String = "standard",
+    val cvPolicyOverrides: TechnicalAssessmentPolicyUi? = null,
     val allowRiskyModelSelects: Boolean = false,
     val maxImageSide: Int? = null,
     val batchSize: Int? = null,
     val updatedAtMs: Long = 0,
+)
+
+data class TechnicalAssessmentPolicyUi(
+    val blurSevereEdgeThreshold: Double,
+    val blurSevereFrequencyThreshold: Double,
+    val blurHighEdgeThreshold: Double,
+    val blurHighFrequencyThreshold: Double,
+    val highlightClipThreshold: Int,
+    val shadowClipThreshold: Int,
+    val clippingHighRatio: Double,
+    val clippingHighConnectedRatio: Double,
+    val clippingSevereRatio: Double,
+    val clippingSevereConnectedRatio: Double,
+    val colorCastHighThreshold: Double,
+    val colorCastSevereThreshold: Double,
+    val faceEyeOpenWarnThreshold: Double = 0.35,
+    val faceExposureWarnRatio: Double = 0.25,
+    val faceColorCastWarnThreshold: Double = 0.42,
 )
 
 data class EvaluationRunUi(
@@ -381,6 +400,12 @@ class PreviewCoreGateway : CoreGateway {
             },
         )
         return nextMarks
+    }
+
+    override suspend fun deleteProjectGroup(projectId: String, groupId: String) {
+        dashboard.value = dashboard.value.copy(
+            assets = dashboard.value.assets.filterNot { it.id == groupId },
+        )
     }
 
     override suspend fun createProject(name: String): ProjectSummary {

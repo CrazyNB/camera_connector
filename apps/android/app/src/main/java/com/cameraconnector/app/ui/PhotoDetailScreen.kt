@@ -46,15 +46,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BookmarkAdd
 import androidx.compose.material.icons.outlined.BookmarkAdded
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
@@ -65,7 +67,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -237,7 +238,15 @@ private fun PhotoDetailContent(
     val hasActionCallbacks = onToggleMarked != null ||
         onSplitBurstMember != null ||
         onToggleFavorite != null ||
-        onDeleteAsset != null
+        onDeleteAsset != null ||
+        onEvaluateModel != null
+    var evaluationSubmitted by remember(asset.id) { mutableStateOf(false) }
+    val evaluationInFlight = evaluationSubmitted || asset.modelEvaluationInFlight()
+    LaunchedEffect(asset.id, asset.modelStatus, asset.modelScore, asset.modelSummary) {
+        if (!asset.modelEvaluationInFlight()) {
+            evaluationSubmitted = false
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -280,6 +289,14 @@ private fun PhotoDetailContent(
                 favoriteSelected = photoDetailFavoriteSelected(asset),
                 favoriteEnabled = actionsEnabled && onToggleFavorite != null,
                 onToggleFavorite = onToggleFavorite,
+                evaluateEnabled = actionsEnabled && onEvaluateModel != null,
+                evaluationInFlight = evaluationInFlight,
+                onEvaluateModel = onEvaluateModel?.let { evaluate ->
+                    {
+                        evaluationSubmitted = true
+                        evaluate(asset)
+                    }
+                },
                 onDeleteAsset = onDeleteAsset,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -296,8 +313,8 @@ private fun PhotoDetailContent(
             SmartSelectionDetailCard(
                 asset = asset,
                 burstPositionText = detailBurstPositionText,
-                evaluateEnabled = actionsEnabled && onEvaluateModel != null,
-                onEvaluateModel = onEvaluateModel,
+                evaluateEnabled = false,
+                onEvaluateModel = null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .detailHorizontalSwipe(
@@ -315,9 +332,9 @@ private fun PhotoDetailContent(
                         onSwipeNext = onNavigateNextGroup,
                     ),
             ) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("拍摄参数", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
                     CompactDetailGrid(metadataLines)
                 }
             }
@@ -333,11 +350,7 @@ private fun PhotoDetailContent(
             Column(Modifier.padding(16.dp)) {
                 Text("来源信息", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                DetailLine("来源", asset.sourceLabel())
-                DetailLine("账号", asset.username ?: "未知")
-                DetailLine("原始路径", asset.originalPath ?: asset.displayPath)
-                DetailLine("接收时间", formatEpochMillisTextForDisplay(asset.receivedAt))
-                DetailLine("文件大小", asset.sizeBytes?.let { "$it bytes" } ?: "未知")
+                CompactDetailGrid(photoDetailSourceLines(asset))
             }
         }
         ElementCard(
@@ -351,10 +364,7 @@ private fun PhotoDetailContent(
             Column(Modifier.padding(16.dp)) {
                 Text("文件", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                DetailLine("位置", asset.displayPath)
-                DetailLine("RAW", asset.rawPath ?: "-")
-                DetailLine("JPEG", asset.jpegPath ?: "-")
-                DetailLine("视频", asset.videoPath ?: "-")
+                CompactDetailGrid(photoDetailFileLines(asset))
             }
         }
     }
@@ -368,8 +378,6 @@ private fun SmartSelectionDetailCard(
     onEvaluateModel: ((ProjectAsset) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val burst = asset.burst
-    val score = asset.modelScoreText()
     CompactSmartSelectionDetailCard(
         asset = asset,
         burstPositionText = burstPositionText,
@@ -377,109 +385,6 @@ private fun SmartSelectionDetailCard(
         onEvaluateModel = onEvaluateModel,
         modifier = modifier,
     )
-    return
-    ElementCard(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("\u667a\u80fd\u4f18\u9009", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        asset.smartSummaryText() ?: "等待模型评价",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    onEvaluateModel?.let { evaluate ->
-                        IconButton(
-                            onClick = { evaluate(asset) },
-                            enabled = evaluateEnabled,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .semantics {
-                                    contentDescription = "\u91cd\u65b0\u6a21\u578b\u8bc4\u4ef7"
-                                    stateDescription = if (evaluateEnabled) "\u53ef\u7528" else "\u4e0d\u53ef\u7528"
-                                },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Refresh,
-                                contentDescription = null,
-                                tint = if (evaluateEnabled) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    score?.let {
-                        Surface(
-                            color = smartBadgeColor(asset).copy(alpha = 0.14f),
-                            contentColor = smartBadgeColor(asset),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, smartBadgeColor(asset).copy(alpha = 0.38f)),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(it, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                Text("\u6a21\u578b\u5206", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                asset.modelBadgeText()?.let { ElementTag(it, smartBadgeColor(asset)) }
-                asset.groupBestModelScoreText()
-                    ?.takeIf { it != asset.modelScoreText() }
-                    ?.let { ElementTag("\u4f18\u9009\u8bc4\u5206 $it", ElementWarning) }
-                asset.recommendationBadgeText()?.let {
-                    ElementTag(it, if (asset.isBestRecommendedAsset()) ElementSuccess else ElementInfo)
-                }
-            }
-            asset.modelStatus?.let { DetailLine("\u8bc4\u4ef7\u72b6\u6001", modelEvaluationStatusLabel(it)) }
-            asset.modelTier?.let { DetailLine("\u8bc4\u4ef7\u7b49\u7ea7", modelEvaluationTierLabel(it)) }
-            asset.modelEvaluatorKind?.let { DetailLine("评价来源", modelEvaluationSourceLabel(it)) }
-            asset.technicalGateStatus?.let { DetailLine("\u6280\u672f\u95e8\u63a7", technicalGateStatusLabel(it)) }
-            asset.technicalDefects.takeIf { it.isNotEmpty() }?.let { defects ->
-                DetailLine(
-                    "\u6280\u672f\u98ce\u9669",
-                    defects.joinToString(" / ") { defect ->
-                        listOfNotNull(
-                            defect.defectType.takeIf { it.isNotBlank() }?.let(::technicalDefectTypeLabel),
-                            defect.severity.takeIf { it.isNotBlank() }?.let(::technicalDefectSeverityLabel),
-                            defect.reason?.takeIf { it.isNotBlank() }?.let(::smartReasonText),
-                        )
-                            .joinToString("\uff1a")
-                    },
-                )
-            }
-            burst?.let {
-                DetailLine(
-                    "连拍位置",
-                    burstPositionText ?: "1/${it.memberCount}",
-                )
-                asset.groupBestModelScoreText()?.let { bestScore ->
-                    DetailLine("\u4f18\u9009\u7167\u7247\u8bc4\u5206", bestScore)
-                }
-                DetailLine("\u63a8\u8350\u72b6\u6001", recommendationStatusLabel(it.recommendationStatus))
-                it.bestAssetGroupId?.takeIf { bestId -> bestId.isNotBlank() }?.let { bestId ->
-                    DetailLine("\u7b97\u6cd5\u4f18\u9009", if (asset.isBestRecommendedAsset()) "\u5f53\u524d\u7167\u7247" else bestId)
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -490,21 +395,11 @@ private fun CompactSmartSelectionDetailCard(
     onEvaluateModel: ((ProjectAsset) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val burst = asset.burst
     val score = asset.modelScoreText()
     val summary = asset.modelSummaryDisplayText()
     val technicalRisk = asset.compactTechnicalRiskText()
-    val recommendationText = asset.compactRecommendationText()
-    val selectedScoreText = asset.groupBestModelScoreText()
-        ?.takeIf { it != asset.modelScoreText() }
+    val summaryExpandable = summary.length > 90
     var summaryExpanded by remember(asset.id, summary) { mutableStateOf(false) }
-    var evaluationSubmitted by remember(asset.id) { mutableStateOf(false) }
-    val evaluationInFlight = evaluationSubmitted || asset.modelEvaluationInFlight()
-    LaunchedEffect(asset.id, asset.modelStatus, asset.modelScore, asset.modelSummary) {
-        if (!asset.modelEvaluationInFlight()) {
-            evaluationSubmitted = false
-        }
-    }
     ElementCard(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -522,39 +417,6 @@ private fun CompactSmartSelectionDetailCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    onEvaluateModel?.let { evaluate ->
-                        IconButton(
-                            onClick = {
-                                evaluationSubmitted = true
-                                evaluate(asset)
-                            },
-                            enabled = evaluateEnabled && !evaluationInFlight,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .semantics {
-                                    contentDescription = "\u91cd\u65b0\u6a21\u578b\u8bc4\u4ef7"
-                                    stateDescription = when {
-                                        evaluationInFlight -> "\u5df2\u63d0\u4ea4\uff0c\u7b49\u5f85\u7ed3\u679c"
-                                        evaluateEnabled -> "\u53ef\u7528"
-                                        else -> "\u4e0d\u53ef\u7528"
-                                    }
-                                },
-                        ) {
-                            if (evaluationInFlight) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
-                                    strokeWidth = 2.dp,
-                                    color = ElementBlue,
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Outlined.Refresh,
-                                    contentDescription = null,
-                                    tint = if (evaluateEnabled) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
                     score?.let { SmartScorePill(it, asset.modelScoreColor()) }
                 }
             }
@@ -562,12 +424,31 @@ private fun CompactSmartSelectionDetailCard(
                 summary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { summaryExpanded = !summaryExpanded },
+                    .clickable(enabled = summaryExpandable) { summaryExpanded = !summaryExpanded },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = if (summaryExpanded) Int.MAX_VALUE else 2,
                 overflow = if (summaryExpanded) TextOverflow.Clip else TextOverflow.Ellipsis,
             )
+            if (summaryExpandable) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { summaryExpanded = !summaryExpanded },
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Icon(
+                        imageVector = if (summaryExpanded) {
+                            Icons.Outlined.KeyboardArrowUp
+                        } else {
+                            Icons.Outlined.KeyboardArrowDown
+                        },
+                        contentDescription = if (summaryExpanded) "收起评价摘要" else "展开评价摘要",
+                        tint = ElementBlue,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -581,10 +462,6 @@ private fun CompactSmartSelectionDetailCard(
                 asset.compactTechnicalGateTag()?.let { ElementTag(it, ElementDanger) }
             }
             technicalRisk?.let { SmartInsightLine("\u98ce\u9669", it, ElementDanger) }
-            recommendationText?.let { SmartInsightLine("\u63a8\u8350", it, ElementSuccess) }
-            if (burst != null && selectedScoreText != null) {
-                SmartInsightLine("\u4f18\u9009\u8bc4\u5206", selectedScoreText, ElementWarning)
-            }
         }
     }
 }
@@ -619,27 +496,20 @@ private fun SmartInsightLine(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            color = color.copy(alpha = 0.10f),
-            contentColor = color,
-            shape = RoundedCornerShape(999.dp),
-            border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
-        ) {
-            Text(
-                label,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-            )
-        }
+        Text(
+            label,
+            modifier = Modifier.width(34.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
         Text(
             value,
             modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.onSurface,
+            color = color,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
             maxLines = 2,
@@ -684,8 +554,8 @@ private fun ProjectAsset.compactTechnicalGateTag(): String? {
     if (technicalDefects.isNotEmpty()) {
         return null
     }
-    val gate = technicalGateStatus?.trim()?.lowercase() ?: return null
-    if (gate !in setOf("warn", "reject", "inconclusive", "unsupported")) {
+    val gate = technicalRiskStatus() ?: return null
+    if (!hasTechnicalRisk()) {
         return null
     }
     return technicalGateStatusLabel(gate)
@@ -698,16 +568,6 @@ private fun ProjectAsset.compactTechnicalRiskText(): String? {
     return technicalDefects
         .take(2)
         .joinToString(" / ") { defect -> defect.userFacingRiskText() }
-}
-
-private fun ProjectAsset.compactRecommendationText(): String? {
-    val burst = burst ?: return null
-    val bestId = burst.bestAssetGroupId?.takeIf { it.isNotBlank() }
-    return when {
-        bestId == null -> null
-        isBestRecommendedAsset() -> "\u5f53\u524d\u7167\u7247\u662f\u6a21\u578b\u4f18\u9009"
-        else -> "\u6a21\u578b\u5df2\u4f18\u9009\u7ec4\u5185\u5176\u4ed6\u7167\u7247"
-    }
 }
 
 private fun ProjectAssetTechnicalDefect.userFacingRiskText(): String {
@@ -767,10 +627,27 @@ private fun photoMetadataAspectRatio(dimensions: String): Float? {
     return width / height
 }
 
-private fun detailCarouselHeight(imageAspectRatio: Float?): Dp =
+internal fun photoDetailSourceLines(asset: ProjectAsset): List<Pair<String, String>> =
+    listOf(
+        "来源" to asset.sourceLabel(),
+        "账号" to (asset.username ?: "未知"),
+        "原始路径" to (asset.originalPath ?: asset.displayPath),
+        "接收时间" to formatEpochMillisTextForDisplay(asset.receivedAt),
+        "文件大小" to (asset.sizeBytes?.let { "$it bytes" } ?: "未知"),
+    )
+
+internal fun photoDetailFileLines(asset: ProjectAsset): List<Pair<String, String>> =
+    listOfNotNull(
+        "位置" to asset.displayPath,
+        asset.rawPath?.takeIf { it.isNotBlank() }?.let { "RAW" to it },
+        asset.jpegPath?.takeIf { it.isNotBlank() }?.let { "JPEG" to it },
+        asset.videoPath?.takeIf { it.isNotBlank() }?.let { "视频" to it },
+    )
+
+internal fun detailCarouselHeight(imageAspectRatio: Float?): Dp =
     when {
-        imageAspectRatio == null -> 360.dp
-        imageAspectRatio >= 1.2f -> 300.dp
+        imageAspectRatio == null -> 300.dp
+        imageAspectRatio >= 1.2f -> 220.dp
         imageAspectRatio <= 0.82f -> 480.dp
         else -> 380.dp
     }
@@ -824,6 +701,16 @@ private fun DetailPhotoCarousel(
             .coerceAtLeast(pageWidthPx * 0.72f + sideGapPx)
         val thresholdPx = pageStridePx * 0.18f
         val pageOffsetX = if (settling) settleOffsetX else dragOffsetX
+        val mainHorizontalPadding = if (imageAspectRatio != null && imageAspectRatio >= 1.2f) {
+            16.dp
+        } else {
+            40.dp
+        }
+        val sideHorizontalPadding = if (imageAspectRatio != null && imageAspectRatio >= 1.2f) {
+            28.dp
+        } else {
+            48.dp
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -895,7 +782,7 @@ private fun DetailPhotoCarousel(
                 DetailCarouselPhotoPage(
                     asset = previous,
                     previewQuality = PreviewQuality.Thumbnail,
-                    horizontalPadding = 48.dp,
+                    horizontalPadding = sideHorizontalPadding,
                     pageScale = 0.9f,
                     onClick = onPrevious,
                     modifier = Modifier
@@ -906,8 +793,7 @@ private fun DetailPhotoCarousel(
             DetailCarouselPhotoPage(
                 asset = asset,
                 previewQuality = PreviewQuality.Detail,
-                horizontalPadding = 40.dp,
-                positionText = positionText,
+                horizontalPadding = mainHorizontalPadding,
                 onClick = onClick,
                 modifier = Modifier
                     .fillMaxSize()
@@ -917,13 +803,32 @@ private fun DetailPhotoCarousel(
                 DetailCarouselPhotoPage(
                     asset = next,
                     previewQuality = PreviewQuality.Thumbnail,
-                    horizontalPadding = 48.dp,
+                    horizontalPadding = sideHorizontalPadding,
                     pageScale = 0.9f,
                     onClick = onNext,
                     modifier = Modifier
                         .fillMaxSize()
                         .offset { IntOffset((pageOffsetX + pageStridePx).roundToInt(), 0) },
                 )
+            }
+            positionText?.let {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp, top = 8.dp),
+                    color = ElementBackground.copy(alpha = 0.82f),
+                    contentColor = ElementPurple,
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, ElementPurple.copy(alpha = 0.46f)),
+                ) {
+                    Text(
+                        text = it,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 11.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }
@@ -935,7 +840,6 @@ private fun DetailCarouselPhotoPage(
     previewQuality: PreviewQuality,
     horizontalPadding: Dp,
     pageScale: Float = 1f,
-    positionText: String? = null,
     onClick: (() -> Unit)?,
     onPreviewReady: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -960,25 +864,6 @@ private fun DetailCarouselPhotoPage(
             showFallbackText = false,
             modifier = Modifier.fillMaxHeight(),
         )
-        positionText?.let {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(10.dp),
-                color = ElementBackground.copy(alpha = 0.78f),
-                contentColor = ElementPurple,
-                shape = RoundedCornerShape(999.dp),
-                border = BorderStroke(1.dp, ElementPurple.copy(alpha = 0.46f)),
-            ) {
-                Text(
-                    text = it,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    fontSize = 11.sp,
-                    lineHeight = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
     }
 }
 
@@ -993,6 +878,9 @@ private fun PhotoDetailDecisionActions(
     favoriteSelected: Boolean,
     favoriteEnabled: Boolean,
     onToggleFavorite: ((String) -> Unit)?,
+    evaluateEnabled: Boolean,
+    evaluationInFlight: Boolean,
+    onEvaluateModel: (() -> Unit)?,
     onDeleteAsset: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
@@ -1017,6 +905,21 @@ private fun PhotoDetailDecisionActions(
             enabled = favoriteEnabled,
             onClick = {
                 onToggleFavorite?.invoke(asset.assetSelectionId())
+            },
+        )
+        PhotoDetailIconAction(
+            icon = Icons.Outlined.AutoAwesome,
+            contentDescription = "\u63d0\u4ea4\u6a21\u578b\u8bc4\u4ef7",
+            tint = ElementBlue,
+            enabled = evaluateEnabled && onEvaluateModel != null && !evaluationInFlight,
+            loading = evaluationInFlight,
+            stateDescription = when {
+                evaluationInFlight -> "\u5df2\u63d0\u4ea4\uff0c\u7b49\u5f85\u7ed3\u679c"
+                evaluateEnabled -> "\u53ef\u7528"
+                else -> "\u4e0d\u53ef\u7528"
+            },
+            onClick = {
+                onEvaluateModel?.invoke()
             },
         )
         PhotoDetailIconAction(
@@ -1048,6 +951,8 @@ private fun PhotoDetailIconAction(
     contentDescription: String,
     tint: Color,
     enabled: Boolean,
+    loading: Boolean = false,
+    stateDescription: String? = null,
     onClick: () -> Unit,
 ) {
     Surface(
@@ -1059,12 +964,26 @@ private fun PhotoDetailIconAction(
         shape = CircleShape,
         border = BorderStroke(1.dp, if (enabled) tint.copy(alpha = 0.42f) else ElementBorder),
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(22.dp),
-            )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.semantics {
+                this.contentDescription = contentDescription
+                stateDescription?.let { this.stateDescription = it }
+            },
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(21.dp),
+                    strokeWidth = 2.dp,
+                    color = tint,
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
@@ -1321,19 +1240,11 @@ internal const val FULLSCREEN_DOUBLE_TAP_SCALE = 2.5f
 internal const val FULLSCREEN_MAX_SCALE = 5f
 
 @Composable
-internal fun DetailLine(label: String, value: String) {
-    Column(Modifier.padding(vertical = 4.dp)) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@Composable
 private fun CompactDetailGrid(lines: List<Pair<String, String>>) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         lines.chunked(2).forEach { row ->
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Top,
             ) {
                 row.forEach { (label, value) ->
@@ -1361,14 +1272,17 @@ private fun CompactDetailCell(
         Text(
             label,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(1.dp))
         Text(
             value,
-            style = MaterialTheme.typography.bodyMedium,
-            lineHeight = 18.sp,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
+            lineHeight = 16.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

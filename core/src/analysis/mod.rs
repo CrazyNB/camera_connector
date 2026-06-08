@@ -27,6 +27,7 @@ pub use recommendation::{
     SelectionSource,
 };
 pub use technical::{
-    assess_preview_sample, PreviewSample, TechnicalAssessment, TechnicalAssessmentStatus,
-    TechnicalDefectFlag, TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+    assess_preview_sample, assess_preview_sample_with_policy, PreviewSample, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
+    TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
 };

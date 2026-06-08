@@ -7,6 +7,12 @@ pub struct PreviewSample {
     pub width: usize,
     pub height: usize,
     pub luma: Vec<u8>,
+    #[serde(default)]
+    pub red: Option<Vec<u8>>,
+    #[serde(default)]
+    pub green: Option<Vec<u8>>,
+    #[serde(default)]
+    pub blue: Option<Vec<u8>>,
     pub preview_source: Option<String>,
 }
 
@@ -155,11 +161,123 @@ pub struct TechnicalAssessment {
     pub analyzed_at_ms: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TechnicalAssessmentPolicy {
+    pub blur_severe_edge_threshold: f64,
+    pub blur_severe_frequency_threshold: f64,
+    pub blur_high_edge_threshold: f64,
+    pub blur_high_frequency_threshold: f64,
+    pub highlight_clip_threshold: u8,
+    pub shadow_clip_threshold: u8,
+    pub clipping_high_ratio: f64,
+    pub clipping_high_connected_ratio: f64,
+    pub clipping_severe_ratio: f64,
+    pub clipping_severe_connected_ratio: f64,
+    pub color_cast_high_threshold: f64,
+    pub color_cast_severe_threshold: f64,
+    #[serde(default = "default_face_eye_open_warn_threshold")]
+    pub face_eye_open_warn_threshold: f64,
+    #[serde(default = "default_face_exposure_warn_ratio")]
+    pub face_exposure_warn_ratio: f64,
+    #[serde(default = "default_face_color_cast_warn_threshold")]
+    pub face_color_cast_warn_threshold: f64,
+}
+
+fn default_face_eye_open_warn_threshold() -> f64 {
+    TechnicalAssessmentPolicy::standard().face_eye_open_warn_threshold
+}
+
+fn default_face_exposure_warn_ratio() -> f64 {
+    TechnicalAssessmentPolicy::standard().face_exposure_warn_ratio
+}
+
+fn default_face_color_cast_warn_threshold() -> f64 {
+    TechnicalAssessmentPolicy::standard().face_color_cast_warn_threshold
+}
+
+impl TechnicalAssessmentPolicy {
+    pub fn loose() -> Self {
+        Self {
+            blur_severe_edge_threshold: 0.025,
+            blur_severe_frequency_threshold: 0.025,
+            blur_high_edge_threshold: 0.09,
+            blur_high_frequency_threshold: 0.09,
+            highlight_clip_threshold: 250,
+            shadow_clip_threshold: 5,
+            clipping_high_ratio: 0.18,
+            clipping_high_connected_ratio: 0.25,
+            clipping_severe_ratio: 0.65,
+            clipping_severe_connected_ratio: 0.65,
+            color_cast_high_threshold: 0.55,
+            color_cast_severe_threshold: 0.85,
+            face_eye_open_warn_threshold: 0.25,
+            face_exposure_warn_ratio: 0.35,
+            face_color_cast_warn_threshold: 0.55,
+        }
+    }
+
+    pub fn standard() -> Self {
+        Self {
+            blur_severe_edge_threshold: 0.04,
+            blur_severe_frequency_threshold: 0.04,
+            blur_high_edge_threshold: 0.12,
+            blur_high_frequency_threshold: 0.12,
+            highlight_clip_threshold: 245,
+            shadow_clip_threshold: 10,
+            clipping_high_ratio: 0.12,
+            clipping_high_connected_ratio: 0.18,
+            clipping_severe_ratio: 0.50,
+            clipping_severe_connected_ratio: 0.50,
+            color_cast_high_threshold: 0.42,
+            color_cast_severe_threshold: 0.70,
+            face_eye_open_warn_threshold: 0.35,
+            face_exposure_warn_ratio: 0.25,
+            face_color_cast_warn_threshold: 0.42,
+        }
+    }
+
+    pub fn strict() -> Self {
+        Self {
+            blur_severe_edge_threshold: 0.06,
+            blur_severe_frequency_threshold: 0.06,
+            blur_high_edge_threshold: 0.16,
+            blur_high_frequency_threshold: 0.16,
+            highlight_clip_threshold: 242,
+            shadow_clip_threshold: 13,
+            clipping_high_ratio: 0.08,
+            clipping_high_connected_ratio: 0.12,
+            clipping_severe_ratio: 0.40,
+            clipping_severe_connected_ratio: 0.40,
+            color_cast_high_threshold: 0.32,
+            color_cast_severe_threshold: 0.55,
+            face_eye_open_warn_threshold: 0.45,
+            face_exposure_warn_ratio: 0.16,
+            face_color_cast_warn_threshold: 0.32,
+        }
+    }
+}
+
 pub fn assess_preview_sample(
     asset_group_id: &str,
     sample: PreviewSample,
     assessor_version: &str,
     analyzed_at_ms: i64,
+) -> TechnicalAssessment {
+    assess_preview_sample_with_policy(
+        asset_group_id,
+        sample,
+        assessor_version,
+        analyzed_at_ms,
+        TechnicalAssessmentPolicy::standard(),
+    )
+}
+
+pub fn assess_preview_sample_with_policy(
+    asset_group_id: &str,
+    sample: PreviewSample,
+    assessor_version: &str,
+    analyzed_at_ms: i64,
+    policy: TechnicalAssessmentPolicy,
 ) -> TechnicalAssessment {
     let assessor_version = if assessor_version.trim().is_empty() {
         DEFAULT_ASSESSOR_VERSION
@@ -192,7 +310,9 @@ pub fn assess_preview_sample(
     let mut defect_flags = Vec::new();
     let edge_detail = edge_detail_score(&sample);
     let high_frequency = high_frequency_proxy(&sample);
-    if edge_detail < 0.04 && high_frequency < 0.04 {
+    if edge_detail < policy.blur_severe_edge_threshold
+        && high_frequency < policy.blur_severe_frequency_threshold
+    {
         defect_flags.push(defect_flag(
             TechnicalDefectType::Blur,
             TechnicalDefectSeverity::Severe,
@@ -203,7 +323,9 @@ pub fn assess_preview_sample(
             ])),
             "severe defocus or blur risk",
         ));
-    } else if edge_detail < 0.12 && high_frequency < 0.12 {
+    } else if edge_detail < policy.blur_high_edge_threshold
+        && high_frequency < policy.blur_high_frequency_threshold
+    {
         defect_flags.push(defect_flag(
             TechnicalDefectType::Blur,
             TechnicalDefectSeverity::High,
@@ -220,16 +342,19 @@ pub fn assess_preview_sample(
         &mut defect_flags,
         &sample,
         TechnicalDefectType::HighlightClip,
-        245,
+        policy.highlight_clip_threshold,
         true,
+        policy,
     );
     push_clipping_defect(
         &mut defect_flags,
         &sample,
         TechnicalDefectType::ShadowClip,
-        10,
+        policy.shadow_clip_threshold,
         false,
+        policy,
     );
+    push_color_cast_defect(&mut defect_flags, &sample, policy);
 
     let gate_status = gate_status_from_defects(&defect_flags);
     TechnicalAssessment {
@@ -241,6 +366,74 @@ pub fn assess_preview_sample(
         preview_source: sample.preview_source,
         visual_signature,
         analyzed_at_ms,
+    }
+}
+
+fn push_color_cast_defect(
+    defect_flags: &mut Vec<TechnicalDefectFlag>,
+    sample: &PreviewSample,
+    policy: TechnicalAssessmentPolicy,
+) {
+    let Some((red, green, blue)) = rgb_channels(sample) else {
+        return;
+    };
+    let pixel_count = red.len();
+    if pixel_count == 0 {
+        return;
+    }
+
+    let mean_red = red.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
+    let mean_green = green.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
+    let mean_blue = blue.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
+    let mean_luma = sample.luma.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
+    if mean_luma < 24.0 || mean_luma > 232.0 {
+        return;
+    }
+
+    let normalized = [
+        mean_red / mean_luma.max(1.0),
+        mean_green / mean_luma.max(1.0),
+        mean_blue / mean_luma.max(1.0),
+    ];
+    let max_channel = normalized.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let min_channel = normalized.iter().copied().fold(f64::MAX, f64::min);
+    let cast_strength = max_channel - min_channel;
+    let high_threshold = policy.color_cast_high_threshold.max(0.0);
+    let severe_threshold = policy
+        .color_cast_severe_threshold
+        .max(high_threshold)
+        .max(0.0);
+    let (severity, confidence) = if cast_strength >= severe_threshold {
+        (TechnicalDefectSeverity::Severe, 0.88)
+    } else if cast_strength >= high_threshold {
+        (TechnicalDefectSeverity::High, 0.72)
+    } else {
+        return;
+    };
+
+    defect_flags.push(defect_flag(
+        TechnicalDefectType::ColorCast,
+        severity,
+        confidence,
+        Some(metrics_json(&[
+            ("mean_red", mean_red),
+            ("mean_green", mean_green),
+            ("mean_blue", mean_blue),
+            ("cast_strength", cast_strength),
+        ])),
+        "strong color cast risk",
+    ));
+}
+
+fn rgb_channels(sample: &PreviewSample) -> Option<(&[u8], &[u8], &[u8])> {
+    let expected_len = sample.width.saturating_mul(sample.height);
+    let red = sample.red.as_deref()?;
+    let green = sample.green.as_deref()?;
+    let blue = sample.blue.as_deref()?;
+    if red.len() == expected_len && green.len() == expected_len && blue.len() == expected_len {
+        Some((red, green, blue))
+    } else {
+        None
     }
 }
 
@@ -331,6 +524,7 @@ fn push_clipping_defect(
     defect_type: TechnicalDefectType,
     threshold: u8,
     high: bool,
+    policy: TechnicalAssessmentPolicy,
 ) {
     let clipped_count = sample
         .luma
@@ -345,9 +539,13 @@ fn push_clipping_defect(
         .count();
     let clipped_ratio = clipped_count as f64 / sample.luma.len() as f64;
     let connected_ratio = coarse_connected_clipping_ratio(sample, threshold, high);
-    let (severity, confidence) = if clipped_ratio >= 0.50 || connected_ratio >= 0.50 {
+    let (severity, confidence) = if clipped_ratio >= policy.clipping_severe_ratio
+        || connected_ratio >= policy.clipping_severe_connected_ratio
+    {
         (TechnicalDefectSeverity::Severe, 0.92)
-    } else if clipped_ratio >= 0.12 || connected_ratio >= 0.18 {
+    } else if clipped_ratio >= policy.clipping_high_ratio
+        || connected_ratio >= policy.clipping_high_connected_ratio
+    {
         (TechnicalDefectSeverity::High, 0.76)
     } else {
         return;

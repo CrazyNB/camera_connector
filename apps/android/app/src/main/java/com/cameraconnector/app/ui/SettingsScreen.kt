@@ -62,6 +62,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -75,6 +76,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -104,7 +106,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetQuery
 import com.cameraconnector.app.core.ProjectAssetRole
@@ -116,6 +117,7 @@ import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
+import com.cameraconnector.app.core.TechnicalAssessmentPolicyUi
 import com.cameraconnector.app.media.PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
 import com.cameraconnector.app.media.PhotoMetadata
 import com.cameraconnector.app.media.PreviewQuality
@@ -129,6 +131,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 internal fun SettingsScreen(
@@ -215,9 +219,9 @@ internal fun SettingsScreen(
             SettingsMenuRow(
                 title = "模型服务",
                 subtitle = if (configuredCount > 0) {
-                    "已配置 ${configuredCount} 个，项目内选择使用"
+                    "已配置 ${configuredCount} 个"
                 } else {
-                    "未配置，项目智能评价需要模型服务"
+                    "未配置"
                 },
                 trailing = ">",
                 onClick = onOpenModelProviders,
@@ -226,7 +230,7 @@ internal fun SettingsScreen(
         item {
             SettingsMenuRow(
                 title = "\u63d0\u793a\u8bcd\u914d\u7f6e",
-                subtitle = "全局评价偏好，协议由系统锁定",
+                subtitle = "评价偏好与风格标签",
                 trailing = ">",
                 onClick = onOpenPromptProfiles,
             )
@@ -282,6 +286,25 @@ internal fun ModelProviderProfilesScreen(
     onDeleteModelProviderSettings: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var editingSettingsId by rememberSaveable { mutableStateOf<String?>(null) }
+    var creatingProvider by rememberSaveable { mutableStateOf(false) }
+    val editingProvider = modelProviderSettingsList.firstOrNull { it.settingsId == editingSettingsId }
+    val editorOpen = creatingProvider || editingProvider != null
+
+    fun closeEditorOrScreen() {
+        if (editorOpen) {
+            creatingProvider = false
+            editingSettingsId = null
+        } else {
+            onBack()
+        }
+    }
+
+    BackHandler(enabled = editorOpen) {
+        creatingProvider = false
+        editingSettingsId = null
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -292,13 +315,30 @@ internal fun ModelProviderProfilesScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
+                IconButton(onClick = ::closeEditorOrScreen) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        contentDescription = if (editorOpen) "返回模型服务列表" else "返回设置",
+                    )
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("模型服务", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(4.dp))
-                    Text("配置可复用的模型 API，项目只选择使用哪一个", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        when {
+                            creatingProvider -> "新建模型服务"
+                            editingProvider != null -> "编辑模型服务"
+                            else -> "模型服务"
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                }
+                if (!editorOpen) {
+                    OutlinedButton(
+                        onClick = { creatingProvider = true },
+                        enabled = actionInFlight == null,
+                        shape = elementShape,
+                    ) {
+                        Text("新建")
+                    }
                 }
             }
         }
@@ -311,14 +351,55 @@ internal fun ModelProviderProfilesScreen(
             item { ProcessingCard(action) }
         }
 
-        item {
-            ModelProviderSettingsCard(
-                settings = modelProviderSettings,
-                settingsList = modelProviderSettingsList,
-                actionsEnabled = actionInFlight == null,
-                onSaveSettings = onSaveModelProviderSettings,
-                onDeleteSettings = onDeleteModelProviderSettings,
-            )
+        if (editorOpen) {
+            item {
+                ModelProviderSettingsCard(
+                    settings = editingProvider ?: modelProviderSettings.copy(settingsId = ""),
+                    settingsList = editingProvider?.let(::listOf).orEmpty(),
+                    actionsEnabled = actionInFlight == null,
+                    onSaveSettings = { settings ->
+                        onSaveModelProviderSettings(settings)
+                        creatingProvider = false
+                        editingSettingsId = null
+                    },
+                    onDeleteSettings = { settingsId ->
+                        onDeleteModelProviderSettings(settingsId)
+                        creatingProvider = false
+                        editingSettingsId = null
+                    },
+                )
+            }
+        } else if (modelProviderSettingsList.isEmpty()) {
+            item {
+                ElementCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("还没有模型服务", style = MaterialTheme.typography.titleMedium)
+                        Button(
+                            onClick = { creatingProvider = true },
+                            enabled = actionInFlight == null,
+                            shape = elementShape,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("新建模型服务")
+                        }
+                    }
+                }
+            }
+        } else {
+            items(modelProviderSettingsList, key = { it.settingsId }) { option ->
+                SettingsMenuRow(
+                    title = modelProviderOptionLabel(option),
+                    subtitle = option.baseUrl.ifBlank { option.providerLabel },
+                    trailing = ">",
+                    onClick = {
+                        creatingProvider = false
+                        editingSettingsId = option.settingsId
+                    },
+                )
+            }
         }
     }
 }
@@ -350,7 +431,7 @@ internal fun PromptProfilesScreen(
                 Column(Modifier.weight(1f)) {
                     Text("\u63d0\u793a\u8bcd\u914d\u7f6e", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(4.dp))
-                    Text("\u53ea\u7f16\u8f91\u8bc4\u4ef7\u504f\u597d\uff0c\u8f93\u5165\u8f93\u51fa\u534f\u8bae\u7531\u7cfb\u7edf\u9501\u5b9a", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("管理摄影评价偏好", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedButton(
                     onClick = onCreatePromptProfile,
@@ -594,13 +675,9 @@ internal fun PromptProfileEditorScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("系统锁定协议", style = MaterialTheme.typography.titleMedium)
+                    Text("应用会保持输出格式稳定", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "系统提示词、评价任务说明、连拍优选任务说明、项目优选任务说明、输入输出 JSON Schema 由应用固定生成。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "第一版先开放摄影偏好，避免用户改坏结构化结果；后续再评估字段表单化自定义。",
+                        "这里只编辑你的摄影偏好；评分字段、优选结果和 JSON 输出格式由应用自动生成。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -650,11 +727,9 @@ private fun parsePromptStyleTags(value: String): List<String> =
 @Composable
 internal fun ProjectSettingsScreen(
     project: ProjectSummary?,
-    provider: ModelProviderSettingsUi,
     providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
     promptProfiles: List<PromptProfileUi>,
-    latestRun: EvaluationRunUi?,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
@@ -708,11 +783,9 @@ internal fun ProjectSettingsScreen(
         } else {
             item {
                 ProjectIntelligenceSettingsCard(
-                    provider = provider,
                     providerOptions = providerOptions,
                     settings = projectSettings,
                     promptProfiles = promptProfiles,
-                    latestRun = latestRun,
                     actionsEnabled = actionInFlight == null,
                     onSaveSettings = onSaveSettings,
                     onGenerateProjectRecommendation = onGenerateProjectRecommendation,
@@ -770,7 +843,6 @@ private fun ModelProviderSettingsCard(
     var batchSize by remember(selectedSettings.settingsId, selectedSettings.defaultBatchSize, editingNewProfile) {
         mutableStateOf(providerBatchSizeValue(selectedSettings.defaultBatchSize))
     }
-    val configuredText = if (providerOptions.isEmpty()) "未配置" else "${providerOptions.size} 个配置"
     val normalizedProviderKind = providerKind.trim().lowercase().ifBlank { "none" }
     val cleanSettingsName = settingsName.trim()
     val canSaveProvider = cleanSettingsName.isNotBlank() &&
@@ -796,19 +868,21 @@ private fun ModelProviderSettingsCard(
                     Text("模型配置", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "配置独立保存，项目只选择使用哪一个 · $configuredText",
+                        if (editingNewProfile) "填写服务地址、模型和密钥" else "编辑当前模型服务",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                OutlinedButton(
-                    onClick = { editingNewProfile = true },
-                    enabled = actionsEnabled,
-                    shape = elementShape,
-                ) {
-                    Text("新建")
+                if (providerOptions.size > 1) {
+                    OutlinedButton(
+                        onClick = { editingNewProfile = true },
+                        enabled = actionsEnabled,
+                        shape = elementShape,
+                    ) {
+                        Text("新建")
+                    }
                 }
             }
-            if (providerOptions.isNotEmpty()) {
+            if (providerOptions.size > 1) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(providerOptions, key = { it.settingsId }) { option ->
                         FilterChipButton(
@@ -957,11 +1031,9 @@ private fun modelProviderOptionLabel(settings: ModelProviderSettingsUi): String 
 
 @Composable
 private fun ProjectIntelligenceSettingsCard(
-    provider: ModelProviderSettingsUi,
     providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
     promptProfiles: List<PromptProfileUi>,
-    latestRun: EvaluationRunUi?,
     actionsEnabled: Boolean,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
     onGenerateProjectRecommendation: () -> Unit,
@@ -973,7 +1045,6 @@ private fun ProjectIntelligenceSettingsCard(
         .filter { it.configured && it.providerKind != "none" }
         .distinctBy { it.settingsId }
     val selectedProviderReady = modelProviderReadyForProject(projectSettings, modelOptions)
-    val intelligenceUi = projectIntelligenceSettingsUi(projectSettings, providerConfigured = selectedProviderReady)
     val selectablePromptProfiles = promptProfiles
         .filter { it.enabled && (it.scope.equals("global", ignoreCase = true) || it.projectId == null) }
         .ifEmpty { promptProfiles.filter { it.enabled } }
@@ -990,37 +1061,16 @@ private fun ProjectIntelligenceSettingsCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("项目智能设置", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        latestRun?.let { "最近项目优选：${evaluationRunStatusLabel(it.status)}" }
-                            ?: "项目优选：手动触发",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = intelligenceUi.modelEvaluationEnabled,
-                    enabled = actionsEnabled && intelligenceUi.modelEvaluationToggleEnabled &&
-                        projectSettings.projectId.isNotBlank(),
-                    onCheckedChange = { enabled ->
-                        onSaveSettings(projectSettings.copy(modelEvaluationEnabled = enabled))
-                    },
-                )
-            }
-
             if (!selectedProviderReady) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("\u6a21\u578b\u670d\u52a1\u672a\u914d\u7f6e", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (modelOptions.isEmpty()) "模型服务未配置" else "请选择模型服务",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedButton(
                         onClick = onConfigureModelProvider,
                         enabled = actionsEnabled,
@@ -1034,21 +1084,14 @@ private fun ProjectIntelligenceSettingsCard(
             if (modelOptions.isNotEmpty()) {
                 Text("使用模型", style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        FilterChipButton(
-                            label = "未选择",
-                            selected = selectedProviderId.isNullOrBlank(),
-                            onClick = {
-                                onSaveSettings(projectSettings.copy(modelProviderSettingsId = null))
-                            },
-                        )
-                    }
                     items(modelOptions, key = { it.settingsId }) { option ->
                         FilterChipButton(
                             label = modelProviderOptionLabel(option),
                             selected = selectedProviderId == option.settingsId,
                             onClick = {
-                                onSaveSettings(projectSettings.copy(modelProviderSettingsId = option.settingsId))
+                                onSaveSettings(
+                                    projectSettingsAfterModelProviderSelection(projectSettings, option.settingsId),
+                                )
                             },
                         )
                     }
@@ -1058,14 +1101,26 @@ private fun ProjectIntelligenceSettingsCard(
             SettingsSwitchRow(
                 title = "\u4e0a\u4f20\u540e\u81ea\u52a8\u8bc4\u4ef7",
                 checked = projectSettings.autoEvaluateOnUpload,
-                enabled = actionsEnabled && selectedProviderReady && projectSettings.modelEvaluationEnabled,
-                onCheckedChange = { onSaveSettings(projectSettings.copy(autoEvaluateOnUpload = it)) },
+                enabled = actionsEnabled && selectedProviderReady,
+                onCheckedChange = {
+                    onSaveSettings(
+                        projectSettings.copy(
+                            autoEvaluateOnUpload = it,
+                        ),
+                    )
+                },
             )
             SettingsSwitchRow(
                 title = "\u8fde\u62cd\u7ec4\u81ea\u52a8\u4f18\u9009",
                 checked = projectSettings.autoBurstRecommendationEnabled,
-                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
-                onCheckedChange = { onSaveSettings(projectSettings.copy(autoBurstRecommendationEnabled = it)) },
+                enabled = actionsEnabled && selectedProviderReady && projectSettings.projectId.isNotBlank(),
+                onCheckedChange = {
+                    onSaveSettings(
+                        projectSettings.copy(
+                            autoBurstRecommendationEnabled = it,
+                        ),
+                    )
+                },
             )
             SettingsSwitchRow(
                 title = "\u5141\u8bb8\u98ce\u9669\u7167\u7247\u53c2\u4e0e\u4f18\u9009",
@@ -1082,14 +1137,28 @@ private fun ProjectIntelligenceSettingsCard(
                 labelForValue = ::sceneProfileLabel,
                 onSelected = { onSaveSettings(projectSettings.copy(sceneProfile = it)) },
             )
-            OptionRow(
-                title = "技术门控强度",
-                values = listOf("loose", "standard", "strict"),
-                selected = projectSettings.cvPolicy,
-                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
-                labelForValue = ::cvPolicyLabel,
-                onSelected = { onSaveSettings(projectSettings.copy(cvPolicy = it)) },
-            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("高级配置", style = MaterialTheme.typography.labelLarge)
+                OptionRow(
+                    title = "技术风险阈值",
+                    values = listOf("loose", "standard", "strict"),
+                    selected = projectSettings.cvPolicy,
+                    enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                    labelForValue = ::cvPolicyLabel,
+                    onSelected = { onSaveSettings(projectSettings.copy(cvPolicy = it)) },
+                )
+                Text(
+                    cvPolicyHint(projectSettings.cvPolicy),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                CvPolicyAdvancedControls(
+                    projectSettings = projectSettings,
+                    actionsEnabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                    onSaveSettings = onSaveSettings,
+                )
+            }
 
             if (selectablePromptProfiles.isNotEmpty()) {
                 Text("\u8bc4\u4ef7\u63d0\u793a\u8bcd", style = MaterialTheme.typography.labelLarge)
@@ -1122,6 +1191,415 @@ private fun ProjectIntelligenceSettingsCard(
         }
     }
 }
+
+@Composable
+private fun CvPolicyAdvancedControls(
+    projectSettings: ProjectEvaluationSettingsUi,
+    actionsEnabled: Boolean,
+    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+) {
+    val basePolicy = technicalPolicyForCvPolicy(projectSettings.cvPolicy)
+    val customPolicy = projectSettings.cvPolicyOverrides
+    var draftPolicy by remember(projectSettings.projectId, projectSettings.cvPolicy, customPolicy) {
+        mutableStateOf(customPolicy ?: basePolicy)
+    }
+    SettingsSwitchRow(
+        title = "自定义技术阈值",
+        checked = customPolicy != null,
+        enabled = actionsEnabled,
+        onCheckedChange = { enabled ->
+            val nextPolicy = if (enabled) draftPolicy else null
+            onSaveSettings(projectSettings.copy(cvPolicyOverrides = nextPolicy))
+        },
+    )
+    if (customPolicy == null) {
+        return
+    }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            cvThresholdControlSpecs(draftPolicy, sceneProfile = projectSettings.sceneProfile).forEach { control ->
+                ThresholdSlider(
+                    title = control.title,
+                    value = control.sliderValue,
+                    displayPercent = control.displayPercent,
+                    description = control.description,
+                    enabled = actionsEnabled,
+                    onValueChange = {
+                        draftPolicy = updateCvThresholdControl(draftPolicy, control.key, it)
+                    },
+                )
+            }
+            CvPolicyCapabilityRows(sceneProfile = projectSettings.sceneProfile)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                    draftPolicy = basePolicy
+                    onSaveSettings(projectSettings.copy(cvPolicyOverrides = basePolicy))
+                },
+                enabled = actionsEnabled,
+                shape = elementShape,
+            ) {
+                Text("重置")
+            }
+            Button(
+                onClick = { onSaveSettings(projectSettings.copy(cvPolicyOverrides = draftPolicy)) },
+                enabled = actionsEnabled && draftPolicy != customPolicy,
+                shape = elementShape,
+            ) {
+                Text("应用阈值")
+            }
+        }
+    }
+}
+
+internal enum class CvThresholdControlKey {
+    BlurHigh,
+    Clipping,
+    ColorCast,
+    FaceEyes,
+    FaceExposure,
+    FaceColorCast,
+}
+
+internal data class CvThresholdControlSpec(
+    val key: CvThresholdControlKey,
+    val title: String,
+    val sliderValue: Double,
+    val displayPercent: Int,
+    val description: String,
+)
+
+internal fun cvThresholdControlSpecs(
+    policy: TechnicalAssessmentPolicyUi,
+    sceneProfile: String = "general",
+): List<CvThresholdControlSpec> {
+    val controls = mutableListOf(
+        CvThresholdControlSpec(
+            key = CvThresholdControlKey.BlurHigh,
+            title = "失焦灵敏度",
+            sliderValue = blurSensitivity(policy),
+            displayPercent = percentLabel(blurSensitivity(policy)),
+            description = blurThresholdDescription(policy),
+        ),
+        CvThresholdControlSpec(
+            key = CvThresholdControlKey.Clipping,
+            title = "死黑/死白灵敏度",
+            sliderValue = clippingSensitivity(policy),
+            displayPercent = percentLabel(clippingSensitivity(policy)),
+            description = clippingThresholdDescription(policy),
+        ),
+        CvThresholdControlSpec(
+            key = CvThresholdControlKey.ColorCast,
+            title = "偏色灵敏度",
+            sliderValue = colorCastSensitivity(policy),
+            displayPercent = percentLabel(colorCastSensitivity(policy)),
+            description = colorCastThresholdDescription(policy),
+        ),
+    )
+    if (sceneProfile.trim().equals("portrait", ignoreCase = true)) {
+        controls += CvThresholdControlSpec(
+            key = CvThresholdControlKey.FaceEyes,
+            title = "闭眼灵敏度",
+            sliderValue = faceEyesSensitivity(policy),
+            displayPercent = percentLabel(faceEyesSensitivity(policy)),
+            description = faceEyesThresholdDescription(policy),
+        )
+        controls += CvThresholdControlSpec(
+            key = CvThresholdControlKey.FaceExposure,
+            title = "面部死黑/死白灵敏度",
+            sliderValue = faceExposureSensitivity(policy),
+            displayPercent = percentLabel(faceExposureSensitivity(policy)),
+            description = faceExposureThresholdDescription(policy),
+        )
+        controls += CvThresholdControlSpec(
+            key = CvThresholdControlKey.FaceColorCast,
+            title = "面部偏色灵敏度",
+            sliderValue = faceColorCastSensitivity(policy),
+            displayPercent = percentLabel(faceColorCastSensitivity(policy)),
+            description = faceColorCastThresholdDescription(policy),
+        )
+    }
+    return controls
+}
+
+internal fun updateCvThresholdControl(
+    policy: TechnicalAssessmentPolicyUi,
+    key: CvThresholdControlKey,
+    value: Double,
+): TechnicalAssessmentPolicyUi =
+    when (key) {
+        CvThresholdControlKey.BlurHigh -> {
+            val next = denormalize(value, BLUR_HIGH_MIN, BLUR_HIGH_MAX)
+            policy.copy(
+                blurHighEdgeThreshold = next,
+                blurHighFrequencyThreshold = next,
+                blurSevereEdgeThreshold = policy.blurSevereEdgeThreshold.coerceAtMost(next),
+                blurSevereFrequencyThreshold = policy.blurSevereFrequencyThreshold.coerceAtMost(next),
+            )
+        }
+        CvThresholdControlKey.Clipping -> {
+            val sensitivity = value.coerceIn(0.0, 1.0)
+            policy.copy(
+                clippingHighRatio = inverseDenormalize(sensitivity, CLIPPING_HIGH_MIN, CLIPPING_HIGH_MAX),
+                clippingHighConnectedRatio = inverseDenormalize(
+                    sensitivity,
+                    CLIPPING_HIGH_CONNECTED_MIN,
+                    CLIPPING_HIGH_CONNECTED_MAX,
+                ),
+                clippingSevereRatio = inverseDenormalize(
+                    sensitivity,
+                    CLIPPING_SEVERE_MIN,
+                    CLIPPING_SEVERE_MAX,
+                ),
+                clippingSevereConnectedRatio = inverseDenormalize(
+                    sensitivity,
+                    CLIPPING_SEVERE_MIN,
+                    CLIPPING_SEVERE_MAX,
+                ),
+            )
+        }
+        CvThresholdControlKey.ColorCast -> {
+            val sensitivity = value.coerceIn(0.0, 1.0)
+            policy.copy(
+                colorCastHighThreshold = inverseDenormalize(
+                    sensitivity,
+                    COLOR_CAST_HIGH_MIN,
+                    COLOR_CAST_HIGH_MAX,
+                ),
+                colorCastSevereThreshold = inverseDenormalize(
+                    sensitivity,
+                    COLOR_CAST_SEVERE_MIN,
+                    COLOR_CAST_SEVERE_MAX,
+                ),
+            )
+        }
+        CvThresholdControlKey.FaceEyes -> {
+            val next = denormalize(value, FACE_EYE_OPEN_WARN_MIN, FACE_EYE_OPEN_WARN_MAX)
+            policy.copy(faceEyeOpenWarnThreshold = next)
+        }
+        CvThresholdControlKey.FaceExposure -> {
+            val next = inverseDenormalize(value, FACE_EXPOSURE_WARN_MIN, FACE_EXPOSURE_WARN_MAX)
+            policy.copy(faceExposureWarnRatio = next)
+        }
+        CvThresholdControlKey.FaceColorCast -> {
+            val next = inverseDenormalize(value, FACE_COLOR_CAST_WARN_MIN, FACE_COLOR_CAST_WARN_MAX)
+            policy.copy(faceColorCastWarnThreshold = next)
+        }
+    }
+
+@Composable
+private fun ThresholdSlider(
+    title: String,
+    value: Double,
+    displayPercent: Int,
+    description: String,
+    enabled: Boolean,
+    onValueChange: (Double) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("$displayPercent%", fontWeight = FontWeight.SemiBold)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.toDouble()) },
+            enabled = enabled,
+            valueRange = 0f..1f,
+        )
+        Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun CvPolicyCapabilityRows(sceneProfile: String) {
+    if (sceneProfile.trim().lowercase() != "portrait") {
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        CapabilityStatusRow(title = "人像专项", status = "已启用人脸/闭眼")
+    }
+}
+
+@Composable
+private fun CapabilityStatusRow(title: String, status: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(
+            color = ElementControlSurface,
+            shape = CircleShape,
+            border = BorderStroke(1.dp, ElementBorder),
+        ) {
+            Text(
+                status,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+private const val BLUR_HIGH_MIN = 0.06
+private const val BLUR_HIGH_MAX = 0.22
+private const val CLIPPING_HIGH_MIN = 0.04
+private const val CLIPPING_HIGH_MAX = 0.30
+private const val CLIPPING_HIGH_CONNECTED_MIN = 0.04
+private const val CLIPPING_HIGH_CONNECTED_MAX = 0.30
+private const val CLIPPING_SEVERE_MIN = 0.35
+private const val CLIPPING_SEVERE_MAX = 0.75
+private const val COLOR_CAST_HIGH_MIN = 0.28
+private const val COLOR_CAST_HIGH_MAX = 0.65
+private const val COLOR_CAST_SEVERE_MIN = 0.50
+private const val COLOR_CAST_SEVERE_MAX = 0.90
+private const val FACE_EYE_OPEN_WARN_MIN = 0.20
+private const val FACE_EYE_OPEN_WARN_MAX = 0.55
+private const val FACE_EXPOSURE_WARN_MIN = 0.12
+private const val FACE_EXPOSURE_WARN_MAX = 0.40
+private const val FACE_COLOR_CAST_WARN_MIN = 0.28
+private const val FACE_COLOR_CAST_WARN_MAX = 0.65
+
+private fun blurSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    normalize(policy.blurHighEdgeThreshold, BLUR_HIGH_MIN, BLUR_HIGH_MAX)
+
+private fun clippingSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    listOf(
+        inverseNormalize(policy.clippingHighRatio, CLIPPING_HIGH_MIN, CLIPPING_HIGH_MAX),
+        inverseNormalize(
+            policy.clippingHighConnectedRatio,
+            CLIPPING_HIGH_CONNECTED_MIN,
+            CLIPPING_HIGH_CONNECTED_MAX,
+        ),
+        inverseNormalize(policy.clippingSevereRatio, CLIPPING_SEVERE_MIN, CLIPPING_SEVERE_MAX),
+    ).average().coerceIn(0.0, 1.0)
+
+private fun colorCastSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    listOf(
+        inverseNormalize(policy.colorCastHighThreshold, COLOR_CAST_HIGH_MIN, COLOR_CAST_HIGH_MAX),
+        inverseNormalize(policy.colorCastSevereThreshold, COLOR_CAST_SEVERE_MIN, COLOR_CAST_SEVERE_MAX),
+    ).average().coerceIn(0.0, 1.0)
+
+private fun faceEyesSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    normalize(policy.faceEyeOpenWarnThreshold, FACE_EYE_OPEN_WARN_MIN, FACE_EYE_OPEN_WARN_MAX)
+
+private fun faceExposureSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    inverseNormalize(policy.faceExposureWarnRatio, FACE_EXPOSURE_WARN_MIN, FACE_EXPOSURE_WARN_MAX)
+
+private fun faceColorCastSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
+    inverseNormalize(policy.faceColorCastWarnThreshold, FACE_COLOR_CAST_WARN_MIN, FACE_COLOR_CAST_WARN_MAX)
+
+private fun percentLabel(value: Double): Int =
+    (value.coerceIn(0.0, 1.0) * 100).roundToInt()
+
+private fun blurThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：边缘和高频细节都低于 ${formatRatioPercent(policy.blurHighEdgeThreshold)} 时标记失焦；" +
+        "低于 ${formatRatioPercent(policy.blurSevereEdgeThreshold)} 视为严重。"
+
+private fun clippingThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：近黑 <=${policy.shadowClipThreshold} / 近白 >=${policy.highlightClipThreshold}，" +
+        "占比超过 ${formatRatioPercent(policy.clippingHighRatio)} 或连片超过 ${formatRatioPercent(policy.clippingHighConnectedRatio)} 时标记；" +
+        "${formatRatioPercent(policy.clippingSevereRatio)} 以上视为严重。"
+
+private fun colorCastThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：RGB 通道相对亮度差异超过 ${formatDecimal(policy.colorCastHighThreshold, 2)} 时标记偏色；" +
+        "超过 ${formatDecimal(policy.colorCastSevereThreshold, 2)} 视为严重。"
+
+private fun faceEyesThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：检测到人脸时，任一眼睁开概率低于 ${formatDecimal(policy.faceEyeOpenWarnThreshold, 2)} 标记闭眼风险。"
+
+private fun faceExposureThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：人脸区域近黑/近白像素占比超过 ${formatRatioPercent(policy.faceExposureWarnRatio)} 标记面部曝光风险。"
+
+private fun faceColorCastThresholdDescription(policy: TechnicalAssessmentPolicyUi): String =
+    "当前：人脸区域 RGB 相对亮度差异超过 ${formatDecimal(policy.faceColorCastWarnThreshold, 2)} 标记面部偏色。"
+
+private fun formatRatioPercent(value: Double): String =
+    "${percentLabel(value)}%"
+
+private fun formatDecimal(value: Double, digits: Int): String =
+    "%.${digits}f".format(Locale.US, value)
+
+private fun normalize(value: Double, min: Double, max: Double): Double =
+    ((value - min) / (max - min)).coerceIn(0.0, 1.0)
+
+private fun inverseNormalize(value: Double, min: Double, max: Double): Double =
+    ((max - value) / (max - min)).coerceIn(0.0, 1.0)
+
+private fun denormalize(value: Double, min: Double, max: Double): Double =
+    min + (max - min) * value.coerceIn(0.0, 1.0)
+
+private fun inverseDenormalize(value: Double, min: Double, max: Double): Double =
+    max - (max - min) * value.coerceIn(0.0, 1.0)
+
+private fun technicalPolicyForCvPolicy(value: String): TechnicalAssessmentPolicyUi =
+    when (value.trim().lowercase()) {
+        "loose" -> TechnicalAssessmentPolicyUi(
+            blurSevereEdgeThreshold = 0.025,
+            blurSevereFrequencyThreshold = 0.025,
+            blurHighEdgeThreshold = 0.09,
+            blurHighFrequencyThreshold = 0.09,
+            highlightClipThreshold = 250,
+            shadowClipThreshold = 5,
+            clippingHighRatio = 0.18,
+            clippingHighConnectedRatio = 0.25,
+            clippingSevereRatio = 0.65,
+            clippingSevereConnectedRatio = 0.65,
+            colorCastHighThreshold = 0.55,
+            colorCastSevereThreshold = 0.85,
+            faceEyeOpenWarnThreshold = 0.25,
+            faceExposureWarnRatio = 0.35,
+            faceColorCastWarnThreshold = 0.55,
+        )
+        "strict" -> TechnicalAssessmentPolicyUi(
+            blurSevereEdgeThreshold = 0.06,
+            blurSevereFrequencyThreshold = 0.06,
+            blurHighEdgeThreshold = 0.16,
+            blurHighFrequencyThreshold = 0.16,
+            highlightClipThreshold = 242,
+            shadowClipThreshold = 13,
+            clippingHighRatio = 0.08,
+            clippingHighConnectedRatio = 0.12,
+            clippingSevereRatio = 0.40,
+            clippingSevereConnectedRatio = 0.40,
+            colorCastHighThreshold = 0.32,
+            colorCastSevereThreshold = 0.55,
+            faceEyeOpenWarnThreshold = 0.45,
+            faceExposureWarnRatio = 0.16,
+            faceColorCastWarnThreshold = 0.32,
+        )
+        else -> TechnicalAssessmentPolicyUi(
+            blurSevereEdgeThreshold = 0.04,
+            blurSevereFrequencyThreshold = 0.04,
+            blurHighEdgeThreshold = 0.12,
+            blurHighFrequencyThreshold = 0.12,
+            highlightClipThreshold = 245,
+            shadowClipThreshold = 10,
+            clippingHighRatio = 0.12,
+            clippingHighConnectedRatio = 0.18,
+            clippingSevereRatio = 0.50,
+            clippingSevereConnectedRatio = 0.50,
+            colorCastHighThreshold = 0.42,
+            colorCastSevereThreshold = 0.70,
+            faceEyeOpenWarnThreshold = 0.35,
+            faceExposureWarnRatio = 0.25,
+            faceColorCastWarnThreshold = 0.42,
+        )
+    }
+
+private fun cvPolicyHint(value: String): String =
+    when (value.trim().lowercase()) {
+        "loose" -> "减少误报，只标记明显失焦、死黑和过曝。"
+        "strict" -> "更早提示风险，适合需要严格筛片的项目。"
+        else -> "平衡误报和漏报，适合大多数项目。"
+    }
 
 @Composable
 private fun BatchSizeToggle(

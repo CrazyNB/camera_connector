@@ -1,25 +1,27 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    append_transfer_record, assess_preview_sample, evaluate_asset_group_with_model_provider,
-    evaluate_asset_group_with_stub, group_received_assets, read_connected_devices,
-    read_receiver_runtime_status, read_transfer_log, recommend_burst_group_from_model_evaluations,
-    recommend_project_model_selections, recommend_selection_with_model_provider,
-    scan_received_asset_groups, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
-    AssetUserMarks, BurstGroup, BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice,
-    EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource,
-    ModelProviderKind, ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode,
-    NewAnalysisJob, ObjectFormat, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, ProjectStatus, PromptProfile, PromptProfileContent,
-    PromptProfileVersion, PromptScope, PublishQueueItem, PublishQueueSummary, PushProtocol,
-    PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
-    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
-    SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
-    SubjectAssessment, TechnicalAssessment, TransferRecord, TransferStatus,
+    append_transfer_record, assess_preview_sample, assess_preview_sample_with_policy,
+    evaluate_asset_group_with_model_provider, evaluate_asset_group_with_stub,
+    group_received_assets, read_connected_devices, read_receiver_runtime_status, read_transfer_log,
+    recommend_burst_group_from_model_evaluations, recommend_project_model_selections,
+    recommend_selection_with_model_provider, scan_received_asset_groups, AnalysisEntityType,
+    AnalysisJob, AnalysisJobType, AssetFormatRole, AssetUserMarks, BurstGroup,
+    BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice, CvPolicy, EvaluationRun,
+    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource, ModelProviderKind,
+    ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob,
+    ObjectFormat, PreviewSample, ProjectEvaluationSettings, ProjectRecommendationMode,
+    ProjectStatus, PromptProfile, PromptProfileContent, PromptProfileVersion, PromptScope,
+    PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset,
+    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig,
+    Result, SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation,
+    SelectionRecommendationScope, SelectionRecommendationStatus, SqliteStore, StoredAsset,
+    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy,
+    TransferRecord, TransferStatus,
 };
 
 const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
@@ -838,16 +840,6 @@ impl CameraConnectorService {
         asset_group_ids: &[String],
     ) -> Result<usize> {
         let store = self.storage_store()?;
-        let settings = store
-            .project_evaluation_settings(project_id)?
-            .unwrap_or_else(|| {
-                ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
-            });
-        if !settings.model_evaluation_enabled {
-            return Err(crate::ImporterError::internal(
-                "project model evaluation is disabled",
-            ));
-        }
         let provider = self
             .runtime_model_provider_for_project(&store, project_id)?
             .ok_or_else(|| crate::ImporterError::internal("model provider is not configured"))?;
@@ -898,11 +890,6 @@ impl CameraConnectorService {
             .unwrap_or_else(|| {
                 ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
             });
-        if !settings.model_evaluation_enabled {
-            return Err(crate::ImporterError::internal(
-                "project model evaluation is disabled",
-            ));
-        }
         let provider = self
             .runtime_model_provider_for_project(&store, project_id)?
             .ok_or_else(|| crate::ImporterError::internal("model provider is not configured"))?;
@@ -930,11 +917,12 @@ impl CameraConnectorService {
             }
 
             let now = current_time_ms();
-            let assessment = assess_preview_sample(
+            let assessment = assess_preview_sample_with_policy(
                 &input.asset_group_id,
                 input.preview_sample.clone(),
                 "technical-v1",
                 now,
+                technical_assessment_policy_for_settings(&settings),
             );
             let saved_assessment = store.save_technical_assessment(assessment)?;
             let preview_image_data_url = input
@@ -999,12 +987,21 @@ impl CameraConnectorService {
         provider_configured: bool,
     ) -> Result<TechnicalAssessment> {
         let now = current_time_ms();
-        let sample_for_model = sample.clone();
-        let assessment = assess_preview_sample(asset_group_id, sample, assessor_version, now);
         let store = self.storage_store()?;
         let project_id = store
             .project_id_for_asset_group(asset_group_id)?
             .ok_or_else(|| crate::ImporterError::internal("asset group not found"))?;
+        let settings = store
+            .project_evaluation_settings(&project_id)?
+            .unwrap_or_else(|| ProjectEvaluationSettings::default_for_project(&project_id, now));
+        let sample_for_model = sample.clone();
+        let assessment = assess_preview_sample_with_policy(
+            asset_group_id,
+            sample,
+            assessor_version,
+            now,
+            technical_assessment_policy_for_settings(&settings),
+        );
         let saved_assessment = store.save_technical_assessment(assessment)?;
         let providers = self.runtime_model_providers()?;
         if self.should_run_upload_model_evaluation(
@@ -1115,6 +1112,53 @@ impl CameraConnectorService {
             &prompt_content,
             now_ms,
         )?;
+        if recommendation.status == SelectionRecommendationStatus::Pending && provider.is_some() {
+            let preselected_ids = preselected_asset_group_ids(&recommendation);
+            evaluate_missing_model_candidates_for_burst(
+                &store,
+                &burst.project_id,
+                &preselected_ids,
+                candidate_visuals,
+                provider.as_ref(),
+            )?;
+            let final_evaluations = store.model_evaluations_for_asset_groups(
+                &preselected_ids,
+                evaluator_version_for_runtime_provider(provider.as_ref()),
+            )?;
+            if !final_evaluations.is_empty() {
+                let final_candidate_ids = final_evaluations
+                    .iter()
+                    .map(|evaluation| evaluation.asset_group_id.clone())
+                    .collect::<Vec<_>>();
+                let final_candidate_visuals =
+                    candidate_visuals_for_asset_group_ids(candidate_visuals, &final_candidate_ids);
+                let final_assessments = store
+                    .technical_assessments_for_asset_groups(&final_candidate_ids, "technical-v1")?;
+                let final_now_ms = current_time_ms();
+                let final_run = burst_recommendation_run(
+                    &store,
+                    &burst.project_id,
+                    burst_group_id,
+                    EvaluationRunTrigger::Manual,
+                    provider.as_ref().map(|provider| provider.settings.clone()),
+                    final_now_ms,
+                )?;
+                let mut final_recommendation =
+                    burst_selection_recommendation_from_provider_or_evaluations(
+                        &burst.project_id,
+                        burst_group_id,
+                        &final_evaluations,
+                        &final_assessments,
+                        provider.as_ref(),
+                        &final_candidate_visuals,
+                        &prompt_content,
+                        final_now_ms,
+                    )?;
+                final_recommendation.run_id = Some(final_run.run_id.clone());
+                store.save_evaluation_run(final_run)?;
+                return store.save_selection_recommendation(final_recommendation);
+            }
+        }
         recommendation.run_id = Some(run.run_id.clone());
         store.save_evaluation_run(run)?;
         store.save_selection_recommendation(recommendation)
@@ -1279,8 +1323,7 @@ impl CameraConnectorService {
             .unwrap_or_else(|| {
                 ProjectEvaluationSettings::default_for_project(project_id, current_time_ms())
             });
-        Ok(settings.model_evaluation_enabled
-            && settings.auto_evaluate_on_upload
+        Ok(settings.auto_evaluate_on_upload
             && provider_configured_for_project_from_list(store, project_id, providers)?)
     }
 
@@ -1458,6 +1501,33 @@ impl CameraConnectorService {
     ) -> Result<Option<crate::StoredAssetGroup>> {
         self.storage_store()?
             .move_asset_group(source_project_id, group_id, target_project_id)
+    }
+
+    pub fn delete_project_asset_group(&self, project_id: &str, group_id: &str) -> Result<bool> {
+        let deleted_assets = self
+            .storage_store()?
+            .delete_asset_group(project_id, group_id)?;
+        let Some(deleted_assets) = deleted_assets else {
+            return Ok(false);
+        };
+        for asset in &deleted_assets {
+            if let Some(path) = asset
+                .final_location
+                .as_ref()
+                .and_then(StoredObjectLocation::as_local_path)
+            {
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(crate::ImporterError::internal(format!(
+                            "delete asset file failed: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
 
     pub fn receiver_status(
@@ -1809,17 +1879,9 @@ fn run_analysis_job(
             Ok(())
         }
         (AnalysisJobType::EvaluateAssetGroupWithModel, AnalysisEntityType::AssetGroup) => {
-            let settings = store
-                .project_evaluation_settings(&job.project_id)?
-                .unwrap_or_else(|| {
-                    ProjectEvaluationSettings::default_for_project(
-                        &job.project_id,
-                        current_time_ms(),
-                    )
-                });
             let project_provider_configured = provider_configured
                 && provider_configured_for_project_from_list(store, &job.project_id, providers)?;
-            if !project_provider_configured || !settings.model_evaluation_enabled {
+            if !project_provider_configured {
                 return Ok(());
             }
             let assessments = store.technical_assessments_for_asset_groups(
@@ -1974,6 +2036,142 @@ fn project_burst_recommendations_for_candidates(
         }
     }
     Ok(burst_recommendations)
+}
+
+fn preselected_asset_group_ids(recommendation: &SelectionRecommendation) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    recommendation
+        .selected_asset_group_ids
+        .iter()
+        .chain(recommendation.candidate_asset_group_ids.iter())
+        .filter(|asset_group_id| seen.insert((*asset_group_id).clone()))
+        .cloned()
+        .collect()
+}
+
+fn candidate_visuals_for_asset_group_ids(
+    candidate_visuals: &[SelectionCandidateVisualInput],
+    asset_group_ids: &[String],
+) -> Vec<SelectionCandidateVisualInput> {
+    let wanted_ids = asset_group_ids.iter().collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    candidate_visuals
+        .iter()
+        .filter(|visual| {
+            wanted_ids.contains(&visual.asset_group_id)
+                && !visual.image_data_url.trim().is_empty()
+                && seen.insert(visual.asset_group_id.clone())
+        })
+        .cloned()
+        .collect()
+}
+
+fn evaluate_missing_model_candidates_for_burst(
+    store: &SqliteStore,
+    project_id: &str,
+    candidate_ids: &[String],
+    candidate_visuals: &[SelectionCandidateVisualInput],
+    provider: Option<&RuntimeModelProvider>,
+) -> Result<usize> {
+    let Some(provider) = provider.filter(|provider| {
+        matches!(
+            provider.settings.provider_kind,
+            ModelProviderKind::OpenAi | ModelProviderKind::Custom
+        ) && model_provider_ready_for_work(&provider.settings)
+            && provider_has_required_secret(provider)
+    }) else {
+        return Ok(0);
+    };
+    if candidate_ids.is_empty() || candidate_visuals.is_empty() {
+        return Ok(0);
+    }
+
+    let wanted_ids = candidate_ids.iter().collect::<BTreeSet<_>>();
+    let visual_by_group = candidate_visuals
+        .iter()
+        .filter(|visual| {
+            wanted_ids.contains(&visual.asset_group_id) && !visual.image_data_url.trim().is_empty()
+        })
+        .map(|visual| {
+            (
+                visual.asset_group_id.as_str(),
+                visual.image_data_url.as_str(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if visual_by_group.is_empty() {
+        return Ok(0);
+    }
+
+    let evaluator_version = evaluator_version_for_runtime_provider(Some(provider));
+    let existing_evaluations =
+        store.model_evaluations_for_asset_groups(candidate_ids, evaluator_version)?;
+    let mut evaluated_ids = existing_evaluations
+        .into_iter()
+        .map(|evaluation| evaluation.asset_group_id)
+        .collect::<BTreeSet<_>>();
+    let mut assessment_by_group = store
+        .technical_assessments_for_asset_groups(candidate_ids, "technical-v1")?
+        .into_iter()
+        .map(|assessment| (assessment.asset_group_id.clone(), assessment))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut saved_count = 0;
+    for asset_group_id in candidate_ids {
+        if evaluated_ids.contains(asset_group_id) {
+            continue;
+        }
+        let Some(image_data_url) = visual_by_group.get(asset_group_id.as_str()).copied() else {
+            continue;
+        };
+        let owner_project_id = store
+            .project_id_for_asset_group(asset_group_id)?
+            .ok_or_else(|| crate::ImporterError::internal("asset group not found"))?;
+        if owner_project_id != project_id {
+            return Err(crate::ImporterError::internal(
+                "asset group does not belong to project",
+            ));
+        }
+
+        let now_ms = current_time_ms();
+        let assessment = match assessment_by_group.get(asset_group_id) {
+            Some(assessment) => assessment.clone(),
+            None => {
+                let fallback_assessment = assess_preview_sample(
+                    asset_group_id,
+                    PreviewSample {
+                        width: 0,
+                        height: 0,
+                        luma: Vec::new(),
+                        red: None,
+                        green: None,
+                        blue: None,
+                        preview_source: Some("selection-candidate-visual".to_string()),
+                    },
+                    "technical-v1",
+                    now_ms,
+                );
+                let saved_assessment = store.save_technical_assessment(fallback_assessment)?;
+                assessment_by_group.insert(asset_group_id.clone(), saved_assessment.clone());
+                saved_assessment
+            }
+        };
+        let evaluation = model_evaluation_for_upload(
+            store,
+            project_id,
+            asset_group_id,
+            &assessment,
+            Some(image_data_url),
+            None,
+            Some(provider.clone()),
+            EvaluationRunTrigger::Manual,
+            now_ms,
+        )?;
+        store.save_model_evaluation(evaluation)?;
+        evaluated_ids.insert(asset_group_id.clone());
+        saved_count += 1;
+    }
+    Ok(saved_count)
 }
 
 fn burst_selection_recommendation_from_provider_or_evaluations(
@@ -2271,6 +2469,22 @@ fn evaluator_version_for_runtime_provider(provider: Option<&RuntimeModelProvider
         "model-stub-v1"
     } else {
         model
+    }
+}
+
+fn technical_assessment_policy_for_settings(
+    settings: &ProjectEvaluationSettings,
+) -> TechnicalAssessmentPolicy {
+    settings
+        .cv_policy_overrides
+        .unwrap_or_else(|| technical_assessment_policy_for_cv_policy(settings.cv_policy))
+}
+
+fn technical_assessment_policy_for_cv_policy(cv_policy: CvPolicy) -> TechnicalAssessmentPolicy {
+    match cv_policy {
+        CvPolicy::Loose => TechnicalAssessmentPolicy::loose(),
+        CvPolicy::Strict => TechnicalAssessmentPolicy::strict(),
+        CvPolicy::Standard => TechnicalAssessmentPolicy::standard(),
     }
 }
 

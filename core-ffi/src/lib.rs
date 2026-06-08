@@ -14,13 +14,13 @@ use camera_connector_core::{
     ProjectEvaluationSettings, ProjectRecommendationMode, PromptProfile, PromptProfileVersion,
     PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig, ReceiverSettingsUpdate,
     SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation, StoredObjectLocation,
-    SubjectAssessment,
+    SubjectAssessment, TechnicalAssessmentPolicy,
 };
 use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jint, jlong, jstring, JNI_TRUE};
 use jni::{Env, EnvUnowned};
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Debug, thiserror::Error)]
@@ -125,7 +125,6 @@ struct MobileModelProviderSettingsPatch {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct MobileProjectEvaluationSettingsPatch {
-    model_evaluation_enabled: Option<bool>,
     auto_evaluate_on_upload: Option<bool>,
     auto_burst_recommendation_enabled: Option<bool>,
     project_recommendation_mode: Option<String>,
@@ -133,10 +132,39 @@ struct MobileProjectEvaluationSettingsPatch {
     model_provider_settings_id: Option<String>,
     scene_profile: Option<String>,
     cv_policy: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    cv_policy_overrides: JsonPatchField<TechnicalAssessmentPolicy>,
     allow_risky_model_selects: Option<bool>,
     max_image_side: Option<i64>,
     batch_size: Option<i64>,
     updated_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum JsonPatchField<T> {
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> Default for JsonPatchField<T> {
+    fn default() -> Self {
+        Self::Missing
+    }
+}
+
+fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<JsonPatchField<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(JsonPatchField::Null),
+        Some(value) => T::deserialize(value)
+            .map(JsonPatchField::Value)
+            .map_err(D::Error::custom),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -322,6 +350,21 @@ impl MobileCore {
             &target_project_id,
         )?;
         Ok(serde_json::to_string(&group)?)
+    }
+
+    pub fn delete_project_group_json(
+        &self,
+        project_id: String,
+        group_id: String,
+    ) -> MobileCoreResult<String> {
+        let deleted = self
+            .service
+            .delete_project_asset_group(&project_id, &group_id)?;
+        Ok(serde_json::to_string(&json!({
+            "project_id": project_id,
+            "group_id": group_id,
+            "deleted": deleted,
+        }))?)
     }
 
     pub fn set_asset_group_user_marks_json(
@@ -647,9 +690,6 @@ impl MobileCore {
             });
         let settings = ProjectEvaluationSettings {
             project_id,
-            model_evaluation_enabled: patch
-                .model_evaluation_enabled
-                .unwrap_or(existing.model_evaluation_enabled),
             auto_evaluate_on_upload: patch
                 .auto_evaluate_on_upload
                 .unwrap_or(existing.auto_evaluate_on_upload),
@@ -678,6 +718,11 @@ impl MobileCore {
                 .map(parse_cv_policy)
                 .transpose()?
                 .unwrap_or(existing.cv_policy),
+            cv_policy_overrides: match patch.cv_policy_overrides {
+                JsonPatchField::Missing => existing.cv_policy_overrides,
+                JsonPatchField::Null => None,
+                JsonPatchField::Value(policy) => Some(policy),
+            },
             allow_risky_model_selects: patch
                 .allow_risky_model_selects
                 .unwrap_or(existing.allow_risky_model_selects),
@@ -2036,7 +2081,6 @@ fn model_provider_settings_json_value(settings: &ModelProviderSettings) -> Value
 fn project_evaluation_settings_json_value(settings: &ProjectEvaluationSettings) -> Value {
     json!({
         "project_id": settings.project_id,
-        "model_evaluation_enabled": settings.model_evaluation_enabled,
         "auto_evaluate_on_upload": settings.auto_evaluate_on_upload,
         "auto_burst_recommendation_enabled": settings.auto_burst_recommendation_enabled,
         "project_recommendation_mode": settings.project_recommendation_mode.as_str(),
@@ -2044,6 +2088,7 @@ fn project_evaluation_settings_json_value(settings: &ProjectEvaluationSettings) 
         "model_provider_settings_id": settings.model_provider_settings_id,
         "scene_profile": settings.scene_profile.as_str(),
         "cv_policy": settings.cv_policy.as_str(),
+        "cv_policy_overrides": settings.cv_policy_overrides,
         "allow_risky_model_selects": settings.allow_risky_model_selects,
         "max_image_side": settings.max_image_side,
         "batch_size": settings.batch_size,
@@ -2479,6 +2524,26 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_movePr
                 target_project_id?,
             )?;
             parse_json_value(&group)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_deleteProjectGroupJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    group_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        let group_id = required_java_string(env, group_id, "group_id");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?
+                .delete_project_group_json(project_id?, group_id?)?;
+            parse_json_value(&result)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()

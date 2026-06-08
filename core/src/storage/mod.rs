@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 mod pipeline;
@@ -20,19 +21,21 @@ use crate::{
     ReceivedAssetTechnicalDefectSummary, ReceiverAccountConfig, ReceiverAuthMode,
     ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, SceneProfile, SelectionRecommendation,
     SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
-    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus,
-    TechnicalDefectFlag, TechnicalGateStatus, TransferRecord, TransferStatus,
+    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy,
+    TechnicalAssessmentStatus, TechnicalDefectFlag, TechnicalGateStatus, TransferRecord,
+    TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
 
 const DB_FILENAME: &str = "camera-connector.sqlite3";
 const FAILED_PUBLISH_RETRY_DELAY_MS: i64 = 30_000;
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     db_path: PathBuf,
+    access_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,9 +272,12 @@ impl SqliteStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let store = Self { db_path: path };
-        store.with_connection(|connection| {
-            initialize_schema(connection)?;
+        let store = Self {
+            access_lock: sqlite_access_lock(&path),
+            db_path: path,
+        };
+        store.with_write_connection(|connection| {
+            initialize_schema(connection, &store.db_path)?;
             seed_builtin_prompt_profiles(connection)
         })?;
         Ok(store)
@@ -321,7 +327,7 @@ impl SqliteStore {
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT project_id, name, slug, status, created_at_ms, updated_at_ms,
                         archived_at_ms, default_output_target_id
@@ -384,15 +390,15 @@ impl SqliteStore {
     }
 
     pub fn prompt_profiles_for_project(&self, project_id: &str) -> Result<Vec<PromptProfile>> {
-        self.with_connection(|connection| prompt_profiles_for_project(connection, project_id))
+        self.with_read_connection(|connection| prompt_profiles_for_project(connection, project_id))
     }
 
     pub fn prompt_profile(&self, profile_id: &str) -> Result<Option<PromptProfile>> {
-        self.with_connection(|connection| prompt_profile_by_id(connection, profile_id))
+        self.with_read_connection(|connection| prompt_profile_by_id(connection, profile_id))
     }
 
     pub fn prompt_profile_version(&self, version_id: &str) -> Result<Option<PromptProfileVersion>> {
-        self.with_connection(|connection| prompt_profile_version_by_id(connection, version_id))
+        self.with_read_connection(|connection| prompt_profile_version_by_id(connection, version_id))
     }
 
     pub fn save_prompt_profile(&self, profile: PromptProfile) -> Result<PromptProfile> {
@@ -435,7 +441,9 @@ impl SqliteStore {
         project_id: &str,
         run_type: EvaluationRunType,
     ) -> Result<Option<EvaluationRun>> {
-        self.with_connection(|connection| latest_evaluation_run(connection, project_id, run_type))
+        self.with_read_connection(|connection| {
+            latest_evaluation_run(connection, project_id, run_type)
+        })
     }
 
     pub fn save_subject_assessment(
@@ -452,7 +460,7 @@ impl SqliteStore {
         project_id: &str,
         group_ids: &[String],
     ) -> Result<Vec<SubjectAssessment>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             subject_assessments_for_asset_groups(connection, project_id, group_ids)
         })
     }
@@ -512,7 +520,7 @@ impl SqliteStore {
     }
 
     pub fn receiver_accounts(&self) -> Result<Vec<StoredReceiverAccount>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT username, password_hash, device_name, enabled, created_at_ms, updated_at_ms
                  FROM receiver_accounts
@@ -670,7 +678,7 @@ impl SqliteStore {
     }
 
     pub fn connected_devices(&self) -> Result<Vec<ConnectedDevice>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut devices = connected_devices_from_connection(connection)?;
             sort_connected_devices(&mut devices);
             Ok(devices)
@@ -717,7 +725,7 @@ impl SqliteStore {
     }
 
     pub fn read_receiver_runtime_status(&self) -> Result<Option<ReceiverRuntimeStatus>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             connection
                 .query_row(
                     "SELECT phase, protocol, auth_mode, local_addr, output_dir, state_dir,
@@ -766,7 +774,7 @@ impl SqliteStore {
         offset: usize,
         limit: usize,
     ) -> Result<AssetGroupPage> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let stored_groups = stored_asset_groups_for_project(connection, project_id)?;
             let mut groups = Vec::new();
             for stored_group in stored_groups {
@@ -822,7 +830,7 @@ impl SqliteStore {
     }
 
     pub fn assets_for_group(&self, project_id: &str, group_id: &str) -> Result<Vec<StoredAsset>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT asset_id, project_id, group_id, transfer_id, group_role,
                         media_kind, format, original_filename, final_filename, normalized_stem, original_path,
@@ -842,6 +850,130 @@ impl SqliteStore {
             )?;
             let rows = statement.query_map(params![project_id, group_id], stored_asset_from_row)?;
             collect_rows(rows)
+        })
+    }
+
+    pub fn delete_asset_group(
+        &self,
+        project_id: &str,
+        group_id: &str,
+    ) -> Result<Option<Vec<StoredAsset>>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            ensure_project_exists(&transaction, project_id)?;
+            let mut statement = transaction.prepare(
+                "SELECT asset_id, project_id, group_id, transfer_id, group_role,
+                        media_kind, format, original_filename, final_filename, normalized_stem, original_path,
+                        original_parent_path, final_location_payload, size_bytes, capture_at_ms,
+                        received_at_ms, published_at_ms, source_identity, username, remote_addr,
+                        duplicate_index, duplicate_count
+                 FROM assets
+                 WHERE project_id = ?1 AND group_id = ?2
+                 ORDER BY published_at_ms ASC, asset_id ASC",
+            )?;
+            let rows = statement.query_map(params![project_id, group_id], stored_asset_from_row)?;
+            let assets = collect_rows(rows)?;
+            drop(statement);
+            if assets.is_empty() {
+                transaction.commit()?;
+                return Ok(None);
+            }
+
+            let affected_burst_ids = transaction
+                .prepare(
+                    "SELECT burst_group_id FROM burst_group_members WHERE member_group_id = ?1",
+                )?
+                .query_map(params![group_id], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            transaction.execute(
+                "DELETE FROM selection_recommendations
+                 WHERE project_id = ?1
+                   AND (scope = 'project' OR subject_id = ?2)",
+                params![project_id, group_id],
+            )?;
+            for burst_group_id in &affected_burst_ids {
+                transaction.execute(
+                    "DELETE FROM selection_recommendations
+                     WHERE project_id = ?1 AND subject_id = ?2",
+                    params![project_id, burst_group_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM background_jobs
+                     WHERE project_id = ?1 AND entity_type = 'burst_group' AND entity_id = ?2",
+                    params![project_id, burst_group_id],
+                )?;
+            }
+            transaction.execute(
+                "DELETE FROM background_jobs
+                 WHERE project_id = ?1 AND entity_type = 'asset_group' AND entity_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM technical_assessments WHERE asset_group_id = ?1",
+                params![group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM model_evaluations WHERE project_id = ?1 AND asset_group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM subject_assessments WHERE project_id = ?1 AND asset_group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM asset_group_user_marks WHERE project_id = ?1 AND group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM burst_member_manual_edits WHERE project_id = ?1 AND member_group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM burst_group_members WHERE member_group_id = ?1",
+                params![group_id],
+            )?;
+            for asset in &assets {
+                transaction.execute(
+                    "DELETE FROM publish_queue WHERE project_id = ?1 AND transfer_id = ?2",
+                    params![project_id, asset.transfer_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM assets WHERE project_id = ?1 AND asset_id = ?2",
+                    params![project_id, asset.asset_id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM transfers WHERE project_id = ?1 AND transfer_id = ?2",
+                    params![project_id, asset.transfer_id],
+                )?;
+            }
+            transaction.execute(
+                "DELETE FROM asset_groups WHERE project_id = ?1 AND group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            for burst_group_id in &affected_burst_ids {
+                transaction.execute(
+                    "UPDATE burst_groups
+                     SET member_count = (
+                         SELECT COUNT(*) FROM burst_group_members WHERE burst_group_id = ?1
+                     ),
+                         updated_at_ms = ?2
+                     WHERE burst_group_id = ?1",
+                    params![burst_group_id, current_time_ms()],
+                )?;
+                transaction.execute(
+                    "DELETE FROM burst_groups
+                     WHERE burst_group_id = ?1 AND member_count < 2",
+                    params![burst_group_id],
+                )?;
+            }
+            transaction.execute(
+                "UPDATE projects SET updated_at_ms = ?1 WHERE project_id = ?2",
+                params![current_time_ms(), project_id],
+            )?;
+            refresh_duplicate_info(&transaction, project_id)?;
+            transaction.commit()?;
+            Ok(Some(assets))
         })
     }
 
@@ -1006,11 +1138,13 @@ impl SqliteStore {
     }
 
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
-        self.with_connection(|connection| stored_asset_groups_for_project(connection, project_id))
+        self.with_read_connection(|connection| {
+            stored_asset_groups_for_project(connection, project_id)
+        })
     }
 
     pub fn project_id_for_asset_group(&self, asset_group_id: &str) -> Result<Option<String>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             connection
                 .query_row(
                     "SELECT project_id FROM asset_groups WHERE group_id = ?1 LIMIT 1",
@@ -1036,7 +1170,7 @@ impl SqliteStore {
         asset_group_ids: &[String],
         assessor_version: &str,
     ) -> Result<Vec<TechnicalAssessment>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             technical_assessments_for_asset_group_ids(connection, asset_group_ids, assessor_version)
         })
     }
@@ -1052,7 +1186,7 @@ impl SqliteStore {
         asset_group_ids: &[String],
         evaluator_version: &str,
     ) -> Result<Vec<ModelEvaluation>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             model_evaluations_for_asset_group_ids(connection, asset_group_ids, evaluator_version)
         })
     }
@@ -1072,7 +1206,7 @@ impl SqliteStore {
         scope: SelectionRecommendationScope,
         subject_id: &str,
     ) -> Result<Option<SelectionRecommendation>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             latest_selection_recommendation_for_connection(
                 connection, project_id, scope, subject_id,
             )
@@ -1080,11 +1214,11 @@ impl SqliteStore {
     }
 
     pub fn burst_group(&self, burst_group_id: &str) -> Result<Option<BurstGroup>> {
-        self.with_connection(|connection| burst_group_by_id(connection, burst_group_id))
+        self.with_read_connection(|connection| burst_group_by_id(connection, burst_group_id))
     }
 
     pub fn burst_group_for_asset_group(&self, asset_group_id: &str) -> Result<Option<BurstGroup>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let project_id = connection
                 .query_row(
                     "SELECT project_id FROM asset_groups WHERE group_id = ?1",
@@ -1376,7 +1510,7 @@ impl SqliteStore {
     }
 
     pub fn transfer_counts(&self, project_id: &str) -> Result<(usize, usize, usize)> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             ensure_project_exists(connection, project_id)?;
             let total = count_transfers(connection, project_id, None)?;
             let completed = count_transfers(connection, project_id, Some("completed"))?;
@@ -1386,7 +1520,7 @@ impl SqliteStore {
     }
 
     pub fn transfer_records(&self, project_id: &str) -> Result<Vec<TransferRecord>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             ensure_project_exists(connection, project_id)?;
             let mut statement = connection.prepare(
                 "SELECT transfer_id, protocol, status, original_path, final_filename,
@@ -1646,7 +1780,7 @@ impl SqliteStore {
     }
 
     pub fn pending_publish_items(&self) -> Result<Vec<PublishQueueItem>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             let mut statement = connection.prepare(
                 "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
                         protocol, original_path, username, remote_addr, source_name, started_at_ms,
@@ -1665,7 +1799,7 @@ impl SqliteStore {
         project_id: &str,
         limit: usize,
     ) -> Result<Vec<PublishQueueItem>> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             ensure_project_exists(connection, project_id)?;
             let mut statement = connection.prepare(
                 "SELECT queue_id, project_id, transfer_id, staged_path, final_filename, size_bytes,
@@ -1748,7 +1882,7 @@ impl SqliteStore {
     }
 
     pub fn publish_queue_summary(&self, project_id: &str) -> Result<PublishQueueSummary> {
-        self.with_connection(|connection| {
+        self.with_read_connection(|connection| {
             ensure_project_exists(connection, project_id)?;
             let mut statement = connection.prepare(
                 "SELECT state, COUNT(*)
@@ -1781,7 +1915,34 @@ impl SqliteStore {
         &self,
         operation: impl FnOnce(&mut Connection) -> std::result::Result<T, rusqlite::Error>,
     ) -> Result<T> {
-        let mut connection = Connection::open(&self.db_path)
+        self.with_write_connection(operation)
+    }
+
+    fn with_read_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> std::result::Result<T, rusqlite::Error>,
+    ) -> Result<T> {
+        let mut connection = self.open_configured_connection()?;
+        connection
+            .execute_batch("PRAGMA query_only = ON;")
+            .map_err(|error| ImporterError::internal(error.to_string()))?;
+        operation(&mut connection).map_err(|error| ImporterError::internal(error.to_string()))
+    }
+
+    fn with_write_connection<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> std::result::Result<T, rusqlite::Error>,
+    ) -> Result<T> {
+        let _access_guard = self
+            .access_lock
+            .lock()
+            .map_err(|_| ImporterError::internal("sqlite access lock poisoned"))?;
+        let mut connection = self.open_configured_connection()?;
+        operation(&mut connection).map_err(|error| ImporterError::internal(error.to_string()))
+    }
+
+    fn open_configured_connection(&self) -> Result<Connection> {
+        let connection = Connection::open(&self.db_path)
             .map_err(|error| ImporterError::internal(error.to_string()))?;
         connection
             .busy_timeout(SQLITE_BUSY_TIMEOUT)
@@ -1789,8 +1950,31 @@ impl SqliteStore {
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .map_err(|error| ImporterError::internal(error.to_string()))?;
-        operation(&mut connection).map_err(|error| ImporterError::internal(error.to_string()))
+        Ok(connection)
     }
+}
+
+static SQLITE_ACCESS_LOCKS: OnceLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+
+fn sqlite_access_lock(db_path: &Path) -> Arc<Mutex<()>> {
+    let key = sqlite_lock_key(db_path);
+    let mut locks = SQLITE_ACCESS_LOCKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .expect("sqlite access lock registry should not be poisoned");
+    locks
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn sqlite_lock_key(db_path: &Path) -> PathBuf {
+    let file_name = db_path.file_name().unwrap_or_default();
+    db_path
+        .parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .map(|parent| parent.join(file_name))
+        .unwrap_or_else(|| db_path.to_path_buf())
 }
 
 fn count_transfers(
@@ -2832,10 +3016,11 @@ fn user_marks_for_asset_group(
         .map(|marks| marks.unwrap_or_default())
 }
 
-fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlite::Error> {
-    connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
-        row.get::<_, String>(0)
-    })?;
+fn initialize_schema(
+    connection: &Connection,
+    db_path: &Path,
+) -> std::result::Result<(), rusqlite::Error> {
+    ensure_wal_mode(connection, db_path)?;
     connection.execute_batch(
         "
         PRAGMA synchronous = NORMAL;
@@ -2883,7 +3068,6 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
 
         CREATE TABLE IF NOT EXISTS project_evaluation_settings (
             project_id TEXT PRIMARY KEY REFERENCES projects(project_id),
-            model_evaluation_enabled INTEGER NOT NULL,
             auto_evaluate_on_upload INTEGER NOT NULL,
             auto_burst_recommendation_enabled INTEGER NOT NULL,
             project_recommendation_mode TEXT NOT NULL,
@@ -2891,6 +3075,7 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
             model_provider_settings_id TEXT,
             scene_profile TEXT NOT NULL,
             cv_policy TEXT NOT NULL,
+            cv_policy_overrides_json TEXT,
             allow_risky_model_selects INTEGER NOT NULL,
             max_image_side INTEGER,
             batch_size INTEGER,
@@ -3183,6 +3368,35 @@ fn initialize_schema(connection: &Connection) -> std::result::Result<(), rusqlit
     Ok(())
 }
 
+static SQLITE_WAL_CONFIGURED_PATHS: OnceLock<Mutex<BTreeSet<PathBuf>>> = OnceLock::new();
+
+fn ensure_wal_mode(
+    connection: &Connection,
+    db_path: &Path,
+) -> std::result::Result<(), rusqlite::Error> {
+    let key = sqlite_lock_key(db_path);
+    {
+        let configured = SQLITE_WAL_CONFIGURED_PATHS
+            .get_or_init(|| Mutex::new(BTreeSet::new()))
+            .lock()
+            .expect("sqlite WAL registry should not be poisoned");
+        if configured.contains(&key) {
+            return Ok(());
+        }
+    }
+
+    connection.query_row("PRAGMA journal_mode = WAL", [], |row| {
+        row.get::<_, String>(0)
+    })?;
+
+    SQLITE_WAL_CONFIGURED_PATHS
+        .get_or_init(|| Mutex::new(BTreeSet::new()))
+        .lock()
+        .expect("sqlite WAL registry should not be poisoned")
+        .insert(key);
+    Ok(())
+}
+
 fn reset_incompatible_development_tables(
     connection: &Connection,
 ) -> std::result::Result<(), rusqlite::Error> {
@@ -3271,7 +3485,6 @@ fn reset_incompatible_development_tables(
         "project_evaluation_settings",
         &[
             "project_id",
-            "model_evaluation_enabled",
             "auto_evaluate_on_upload",
             "auto_burst_recommendation_enabled",
             "project_recommendation_mode",
@@ -3279,6 +3492,7 @@ fn reset_incompatible_development_tables(
             "model_provider_settings_id",
             "scene_profile",
             "cv_policy",
+            "cv_policy_overrides_json",
             "allow_risky_model_selects",
             "max_image_side",
             "batch_size",
@@ -3628,10 +3842,11 @@ fn project_evaluation_settings_by_project_id(
 ) -> std::result::Result<Option<ProjectEvaluationSettings>, rusqlite::Error> {
     connection
         .query_row(
-            "SELECT project_id, model_evaluation_enabled, auto_evaluate_on_upload,
+            "SELECT project_id, auto_evaluate_on_upload,
                     auto_burst_recommendation_enabled, project_recommendation_mode,
                     prompt_profile_id, model_provider_settings_id, scene_profile, cv_policy,
-                    allow_risky_model_selects, max_image_side, batch_size, updated_at_ms
+                    cv_policy_overrides_json, allow_risky_model_selects, max_image_side,
+                    batch_size, updated_at_ms
              FROM project_evaluation_settings
              WHERE project_id = ?1",
             params![project_id],
@@ -3648,13 +3863,12 @@ fn save_project_evaluation_settings_for_connection(
     validate_project_evaluation_settings(connection, &settings)?;
     connection.execute(
         "INSERT INTO project_evaluation_settings (
-            project_id, model_evaluation_enabled, auto_evaluate_on_upload,
+            project_id, auto_evaluate_on_upload,
             auto_burst_recommendation_enabled, project_recommendation_mode, prompt_profile_id,
-            model_provider_settings_id, scene_profile, cv_policy, allow_risky_model_selects,
-            max_image_side, batch_size, updated_at_ms
+            model_provider_settings_id, scene_profile, cv_policy, cv_policy_overrides_json,
+            allow_risky_model_selects, max_image_side, batch_size, updated_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(project_id) DO UPDATE SET
-            model_evaluation_enabled = excluded.model_evaluation_enabled,
             auto_evaluate_on_upload = excluded.auto_evaluate_on_upload,
             auto_burst_recommendation_enabled = excluded.auto_burst_recommendation_enabled,
             project_recommendation_mode = excluded.project_recommendation_mode,
@@ -3662,13 +3876,13 @@ fn save_project_evaluation_settings_for_connection(
             model_provider_settings_id = excluded.model_provider_settings_id,
             scene_profile = excluded.scene_profile,
             cv_policy = excluded.cv_policy,
+            cv_policy_overrides_json = excluded.cv_policy_overrides_json,
             allow_risky_model_selects = excluded.allow_risky_model_selects,
             max_image_side = excluded.max_image_side,
             batch_size = excluded.batch_size,
             updated_at_ms = excluded.updated_at_ms",
         params![
             &settings.project_id,
-            settings.model_evaluation_enabled,
             settings.auto_evaluate_on_upload,
             settings.auto_burst_recommendation_enabled,
             settings.project_recommendation_mode.as_str(),
@@ -3676,6 +3890,7 @@ fn save_project_evaluation_settings_for_connection(
             settings.model_provider_settings_id.as_deref(),
             settings.scene_profile.as_str(),
             settings.cv_policy.as_str(),
+            technical_assessment_policy_json(settings.cv_policy_overrides.as_ref())?,
             settings.allow_risky_model_selects,
             settings.max_image_side,
             settings.batch_size,
@@ -3692,11 +3907,6 @@ fn validate_project_evaluation_settings(
     settings: &ProjectEvaluationSettings,
 ) -> std::result::Result<(), rusqlite::Error> {
     let Some(prompt_profile_id) = settings.prompt_profile_id.as_deref() else {
-        if settings.model_evaluation_enabled {
-            return Err(sqlite_data_error(
-                "model evaluation requires a prompt profile",
-            ));
-        }
         return Ok(());
     };
 
@@ -3740,21 +3950,22 @@ fn validate_prompt_profile_is_usable(
 fn project_evaluation_settings_from_row(
     row: &Row<'_>,
 ) -> std::result::Result<ProjectEvaluationSettings, rusqlite::Error> {
-    let project_recommendation_mode: String = row.get(4)?;
-    let scene_profile: String = row.get(7)?;
-    let cv_policy: String = row.get(8)?;
+    let project_recommendation_mode: String = row.get(3)?;
+    let scene_profile: String = row.get(6)?;
+    let cv_policy: String = row.get(7)?;
+    let cv_policy_overrides_json: Option<String> = row.get(8)?;
     Ok(ProjectEvaluationSettings {
         project_id: row.get(0)?,
-        model_evaluation_enabled: row.get(1)?,
-        auto_evaluate_on_upload: row.get(2)?,
-        auto_burst_recommendation_enabled: row.get(3)?,
+        auto_evaluate_on_upload: row.get(1)?,
+        auto_burst_recommendation_enabled: row.get(2)?,
         project_recommendation_mode: ProjectRecommendationMode::from_str(
             &project_recommendation_mode,
         ),
-        prompt_profile_id: row.get(5)?,
-        model_provider_settings_id: row.get(6)?,
+        prompt_profile_id: row.get(4)?,
+        model_provider_settings_id: row.get(5)?,
         scene_profile: SceneProfile::from_str(&scene_profile),
         cv_policy: CvPolicy::from_str(&cv_policy),
+        cv_policy_overrides: technical_assessment_policy_from_json(cv_policy_overrides_json)?,
         allow_risky_model_selects: row.get(9)?,
         max_image_side: row.get(10)?,
         batch_size: row.get(11)?,
@@ -5199,6 +5410,25 @@ fn technical_defect_flags_from_json(
     serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
 }
 
+fn technical_assessment_policy_json(
+    value: Option<&TechnicalAssessmentPolicy>,
+) -> std::result::Result<Option<String>, rusqlite::Error> {
+    value
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn technical_assessment_policy_from_json(
+    value: Option<String>,
+) -> std::result::Result<Option<TechnicalAssessmentPolicy>, rusqlite::Error> {
+    value
+        .filter(|raw| !raw.trim().is_empty())
+        .map(|raw| serde_json::from_str(&raw))
+        .transpose()
+        .map_err(|error| sqlite_data_error(error.to_string()))
+}
+
 fn string_vec_json(value: &[String]) -> std::result::Result<String, rusqlite::Error> {
     serde_json::to_string(value).map_err(|error| sqlite_data_error(error.to_string()))
 }
@@ -5634,5 +5864,69 @@ fn import_source_from_transfer_id(transfer_id: &str) -> ImportSource {
         ImportSource::FtpPush
     } else {
         ImportSource::ManualDrop
+    }
+}
+
+#[cfg(test)]
+mod read_write_concurrency_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn read_connections_do_not_wait_for_write_transaction_gate() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should create");
+        let store =
+            SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+        store
+            .create_project("Concurrent Reads")
+            .expect("project should create");
+
+        let writer_store = store.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer = thread::spawn(move || {
+            writer_store
+                .with_write_connection(|connection| {
+                    let transaction = connection.unchecked_transaction()?;
+                    transaction.execute(
+                        "UPDATE projects
+                         SET updated_at_ms = updated_at_ms
+                         WHERE project_id = (SELECT project_id FROM projects LIMIT 1)",
+                        [],
+                    )?;
+                    locked_tx
+                        .send(())
+                        .expect("lock signal should send from writer");
+                    release_rx
+                        .recv()
+                        .expect("writer should wait for release signal");
+                    transaction.commit()?;
+                    Ok(())
+                })
+                .expect("writer should finish");
+        });
+
+        locked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer should enter write transaction");
+        let started_at = Instant::now();
+        let projects = store
+            .list_projects()
+            .expect("read should not wait for writer");
+        let elapsed = started_at.elapsed();
+
+        release_tx
+            .send(())
+            .expect("release signal should send to writer");
+        writer.join().expect("writer thread should join");
+
+        assert_eq!(projects.len(), 1);
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "read waited for write transaction for {:?}",
+            elapsed
+        );
     }
 }

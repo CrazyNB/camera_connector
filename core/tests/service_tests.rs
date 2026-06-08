@@ -2,9 +2,10 @@ use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
     CvPolicy, ImportSource, ModelProviderKind, ModelProviderSettings, ModelSendMode, ObjectFormat,
-    ProjectRecommendationMode, PromptProfileContent, PushProtocol, ReceiverAuthMode,
+    PreviewSample, ProjectRecommendationMode, PromptProfileContent, PushProtocol, ReceiverAuthMode,
     ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
-    SceneProfile, StoredObjectLocation, TransferQuery, TransferRecord, TransferStatus,
+    SceneProfile, StoredObjectLocation, TechnicalAssessmentPolicy, TechnicalDefectType,
+    TechnicalGateStatus, TransferQuery, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -1103,7 +1104,7 @@ fn assert_prompt_shared_preference(prompt_text: &str, expected: &str) {
 }
 
 #[test]
-fn service_rejects_invalid_prompt_id_when_model_evaluation_enabled() {
+fn service_rejects_invalid_prompt_id_when_prompt_is_selected() {
     let (service, config_path, state_dir) = service_with_state_dir("service-settings-invalid");
     let project = service
         .create_project("Invalid Prompt Settings")
@@ -1112,22 +1113,20 @@ fn service_rejects_invalid_prompt_id_when_model_evaluation_enabled() {
         .project_evaluation_settings(&project.project_id)
         .expect("settings should load")
         .expect("settings should exist");
-    settings.model_evaluation_enabled = true;
     settings.prompt_profile_id = Some("missing-prompt".to_string());
     settings.updated_at_ms = 5_000;
 
     assert!(service.save_project_evaluation_settings(settings).is_err());
 
-    let mut disabled = service
+    let mut without_prompt = service
         .project_evaluation_settings(&project.project_id)
         .expect("settings should reload")
         .expect("settings should exist");
-    disabled.model_evaluation_enabled = false;
-    disabled.prompt_profile_id = None;
-    disabled.updated_at_ms = 5_100;
+    without_prompt.prompt_profile_id = None;
+    without_prompt.updated_at_ms = 5_100;
     let saved = service
-        .save_project_evaluation_settings(disabled)
-        .expect("disabled model evaluation may omit prompt");
+        .save_project_evaluation_settings(without_prompt)
+        .expect("prompt profile may be omitted");
     assert_eq!(saved.prompt_profile_id, None);
 
     let _ = std::fs::remove_file(config_path);
@@ -1189,6 +1188,65 @@ fn service_saves_provider_and_project_settings_with_manual_recommendation_mode()
     let _ = std::fs::remove_dir_all(state_dir);
 }
 
+#[test]
+fn service_project_evaluation_settings_can_override_technical_thresholds() {
+    let (service, config_path, state_dir) =
+        service_with_state_dir("service-cv-threshold-overrides");
+    let project = service
+        .create_project("CV Threshold Overrides")
+        .expect("project should create");
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should load")
+        .expect("settings should exist");
+    settings.cv_policy = CvPolicy::Standard;
+    let mut policy = TechnicalAssessmentPolicy::standard();
+    policy.clipping_high_ratio = 0.08;
+    policy.clipping_high_connected_ratio = 0.08;
+    settings.cv_policy_overrides = Some(policy);
+    service
+        .save_project_evaluation_settings(settings)
+        .expect("settings should save");
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer(
+                "ftp:threshold-overrides",
+                "DCIM/100/IMG_THRESHOLD.JPG",
+                1_000,
+            ),
+        )
+        .expect("transfer should record");
+    service
+        .drain_analysis_jobs(10)
+        .expect("burst analysis should drain");
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, Default::default(), 0, 25)
+        .expect("page should load");
+    let group_id = page.groups[0]
+        .group_id
+        .as_ref()
+        .expect("group id should exist")
+        .clone();
+
+    let assessment = service
+        .assess_asset_group_preview(
+            &group_id,
+            scattered_highlight_sample(100, 100, 900),
+            "technical-v1",
+        )
+        .expect("assessment should save");
+
+    assert_eq!(assessment.gate_status, TechnicalGateStatus::Warn);
+    assert!(assessment
+        .defect_flags
+        .iter()
+        .any(|flag| flag.defect_type == TechnicalDefectType::HighlightClip));
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
 fn unique_temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("camera-connector-{name}-{}.json", unique_suffix()))
 }
@@ -1216,6 +1274,50 @@ fn service_with_state_dir(
         config_path,
         state_dir,
     )
+}
+
+fn scattered_highlight_sample(width: usize, height: usize, clipped_count: usize) -> PreviewSample {
+    let mut luma = vec![128; width * height];
+    for index in 0..clipped_count.min(luma.len()) {
+        let pixel_index = (index * 37) % luma.len();
+        luma[pixel_index] = 248;
+    }
+    PreviewSample {
+        width,
+        height,
+        luma,
+        red: None,
+        green: None,
+        blue: None,
+        preview_source: Some("test".to_string()),
+    }
+}
+
+fn completed_transfer(
+    transfer_id: &str,
+    original_path: &str,
+    completed_at_ms: i64,
+) -> TransferRecord {
+    let final_filename = original_path
+        .rsplit('/')
+        .next()
+        .expect("filename should exist")
+        .to_string();
+    TransferRecord {
+        transfer_id: transfer_id.to_string(),
+        protocol: "ftp".to_string(),
+        status: TransferStatus::Completed,
+        original_path: original_path.to_string(),
+        final_filename: final_filename.clone(),
+        final_location: Some(StoredObjectLocation::local_path(final_filename)),
+        size_bytes: 100,
+        username: Some("z5".to_string()),
+        remote_addr: Some("192.168.137.56".to_string()),
+        source_name: Some("Studio Z5".to_string()),
+        started_at_ms: completed_at_ms - 1,
+        completed_at_ms: Some(completed_at_ms),
+        error: None,
+    }
 }
 
 fn unique_suffix() -> u128 {

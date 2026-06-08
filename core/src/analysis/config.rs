@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::technical::TechnicalAssessmentPolicy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelProviderKind {
     None,
@@ -293,10 +295,9 @@ pub struct PromptProfileVersion {
     pub created_at_ms: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectEvaluationSettings {
     pub project_id: String,
-    pub model_evaluation_enabled: bool,
     pub auto_evaluate_on_upload: bool,
     pub auto_burst_recommendation_enabled: bool,
     pub project_recommendation_mode: ProjectRecommendationMode,
@@ -304,6 +305,7 @@ pub struct ProjectEvaluationSettings {
     pub model_provider_settings_id: Option<String>,
     pub scene_profile: SceneProfile,
     pub cv_policy: CvPolicy,
+    pub cv_policy_overrides: Option<TechnicalAssessmentPolicy>,
     pub allow_risky_model_selects: bool,
     pub max_image_side: Option<i64>,
     pub batch_size: Option<i64>,
@@ -314,7 +316,6 @@ impl ProjectEvaluationSettings {
     pub fn default_for_project(project_id: impl Into<String>, updated_at_ms: i64) -> Self {
         Self {
             project_id: project_id.into(),
-            model_evaluation_enabled: false,
             auto_evaluate_on_upload: false,
             auto_burst_recommendation_enabled: true,
             project_recommendation_mode: ProjectRecommendationMode::Manual,
@@ -322,6 +323,7 @@ impl ProjectEvaluationSettings {
             model_provider_settings_id: None,
             scene_profile: SceneProfile::General,
             cv_policy: CvPolicy::Standard,
+            cv_policy_overrides: None,
             allow_risky_model_selects: false,
             max_image_side: None,
             batch_size: None,

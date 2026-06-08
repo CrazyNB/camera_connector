@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString};
+﻿use std::ffi::{CStr, CString};
 
 use serde_json::Value;
 
@@ -213,7 +213,6 @@ fn ffi_project_settings_and_prompt_profiles_json_are_available() {
     let project_id = CString::new(project.project_id.clone()).unwrap();
     let patch = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "auto_evaluate_on_upload":true,
             "auto_burst_recommendation_enabled":false,
             "project_recommendation_mode":"manual",
@@ -269,7 +268,6 @@ fn ffi_rejects_invalid_settings_enum_json_envelopes() {
     let invalid_provider = CString::new(r#"{"provider_kind":"OpenAI"}"#).unwrap();
     let invalid_scene = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "project_recommendation_mode":"manual",
             "scene_profile":"Portrait",
             "cv_policy":"standard"
@@ -278,7 +276,6 @@ fn ffi_rejects_invalid_settings_enum_json_envelopes() {
     .unwrap();
     let invalid_mode = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "project_recommendation_mode":"automatic",
             "scene_profile":"general",
             "cv_policy":"standard"
@@ -376,7 +373,6 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
         CString::new(forked["value"]["prompt_profile_id"].as_str().unwrap()).unwrap();
     let project_settings = CString::new(format!(
         r#"{{
-            "model_evaluation_enabled":false,
             "auto_evaluate_on_upload":false,
             "auto_burst_recommendation_enabled":true,
             "project_recommendation_mode":"manual",

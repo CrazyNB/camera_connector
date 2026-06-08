@@ -33,7 +33,6 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DEFAULT_LISTEN_HOST
 import com.cameraconnector.app.core.DeviceAccount
-import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.ModelProviderSettingsUi
 import com.cameraconnector.app.core.PromptProfileUi
 import com.cameraconnector.app.core.ProjectAsset
@@ -108,7 +107,10 @@ fun CameraConnectorApp(
     var globalPromptProfiles by remember { mutableStateOf<List<PromptProfileUi>>(emptyList()) }
     var projectConfigEvaluationSettings by remember { mutableStateOf<ProjectEvaluationSettingsUi?>(null) }
     var projectConfigPromptProfiles by remember { mutableStateOf<List<PromptProfileUi>>(emptyList()) }
-    var projectConfigLatestRecommendationRun by remember { mutableStateOf<EvaluationRunUi?>(null) }
+    val projectWorkspaceIsVisible = projectWorkspaceVisible(
+        workspaceOpen = projectWorkspaceOpen,
+        activeProjectId = projectState.activeProjectId,
+    )
     val context = LocalContext.current
 
     fun saveCameraConnectHost(host: String) {
@@ -166,9 +168,9 @@ fun CameraConnectorApp(
         }
     }
 
-    fun openProjectConfig(projectId: String) {
+    fun openProjectConfig(projectId: String, keepProjectWorkspace: Boolean = false) {
         destination = GlobalDestination.Projects
-        projectWorkspaceOpen = false
+        projectWorkspaceOpen = keepProjectWorkspace && projectWorkspaceOpen
         projectConfigId = projectId
         settingsDiagnosticsOpen = false
         settingsModelProvidersOpen = false
@@ -199,7 +201,6 @@ fun CameraConnectorApp(
 
     LaunchedEffect(coreGateway, projectConfigId) {
         val projectId = projectConfigId
-        projectConfigLatestRecommendationRun = null
         if (projectId.isNullOrBlank()) {
             projectConfigEvaluationSettings = null
             projectConfigPromptProfiles = emptyList()
@@ -207,15 +208,10 @@ fun CameraConnectorApp(
         }
 
         runCatching {
-            Triple(
-                coreGateway.loadProjectEvaluationSettings(projectId),
-                coreGateway.loadPromptProfiles(projectId),
-                coreGateway.latestProjectRecommendationRunStatus(projectId),
-            )
-        }.onSuccess { (settings, profiles, latestRun) ->
+            coreGateway.loadProjectEvaluationSettings(projectId) to coreGateway.loadPromptProfiles(projectId)
+        }.onSuccess { (settings, profiles) ->
             projectConfigEvaluationSettings = settings
             projectConfigPromptProfiles = profiles
-            projectConfigLatestRecommendationRun = activeProjectRecommendationRun(latestRun, projectId)
         }.onFailure { error ->
             if (!error.isUiCancellationNoise()) {
                 actionError = error.message ?: error::class.java.simpleName
@@ -226,7 +222,11 @@ fun CameraConnectorApp(
     BackHandler(enabled = destination == GlobalDestination.Projects && projectConfigId != null) {
         projectConfigId = null
     }
-    BackHandler(enabled = destination == GlobalDestination.Projects && projectWorkspaceOpen) {
+    BackHandler(
+        enabled = destination == GlobalDestination.Projects &&
+            projectConfigId == null &&
+            projectWorkspaceOpen,
+    ) {
         projectWorkspaceOpen = false
     }
     BackHandler(enabled = destination == GlobalDestination.Settings && settingsDiagnosticsOpen) {
@@ -263,8 +263,11 @@ fun CameraConnectorApp(
                                 selected = destination == item,
                                 onClick = {
                                     destination = item
-                                    projectWorkspaceOpen = false
                                     projectConfigId = null
+                                    projectWorkspaceOpen = projectWorkspaceStateAfterBottomDestinationClick(
+                                        current = ProjectWorkspaceNavigationState(projectWorkspaceOpen),
+                                        destination = item,
+                                    ).workspaceOpen
                                     settingsDiagnosticsOpen = false
                                     settingsModelProvidersOpen = false
                                     settingsPromptProfilesOpen = false
@@ -290,13 +293,11 @@ fun CameraConnectorApp(
                         val targetProjectId = projectConfigId
                         ProjectSettingsScreen(
                             project = targetProjectId?.let { id -> projectState.projects.firstOrNull { it.id == id } },
-                            provider = modelProviderSettings,
                             providerOptions = modelProviderSettingsList.ifEmpty {
                                 listOf(modelProviderSettings).filter { it.configured }
                             },
                             settings = projectConfigEvaluationSettings,
                             promptProfiles = globalPromptProfiles.ifEmpty { projectConfigPromptProfiles },
-                            latestRun = projectConfigLatestRecommendationRun,
                             actionError = actionError,
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
@@ -318,7 +319,7 @@ fun CameraConnectorApp(
                                         } else {
                                             emptyList()
                                         }
-                                        val run = if (candidateVisuals.isNotEmpty()) {
+                                        if (candidateVisuals.isNotEmpty()) {
                                             coreGateway.generateProjectRecommendationWithCandidateVisuals(
                                                 projectId,
                                                 candidateVisuals,
@@ -327,7 +328,7 @@ fun CameraConnectorApp(
                                             coreGateway.generateProjectRecommendation(projectId)
                                         }
                                         if (projectConfigId == projectId) {
-                                            projectConfigLatestRecommendationRun = run
+                                            projectConfigEvaluationSettings = coreGateway.loadProjectEvaluationSettings(projectId)
                                         }
                                     }
                                 }
@@ -335,12 +336,13 @@ fun CameraConnectorApp(
                             onConfigureModelProvider = {
                                 destination = GlobalDestination.Settings
                                 projectConfigId = null
-                                projectWorkspaceOpen = false
                                 settingsDiagnosticsOpen = false
+                                settingsModelProvidersOpen = true
+                                settingsPromptProfilesOpen = false
                             },
                             modifier = Modifier.padding(padding),
                         )
-                    } else if (!projectWorkspaceOpen) {
+                    } else if (!projectWorkspaceIsVisible) {
                         ProjectManagementScreen(
                             dashboard = dashboard,
                             projectState = projectState,
@@ -369,14 +371,17 @@ fun CameraConnectorApp(
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
                             onOpenProjects = {
-                                projectWorkspaceOpen = false
+                                projectWorkspaceOpen = projectWorkspaceStateAfterOpenProjects(
+                                    ProjectWorkspaceNavigationState(projectWorkspaceOpen),
+                                ).workspaceOpen
                             },
                             onOpenProjectIntelligence = {
-                                projectState.activeProjectId?.let(::openProjectConfig)
+                                projectState.activeProjectId?.let { projectId ->
+                                    openProjectConfig(projectId, keepProjectWorkspace = true)
+                                }
                             },
                             onConfigureAccount = {
                                 destination = GlobalDestination.Accounts
-                                projectWorkspaceOpen = false
                                 settingsDiagnosticsOpen = false
                                 accountDetail = null
                                 addingAccount = true

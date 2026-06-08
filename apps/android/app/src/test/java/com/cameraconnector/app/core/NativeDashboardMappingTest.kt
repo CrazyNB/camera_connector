@@ -249,11 +249,10 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun projectEvaluationSettingsMapDefaultsModelEvaluationOff() {
+    fun projectEvaluationSettingsMapDefaultsConcreteActionsOff() {
         val settings = mapProjectEvaluationSettings(JSONObject().put("project_id", "project-client"))
 
         assertEquals("project-client", settings.projectId)
-        assertFalse(settings.modelEvaluationEnabled)
         assertFalse(settings.autoEvaluateOnUpload)
         assertTrue(settings.autoBurstRecommendationEnabled)
         assertEquals("manual", settings.projectRecommendationMode)
@@ -266,7 +265,6 @@ class NativeDashboardMappingTest {
     fun projectEvaluationSettingsSerializeManualRecommendationMode() {
         val json = ProjectEvaluationSettingsUi(
             projectId = "project-client",
-            modelEvaluationEnabled = true,
             autoEvaluateOnUpload = true,
             autoBurstRecommendationEnabled = false,
             projectRecommendationMode = "automatic",
@@ -282,6 +280,47 @@ class NativeDashboardMappingTest {
         assertEquals("prompt-portrait", json.getString("prompt_profile_id"))
         assertEquals(1024, json.getInt("max_image_side"))
         assertEquals(2, json.getInt("batch_size"))
+    }
+
+    @Test
+    fun projectEvaluationSettingsMapAndSerializeCvPolicyOverrides() {
+        val overridesJson = JSONObject()
+            .put("blur_severe_edge_threshold", 0.04)
+            .put("blur_severe_frequency_threshold", 0.04)
+            .put("blur_high_edge_threshold", 0.12)
+            .put("blur_high_frequency_threshold", 0.12)
+            .put("highlight_clip_threshold", 245)
+            .put("shadow_clip_threshold", 10)
+            .put("clipping_high_ratio", 0.08)
+            .put("clipping_high_connected_ratio", 0.08)
+            .put("clipping_severe_ratio", 0.50)
+            .put("clipping_severe_connected_ratio", 0.50)
+            .put("color_cast_high_threshold", 0.42)
+            .put("color_cast_severe_threshold", 0.70)
+            .put("face_eye_open_warn_threshold", 0.35)
+            .put("face_exposure_warn_ratio", 0.25)
+            .put("face_color_cast_warn_threshold", 0.42)
+        val settings = mapProjectEvaluationSettings(
+            JSONObject()
+                .put("project_id", "project-client")
+                .put("cv_policy_overrides", overridesJson),
+        )
+
+        assertEquals(0.08, settings.cvPolicyOverrides?.clippingHighRatio)
+        assertEquals(245, settings.cvPolicyOverrides?.highlightClipThreshold)
+        assertEquals(0.42, settings.cvPolicyOverrides?.colorCastHighThreshold)
+        assertEquals(0.35, settings.cvPolicyOverrides?.faceEyeOpenWarnThreshold)
+        assertEquals(0.25, settings.cvPolicyOverrides?.faceExposureWarnRatio)
+        assertEquals(0.42, settings.cvPolicyOverrides?.faceColorCastWarnThreshold)
+
+        val serialized = settings.toProjectEvaluationSettingsJson()
+            .getJSONObject("cv_policy_overrides")
+        assertEquals(0.08, serialized.getDouble("clipping_high_ratio"), 0.0001)
+        assertEquals(245, serialized.getInt("highlight_clip_threshold"))
+        assertEquals(0.42, serialized.getDouble("color_cast_high_threshold"), 0.0001)
+        assertEquals(0.35, serialized.getDouble("face_eye_open_warn_threshold"), 0.0001)
+        assertEquals(0.25, serialized.getDouble("face_exposure_warn_ratio"), 0.0001)
+        assertEquals(0.42, serialized.getDouble("face_color_cast_warn_threshold"), 0.0001)
     }
 
     @Test

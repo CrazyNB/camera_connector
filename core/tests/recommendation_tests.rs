@@ -1,11 +1,11 @@
 use camera_connector_core::{
     recommend_burst_group_from_model_evaluations, recommend_project_model_selections,
-    CameraConnectorService, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType,
+    CameraConnectorService, CvPolicy, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType,
     ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind,
     ModelProviderKind, ModelProviderSettings, ModelSendMode, PreviewSample,
-    SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
-    StoredObjectLocation, TechnicalAssessment, TechnicalAssessmentStatus, TechnicalGateStatus,
-    TransferRecord, TransferStatus,
+    ProjectEvaluationSettings, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SelectionSource, StoredObjectLocation, TechnicalAssessment, TechnicalAssessmentStatus,
+    TechnicalGateStatus, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -250,6 +250,58 @@ fn service_preview_assessment_persists_technical_and_model_evaluation_records() 
 }
 
 #[test]
+fn service_preview_assessment_uses_project_cv_policy() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let project = service
+        .create_project("Strict CV Policy")
+        .expect("project should create");
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should load")
+        .unwrap_or_else(|| {
+            ProjectEvaluationSettings::default_for_project(&project.project_id, 2_000)
+        });
+    settings.cv_policy = CvPolicy::Strict;
+    service
+        .save_project_evaluation_settings(settings)
+        .expect("settings should save");
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:strict-policy", "DCIM/100/IMG_7101.JPG", 1000),
+        )
+        .expect("transfer should record");
+    service
+        .drain_analysis_jobs(10)
+        .expect("burst analysis should drain");
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, Default::default(), 0, 25)
+        .expect("page should load");
+    let group_id = page.groups[0]
+        .group_id
+        .as_ref()
+        .expect("group id should exist")
+        .clone();
+
+    service
+        .assess_asset_group_preview(
+            &group_id,
+            scattered_highlight_sample(100, 100, 900),
+            "technical-v1",
+        )
+        .expect("assessment should save");
+    let assessments = service
+        .storage_store()
+        .expect("store should open")
+        .technical_assessments_for_asset_groups(&[group_id], "technical-v1")
+        .expect("technical assessments should query");
+
+    assert_eq!(assessments.len(), 1);
+    assert_eq!(assessments[0].gate_status, TechnicalGateStatus::Warn);
+}
+
+#[test]
 fn manual_project_recommendation_creates_run_snapshot_and_project_scope_recommendation() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
@@ -452,7 +504,6 @@ fn enable_upload_model_evaluation(service: &CameraConnectorService, project_id: 
         .project_evaluation_settings(project_id)
         .expect("settings should load")
         .expect("settings should exist");
-    settings.model_evaluation_enabled = true;
     settings.auto_evaluate_on_upload = true;
     settings.prompt_profile_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
@@ -483,6 +534,9 @@ fn flat_sample(width: usize, height: usize, value: u8) -> PreviewSample {
         width,
         height,
         luma: vec![value; width * height],
+        red: None,
+        green: None,
+        blue: None,
         preview_source: Some("test".to_string()),
     }
 }
@@ -498,6 +552,26 @@ fn balanced_detail_sample(width: usize, height: usize) -> PreviewSample {
         width,
         height,
         luma,
+        red: None,
+        green: None,
+        blue: None,
+        preview_source: Some("test".to_string()),
+    }
+}
+
+fn scattered_highlight_sample(width: usize, height: usize, clipped_count: usize) -> PreviewSample {
+    let mut luma = vec![128; width * height];
+    for i in 0..clipped_count.min(luma.len()) {
+        let index = (i * 37) % luma.len();
+        luma[index] = 248;
+    }
+    PreviewSample {
+        width,
+        height,
+        luma,
+        red: None,
+        green: None,
+        blue: None,
         preview_source: Some("test".to_string()),
     }
 }

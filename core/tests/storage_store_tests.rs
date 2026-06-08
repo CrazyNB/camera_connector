@@ -763,6 +763,50 @@ fn sqlite_store_moves_asset_group_between_projects() {
 }
 
 #[test]
+fn sqlite_store_deletes_asset_group_without_leaving_database_locked() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Delete Project")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:delete-jpg", "DCIM/100/IMG_7001.JPG", 1000),
+        )
+        .expect("jpg transfer should record");
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:delete-raw", "DCIM/100/IMG_7001.NEF", 1001),
+        )
+        .expect("raw transfer should record");
+    let group_id = store
+        .stored_asset_groups(&project.project_id)
+        .expect("groups should load")
+        .into_iter()
+        .find(|group| group.display_key == "IMG_7001")
+        .expect("group should exist")
+        .group_id;
+
+    let deleted = store
+        .delete_asset_group(&project.project_id, &group_id)
+        .expect("delete should not leave sqlite locked")
+        .expect("delete should find group");
+
+    assert_eq!(deleted.len(), 2);
+    assert!(store
+        .stored_asset_groups(&project.project_id)
+        .expect("groups should reload")
+        .is_empty());
+    assert!(store
+        .transfer_records(&project.project_id)
+        .expect("transfers should reload")
+        .is_empty());
+}
+
+#[test]
 fn sqlite_store_exposes_asset_group_rollup_model() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
