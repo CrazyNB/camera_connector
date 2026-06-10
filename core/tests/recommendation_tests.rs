@@ -472,8 +472,8 @@ fn model_eval(
         strengths: Vec::new(),
         weaknesses: Vec::new(),
         technical_warnings: Vec::new(),
-        prompt_profile_id: None,
-        prompt_version_id: None,
+        prompt_pack_id: None,
+        prompt_pack_version: None,
         prompt_hash: None,
         created_at_ms: 1_000,
         updated_at_ms: 1_000,
@@ -505,7 +505,7 @@ fn enable_upload_model_evaluation(service: &CameraConnectorService, project_id: 
         .expect("settings should load")
         .expect("settings should exist");
     settings.auto_evaluate_on_upload = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service
         .save_project_evaluation_settings(settings)

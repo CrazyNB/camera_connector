@@ -615,11 +615,11 @@ fn automatic_burst_model_recommendation_creates_run_snapshot() {
     assert_eq!(run.run_id, run_id);
     assert_eq!(run.trigger, EvaluationRunTrigger::BurstStable);
     assert_eq!(run.status, EvaluationRunStatus::Ready);
-    assert_eq!(
-        run.prompt_hash.as_deref(),
-        Some("builtin-general-default-v1")
-    );
-    assert!(run.settings_snapshot_json.contains("\"prompt_profile_id\""));
+    assert!(run
+        .prompt_hash
+        .as_deref()
+        .is_some_and(|hash| hash.starts_with("fnv1a64-")));
+    assert!(run.settings_snapshot_json.contains("\"prompt_pack_id\""));
 }
 
 #[test]
@@ -811,7 +811,7 @@ fn enable_upload_model_evaluation(
         .expect("settings should load")
         .expect("settings should exist");
     settings.auto_evaluate_on_upload = auto_evaluate_on_upload;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service
         .save_project_evaluation_settings(settings)

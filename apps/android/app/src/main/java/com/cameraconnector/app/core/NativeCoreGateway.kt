@@ -227,6 +227,7 @@ class NativeCoreGateway(
         name: String,
         styleTags: List<String>,
         sceneProfile: String,
+        distributionFolder: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
@@ -238,6 +239,7 @@ class NativeCoreGateway(
                     name,
                     tagsJson.toString(),
                     sceneProfile,
+                    distributionFolder,
                     promptText,
                 ),
             )
@@ -246,18 +248,44 @@ class NativeCoreGateway(
     override suspend fun forkGlobalPromptProfile(
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name))
+            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name, distributionFolder))
         }
 
-    override suspend fun saveGlobalPromptProfileVersion(
-        promptProfileId: String,
+    override suspend fun saveGlobalPromptPack(
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.saveGlobalPromptVersion(promptProfileId, promptText))
+            val tagsJson = JSONArray()
+            styleTags.forEach { tagsJson.put(it) }
+            mapPromptProfile(
+                nativeCore.saveGlobalPromptVersion(
+                    promptPackId,
+                    name,
+                    tagsJson.toString(),
+                    sceneProfile,
+                    promptText,
+                ),
+            )
         }
+
+    override suspend fun deleteGlobalPromptPack(promptPackId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteGlobalPromptPack(promptPackId)
+        }
+    }
+
+    override suspend fun deleteGlobalPromptPackage(distributionFolder: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteGlobalPromptPackage(distributionFolder)
+        }
+    }
 
     override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
         withContext(Dispatchers.IO) {
@@ -268,18 +296,33 @@ class NativeCoreGateway(
         projectId: String,
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name))
+            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name, distributionFolder))
         }
 
-    override suspend fun savePromptProfileVersion(
+    override suspend fun savePromptPack(
         projectId: String,
-        promptProfileId: String,
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.savePromptVersion(projectId, promptProfileId, promptText))
+            val tagsJson = JSONArray()
+            styleTags.forEach { tagsJson.put(it) }
+            mapPromptProfile(
+                nativeCore.savePromptVersion(
+                    projectId,
+                    promptPackId,
+                    name,
+                    tagsJson.toString(),
+                    sceneProfile,
+                    promptText,
+                ),
+            )
         }
 
     override suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi =
@@ -825,7 +868,7 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
         autoEvaluateOnUpload = value.optBoolean("auto_evaluate_on_upload", false),
         autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
         projectRecommendationMode = "manual",
-        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
+        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
         modelProviderSettingsId = jsonStringOrNull(value, "model_provider_settings_id"),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
         cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
@@ -842,7 +885,7 @@ internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSON
         .put("auto_evaluate_on_upload", autoEvaluateOnUpload)
         .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
         .put("project_recommendation_mode", "manual")
-        .put("prompt_profile_id", promptProfileId ?: JSONObject.NULL)
+        .put("prompt_pack_id", promptProfileId ?: JSONObject.NULL)
         .put("model_provider_settings_id", modelProviderSettingsId ?: JSONObject.NULL)
         .put("scene_profile", sceneProfile.ifBlank { "general" })
         .put("cv_policy", cvPolicy.ifBlank { "standard" })
@@ -901,35 +944,28 @@ internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
 }
 
 internal fun mapPromptProfile(value: JSONObject): PromptProfileUi {
-    val activePromptText = jsonStringOrNull(value, "active_prompt_text")
-    val promptContent = parsePromptProfileContent(activePromptText)
-    val sharedPreference = promptContent?.optString("shared_preference")
+    val activePromptText = jsonStringOrNull(value, "prompt_text")
+    val promptMarkdown = activePromptText
         ?.trim()
         ?.takeIf { it.isNotBlank() }
-        ?: activePromptText
     return PromptProfileUi(
-        promptProfileId = value.optString("prompt_profile_id"),
-        scope = value.optString("scope").ifBlank { "global" },
-        projectId = jsonStringOrNull(value, "project_id"),
+        promptProfileId = value.optString("prompt_pack_id"),
+        distributionFolder = value.optString("distribution_folder").ifBlank { "user" },
+        scope = if (value.optBoolean("built_in", false)) "built_in" else "user",
+        projectId = null,
         name = value.optString("name"),
         styleTags = value.optJSONArray("style_tags").toStringList(),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
-        activeVersionId = jsonStringOrNull(value, "active_version_id"),
+        activeVersionId = jsonStringOrNull(value, "version"),
         builtIn = value.optBoolean("built_in", false),
         enabled = value.optBoolean("enabled", true),
-        activePromptText = sharedPreference,
-        sharedPreference = sharedPreference,
-        evaluationInstruction = jsonStringOrNull(promptContent, "evaluation_instruction"),
-        burstSelectionInstruction = jsonStringOrNull(promptContent, "burst_selection_instruction"),
-        projectSelectionInstruction = jsonStringOrNull(promptContent, "project_selection_instruction"),
+        activePromptText = promptMarkdown,
+        sharedPreference = promptMarkdown,
+        evaluationInstruction = null,
+        burstSelectionInstruction = null,
+        projectSelectionInstruction = null,
     )
 }
-
-private fun parsePromptProfileContent(value: String?): JSONObject? =
-    value
-        ?.trim()
-        ?.takeIf { it.startsWith("{") }
-        ?.let { runCatching { JSONObject(it) }.getOrNull() }
 
 internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
     EvaluationRunUi(
@@ -940,8 +976,8 @@ internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
         status = value.optString("status"),
         providerKind = value.optString("provider_kind").ifBlank { "none" },
         providerModel = value.optString("provider_model"),
-        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
-        promptVersionId = jsonStringOrNull(value, "prompt_version_id"),
+        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
+        promptVersionId = jsonStringOrNull(value, "prompt_pack_version"),
         promptHash = jsonStringOrNull(value, "prompt_hash"),
         errorMessage = jsonStringOrNull(value, "error_message"),
         startedAtMs = value.optLongOrNull("started_at_ms"),

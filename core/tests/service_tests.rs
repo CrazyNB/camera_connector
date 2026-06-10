@@ -1,8 +1,8 @@
-use camera_connector_core::{
+﻿use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
     CvPolicy, ImportSource, ModelProviderKind, ModelProviderSettings, ModelSendMode, ObjectFormat,
-    PreviewSample, ProjectRecommendationMode, PromptProfileContent, PushProtocol, ReceiverAuthMode,
+    PreviewSample, ProjectRecommendationMode, PushProtocol, ReceiverAuthMode,
     ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
     SceneProfile, StoredObjectLocation, TechnicalAssessmentPolicy, TechnicalDefectType,
     TechnicalGateStatus, TransferQuery, TransferRecord, TransferStatus,
@@ -897,213 +897,6 @@ fn service_reads_receiver_runtime_status() {
 }
 
 #[test]
-fn service_rejects_editing_builtin_prompt_until_forked_for_project() {
-    let (service, config_path, state_dir) = service_with_state_dir("service-prompt-builtin");
-    let project = service
-        .create_project("Prompt Fork Project")
-        .expect("project should create");
-
-    assert!(service
-        .save_prompt_profile_version(
-            &project.project_id,
-            "general-default",
-            "Change the built-in prompt.",
-            2_000,
-        )
-        .is_err());
-
-    let forked = service
-        .fork_prompt_profile_for_project(
-            &project.project_id,
-            "general-default",
-            "Project General",
-            2_100,
-        )
-        .expect("built-in prompt should fork");
-    let saved = service
-        .save_prompt_profile_version(
-            &project.project_id,
-            &forked.prompt_profile_id,
-            "Project-specific prompt text.",
-            2_200,
-        )
-        .expect("forked prompt should edit");
-
-    assert_eq!(saved.prompt_profile_id, forked.prompt_profile_id);
-    assert_prompt_shared_preference(&saved.prompt_text, "Project-specific prompt text.");
-    assert_eq!(saved.output_schema_version, "model-evaluation-v1");
-    assert!(!saved.prompt_hash.is_empty());
-
-    let _ = std::fs::remove_file(config_path);
-    let _ = std::fs::remove_dir_all(state_dir);
-}
-
-#[test]
-fn service_fork_prompt_profile_creates_project_scoped_editable_copy() {
-    let (service, config_path, state_dir) = service_with_state_dir("service-prompt-fork");
-    let project = service
-        .create_project("Portrait Prompt Project")
-        .expect("project should create");
-    let source = service
-        .prompt_profiles_for_project(&project.project_id)
-        .expect("profiles should load")
-        .into_iter()
-        .find(|profile| profile.prompt_profile_id == "portrait-conservative")
-        .expect("portrait built-in should exist");
-
-    let forked = service
-        .fork_prompt_profile_for_project(
-            &project.project_id,
-            &source.prompt_profile_id,
-            "Client Portrait",
-            3_000,
-        )
-        .expect("prompt should fork");
-
-    assert_eq!(forked.scope, camera_connector_core::PromptScope::Project);
-    assert_eq!(
-        forked.project_id.as_deref(),
-        Some(project.project_id.as_str())
-    );
-    assert_eq!(forked.name, "Client Portrait");
-    assert_eq!(forked.style_tags, source.style_tags);
-    assert_eq!(forked.scene_profile, source.scene_profile);
-    assert!(!forked.built_in);
-    assert!(forked.enabled);
-    assert!(forked.active_version_id.is_some());
-
-    let source_version = service
-        .storage_store()
-        .expect("store should open")
-        .prompt_profile_version(
-            source
-                .active_version_id
-                .as_deref()
-                .expect("source active version"),
-        )
-        .expect("source version should query")
-        .expect("source version should exist");
-    let forked_version = service
-        .storage_store()
-        .expect("store should open")
-        .prompt_profile_version(
-            forked
-                .active_version_id
-                .as_deref()
-                .expect("fork active version"),
-        )
-        .expect("forked version should query")
-        .expect("forked version should exist");
-
-    assert_eq!(forked_version.prompt_profile_id, forked.prompt_profile_id);
-    assert_eq!(forked_version.prompt_text, source_version.prompt_text);
-
-    let _ = std::fs::remove_file(config_path);
-    let _ = std::fs::remove_dir_all(state_dir);
-}
-
-#[test]
-fn service_rejects_duplicate_prompt_fork_id_without_overwriting_existing_profile() {
-    let (service, config_path, state_dir) = service_with_state_dir("service-prompt-fork-duplicate");
-    let project = service
-        .create_project("Duplicate Prompt Fork Project")
-        .expect("project should create");
-    let now_ms = 3_500;
-
-    let forked = service
-        .fork_prompt_profile_for_project(
-            &project.project_id,
-            "general-default",
-            "First Fork",
-            now_ms,
-        )
-        .expect("first fork should save");
-
-    assert!(service
-        .fork_prompt_profile_for_project(
-            &project.project_id,
-            "general-default",
-            "Second Fork",
-            now_ms
-        )
-        .is_err());
-
-    let loaded = service
-        .storage_store()
-        .expect("store should open")
-        .prompt_profile(&forked.prompt_profile_id)
-        .expect("profile should query")
-        .expect("first fork should still exist");
-    assert_eq!(loaded.name, "First Fork");
-    assert_eq!(
-        loaded.active_version_id.as_deref(),
-        forked.active_version_id.as_deref()
-    );
-
-    let _ = std::fs::remove_file(config_path);
-    let _ = std::fs::remove_dir_all(state_dir);
-}
-
-#[test]
-fn service_editing_project_prompt_creates_new_version_without_deleting_old_one() {
-    let (service, config_path, state_dir) = service_with_state_dir("service-prompt-version");
-    let project = service
-        .create_project("Versioned Prompt Project")
-        .expect("project should create");
-    let forked = service
-        .fork_prompt_profile_for_project(&project.project_id, "general-default", "Editable", 4_000)
-        .expect("prompt should fork");
-    let first_version_id = forked
-        .active_version_id
-        .clone()
-        .expect("fork should have initial version");
-
-    let edited = service
-        .save_prompt_profile_version(
-            &project.project_id,
-            &forked.prompt_profile_id,
-            "A newer rubric for this project.",
-            4_100,
-        )
-        .expect("new version should save");
-
-    assert_ne!(edited.prompt_version_id, first_version_id);
-
-    let store = service.storage_store().expect("store should open");
-    let old_version = store
-        .prompt_profile_version(&first_version_id)
-        .expect("old version should query")
-        .expect("old version should still exist");
-    let new_version = store
-        .prompt_profile_version(&edited.prompt_version_id)
-        .expect("new version should query")
-        .expect("new version should exist");
-    let active_profile = store
-        .prompt_profile(&forked.prompt_profile_id)
-        .expect("profile should query")
-        .expect("profile should exist");
-
-    assert_eq!(old_version.prompt_profile_id, forked.prompt_profile_id);
-    assert_prompt_shared_preference(&new_version.prompt_text, "A newer rubric for this project.");
-    assert_eq!(
-        active_profile.active_version_id.as_deref(),
-        Some(edited.prompt_version_id.as_str())
-    );
-
-    let _ = std::fs::remove_file(config_path);
-    let _ = std::fs::remove_dir_all(state_dir);
-}
-
-fn assert_prompt_shared_preference(prompt_text: &str, expected: &str) {
-    let content: PromptProfileContent =
-        serde_json::from_str(prompt_text).expect("prompt should be structured JSON");
-    assert_eq!(content.shared_preference, expected);
-    assert!(content.evaluation_instruction.is_none());
-    assert!(content.burst_selection_instruction.is_none());
-    assert!(content.project_selection_instruction.is_none());
-}
-
-#[test]
 fn service_rejects_invalid_prompt_id_when_prompt_is_selected() {
     let (service, config_path, state_dir) = service_with_state_dir("service-settings-invalid");
     let project = service
@@ -1113,7 +906,7 @@ fn service_rejects_invalid_prompt_id_when_prompt_is_selected() {
         .project_evaluation_settings(&project.project_id)
         .expect("settings should load")
         .expect("settings should exist");
-    settings.prompt_profile_id = Some("missing-prompt".to_string());
+    settings.prompt_pack_id = Some("missing-prompt".to_string());
     settings.updated_at_ms = 5_000;
 
     assert!(service.save_project_evaluation_settings(settings).is_err());
@@ -1122,12 +915,12 @@ fn service_rejects_invalid_prompt_id_when_prompt_is_selected() {
         .project_evaluation_settings(&project.project_id)
         .expect("settings should reload")
         .expect("settings should exist");
-    without_prompt.prompt_profile_id = None;
+    without_prompt.prompt_pack_id = None;
     without_prompt.updated_at_ms = 5_100;
     let saved = service
         .save_project_evaluation_settings(without_prompt)
         .expect("prompt profile may be omitted");
-    assert_eq!(saved.prompt_profile_id, None);
+    assert_eq!(saved.prompt_pack_id, None);
 
     let _ = std::fs::remove_file(config_path);
     let _ = std::fs::remove_dir_all(state_dir);

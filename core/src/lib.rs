@@ -17,11 +17,11 @@ pub use analysis::{
     EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ModelEvaluation,
     ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind,
     ModelProviderSettings, ModelSendMode, NewAnalysisJob, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
-    PromptScope, SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation,
-    SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
-    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TechnicalAssessmentStatus,
-    TechnicalDefectFlag, TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+    ProjectRecommendationMode, PromptPack, PromptPackContent, SceneProfile,
+    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
+    SelectionRecommendationStatus, SelectionSource, SubjectAssessment, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
+    TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
 };
 pub use error::{ImporterError, Result};
 pub use model::{

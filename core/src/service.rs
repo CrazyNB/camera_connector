@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,13 +15,13 @@ use crate::{
     EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource, ModelProviderKind,
     ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob,
     ObjectFormat, PreviewSample, ProjectEvaluationSettings, ProjectRecommendationMode,
-    ProjectStatus, PromptProfile, PromptProfileContent, PromptProfileVersion, PromptScope,
-    PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset,
-    ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig,
-    Result, SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation,
-    SelectionRecommendationScope, SelectionRecommendationStatus, SqliteStore, StoredAsset,
-    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy,
-    TransferRecord, TransferStatus,
+    ProjectStatus, PromptPack, PromptPackContent, PublishQueueItem, PublishQueueSummary,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
+    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
+    SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
+    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TransferRecord,
+    TransferStatus,
 };
 
 const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
@@ -427,6 +427,14 @@ impl CameraConnectorService {
         mut settings: ProjectEvaluationSettings,
     ) -> Result<ProjectEvaluationSettings> {
         settings.project_recommendation_mode = ProjectRecommendationMode::Manual;
+        if let Some(prompt_pack_id) = settings.prompt_pack_id.as_deref() {
+            let Some(pack) = self.prompt_pack_by_id(prompt_pack_id)? else {
+                return Err(crate::ImporterError::internal("prompt pack not found"));
+            };
+            if !pack.enabled {
+                return Err(crate::ImporterError::internal("prompt pack is disabled"));
+            }
+        }
         self.storage_store()?
             .save_project_evaluation_settings(settings)
     }
@@ -456,308 +464,250 @@ impl CameraConnectorService {
             .subject_assessments_for_asset_groups(project_id, group_ids)
     }
 
-    pub fn prompt_profiles_for_project(&self, project_id: &str) -> Result<Vec<PromptProfile>> {
-        self.storage_store()?
-            .prompt_profiles_for_project(project_id)
+    pub fn prompt_packs_for_project(&self, _project_id: &str) -> Result<Vec<PromptPack>> {
+        self.global_prompt_packs()
     }
 
-    pub fn global_prompt_profiles(&self) -> Result<Vec<PromptProfile>> {
+    pub fn global_prompt_packs(&self) -> Result<Vec<PromptPack>> {
+        let mut packs = builtin_prompt_packs();
+        packs.extend(load_user_prompt_packs(&self.storage_state_dir()?)?);
+        packs.sort_by(|left, right| {
+            prompt_pack_sort_key(left)
+                .cmp(&prompt_pack_sort_key(right))
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.prompt_pack_id.cmp(&right.prompt_pack_id))
+        });
+        Ok(packs.into_iter().filter(|pack| pack.enabled).collect())
+    }
+
+    pub fn prompt_pack_by_id(&self, prompt_pack_id: &str) -> Result<Option<PromptPack>> {
         Ok(self
-            .storage_store()?
-            .prompt_profiles_for_project("")?
+            .global_prompt_packs()?
             .into_iter()
-            .filter(|profile| profile.scope == PromptScope::Global)
-            .collect())
+            .find(|pack| pack.prompt_pack_id == prompt_pack_id))
     }
 
-    pub fn active_prompt_text_for_profile(
-        &self,
-        prompt_profile_id: &str,
-    ) -> Result<Option<String>> {
-        let store = self.storage_store()?;
-        let Some(profile) = store.prompt_profile(prompt_profile_id)? else {
-            return Ok(None);
-        };
-        let Some(version_id) = profile.active_version_id.as_deref() else {
-            return Ok(None);
-        };
-        Ok(store
-            .prompt_profile_version(version_id)?
-            .map(|version| version.prompt_text))
+    pub fn prompt_text_for_pack(&self, prompt_pack_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .global_prompt_packs()?
+            .into_iter()
+            .find(|pack| pack.prompt_pack_id == prompt_pack_id)
+            .map(|pack| pack.prompt_text))
     }
 
-    pub fn create_global_prompt_profile(
+    pub fn prompt_markdown_for_pack(&self, prompt_pack_id: &str) -> Result<Option<String>> {
+        self.prompt_text_for_pack(prompt_pack_id)?
+            .map(|prompt_text| prompt_pack_markdown_from_json(&prompt_text))
+            .transpose()
+    }
+
+    pub fn create_global_prompt_pack(
         &self,
         name: impl AsRef<str>,
         style_tags: Vec<String>,
         scene_profile: SceneProfile,
+        distribution_folder: impl AsRef<str>,
         shared_preference: impl AsRef<str>,
         now_ms: i64,
-    ) -> Result<PromptProfile> {
-        let store = self.storage_store()?;
+    ) -> Result<PromptPack> {
         let name = name.as_ref().trim();
         if name.is_empty() {
             return Err(crate::ImporterError::internal(
-                "prompt profile name is required",
+                "prompt pack name is required",
             ));
         }
-        let prompt_text = prompt_profile_content_json_from_input(shared_preference.as_ref())?;
-        let profile_id = format!("global-prompt-{}-{}", stable_id_fragment(name), now_ms);
-        if store.prompt_profile(&profile_id)?.is_some() {
-            return Err(crate::ImporterError::internal(
-                "prompt profile already exists",
-            ));
-        }
-        let version_id = format!("{profile_id}-v1");
-        let profile = store.save_prompt_profile(PromptProfile {
-            prompt_profile_id: profile_id.clone(),
-            scope: PromptScope::Global,
-            project_id: None,
+        let state_dir = self.storage_state_dir()?;
+        let distribution_folder = normalized_distribution_folder(distribution_folder.as_ref());
+        let prompt_text = prompt_pack_content_json_from_input(shared_preference.as_ref())?;
+        let prompt_pack_id = unique_user_prompt_pack_id(&state_dir, name)?;
+        let pack = PromptPack {
+            prompt_pack_id: prompt_pack_id.clone(),
+            distribution_folder,
             name: name.to_string(),
+            version: format!("user-{now_ms}"),
+            author: "user".to_string(),
             style_tags: style_tags
                 .into_iter()
                 .map(|tag| tag.trim().to_string())
                 .filter(|tag| !tag.is_empty())
                 .collect(),
             scene_profile,
-            active_version_id: None,
+            schema: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            capabilities: default_prompt_pack_capabilities(),
             built_in: false,
             enabled: true,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-        })?;
-        let prompt_hash =
-            stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, prompt_text.as_str());
-        store.save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: version_id,
-            prompt_profile_id: profile.prompt_profile_id.clone(),
+            prompt_hash: stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, &prompt_text),
             prompt_text,
-            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
-            prompt_hash,
-            created_at_ms: now_ms,
-        })?;
-        store
-            .prompt_profile(&profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+            updated_at_ms: now_ms,
+        };
+        save_user_prompt_pack(&state_dir, &pack)
     }
 
-    pub fn fork_global_prompt_profile(
+    pub fn fork_global_prompt_pack(
         &self,
         source_profile_id: &str,
         name: impl AsRef<str>,
+        distribution_folder: impl AsRef<str>,
         now_ms: i64,
-    ) -> Result<PromptProfile> {
-        let store = self.storage_store()?;
-        let source = store
-            .prompt_profile(source_profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
-        if source.scope != PromptScope::Global || !source.enabled {
-            return Err(crate::ImporterError::internal(
-                "prompt profile is not available globally",
-            ));
+    ) -> Result<PromptPack> {
+        let source = self
+            .prompt_pack_by_id(source_profile_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt pack not found"))?;
+        if !source.enabled {
+            return Err(crate::ImporterError::internal("prompt pack is disabled"));
         }
-        let source_version_id = source.active_version_id.as_deref().ok_or_else(|| {
-            crate::ImporterError::internal("prompt profile has no active version")
-        })?;
-        let source_version = store
-            .prompt_profile_version(source_version_id)?
-            .ok_or_else(|| crate::ImporterError::internal("active prompt version not found"))?;
-        let profile_id = format!(
-            "global-prompt-{}-{}",
-            stable_id_fragment(source_profile_id),
-            now_ms
-        );
-        if store.prompt_profile(&profile_id)?.is_some() {
-            return Err(crate::ImporterError::internal(
-                "prompt profile fork already exists",
-            ));
-        }
-        let version_id = format!("{profile_id}-v1");
-        let profile = store.save_prompt_profile(PromptProfile {
-            prompt_profile_id: profile_id.clone(),
-            scope: PromptScope::Global,
-            project_id: None,
-            name: name.as_ref().trim().to_string(),
+        let state_dir = self.storage_state_dir()?;
+        let name = normalized_prompt_pack_name(name.as_ref(), &source.name);
+        let distribution_folder = normalized_distribution_folder(distribution_folder.as_ref());
+        let prompt_pack_id = unique_user_prompt_pack_id(&state_dir, &name)?;
+        let prompt_text = source.prompt_text.clone();
+        let pack = PromptPack {
+            prompt_pack_id: prompt_pack_id.clone(),
+            distribution_folder,
+            name,
+            version: format!("user-{now_ms}"),
+            author: "user".to_string(),
             style_tags: source.style_tags,
             scene_profile: source.scene_profile,
-            active_version_id: None,
+            schema: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+            capabilities: source.capabilities,
             built_in: false,
             enabled: true,
-            created_at_ms: now_ms,
+            prompt_hash: stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, &prompt_text),
+            prompt_text,
             updated_at_ms: now_ms,
-        })?;
-        let source_prompt_text = source_version.prompt_text;
-        store.save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: version_id,
-            prompt_profile_id: profile.prompt_profile_id.clone(),
-            prompt_text: source_prompt_text.clone(),
-            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
-            prompt_hash: stable_prompt_hash(
-                MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION,
-                &source_prompt_text,
-            ),
-            created_at_ms: now_ms,
-        })?;
-        store
-            .prompt_profile(&profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+        };
+        save_user_prompt_pack(&state_dir, &pack)
     }
 
-    pub fn save_global_prompt_profile_version(
+    pub fn save_global_prompt_pack(
         &self,
-        prompt_profile_id: &str,
+        prompt_pack_id: &str,
+        name: impl AsRef<str>,
+        style_tags: Vec<String>,
+        scene_profile: SceneProfile,
         prompt_text: impl AsRef<str>,
         now_ms: i64,
-    ) -> Result<PromptProfile> {
-        let store = self.storage_store()?;
-        let profile = store
-            .prompt_profile(prompt_profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
-        if profile.scope != PromptScope::Global || profile.built_in || !profile.enabled {
+    ) -> Result<PromptPack> {
+        let mut pack = self
+            .prompt_pack_by_id(prompt_pack_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt pack not found"))?;
+        if pack.built_in || !pack.enabled {
             return Err(crate::ImporterError::internal(
-                "prompt profile is not editable globally",
+                "built-in prompt packs must be forked before editing",
             ));
         }
-        let prompt_text = prompt_profile_content_json_from_input(prompt_text.as_ref())?;
-        let prompt_hash =
-            stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, prompt_text.as_str());
-        let version_id = format!(
-            "{}-v{}-{}",
-            stable_id_fragment(prompt_profile_id),
-            now_ms,
-            &prompt_hash["fnv1a64-".len()..]
-        );
-        if store.prompt_profile_version(&version_id)?.is_some() {
+        let name = name.as_ref().trim();
+        if name.is_empty() {
             return Err(crate::ImporterError::internal(
-                "prompt profile version already exists",
+                "prompt pack name is required",
             ));
         }
-        store.save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: version_id,
-            prompt_profile_id: prompt_profile_id.to_string(),
-            prompt_text,
-            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
-            prompt_hash,
-            created_at_ms: now_ms,
-        })?;
-        store
-            .prompt_profile(prompt_profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+        let prompt_text = prompt_pack_content_json_from_input(prompt_text.as_ref())?;
+        pack.name = name.to_string();
+        pack.style_tags = style_tags
+            .into_iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect();
+        pack.scene_profile = scene_profile;
+        pack.version = format!("user-{now_ms}");
+        pack.prompt_hash = stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, &prompt_text);
+        pack.prompt_text = prompt_text;
+        pack.updated_at_ms = now_ms;
+        save_user_prompt_pack(&self.storage_state_dir()?, &pack)
     }
 
-    pub fn fork_prompt_profile_for_project(
+    pub fn delete_global_prompt_pack(&self, prompt_pack_id: &str) -> Result<bool> {
+        let pack = self
+            .prompt_pack_by_id(prompt_pack_id)?
+            .ok_or_else(|| crate::ImporterError::internal("prompt pack not found"))?;
+        if pack.built_in {
+            return Err(crate::ImporterError::internal(
+                "built-in prompt packs cannot be deleted",
+            ));
+        }
+
+        for project in self.list_projects()? {
+            if let Some(mut settings) = self.project_evaluation_settings(&project.project_id)? {
+                if settings.prompt_pack_id.as_deref() == Some(&pack.prompt_pack_id) {
+                    settings.prompt_pack_id = None;
+                    self.save_project_evaluation_settings(settings)?;
+                }
+            }
+        }
+
+        let dir = prompt_pack_dir(
+            &self.storage_state_dir()?,
+            &pack.distribution_folder,
+            &pack.prompt_pack_id,
+        );
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn delete_global_prompt_package(&self, distribution_folder: &str) -> Result<bool> {
+        let distribution_folder = normalized_distribution_folder(distribution_folder);
+        if distribution_folder == "builtin" {
+            return Err(crate::ImporterError::internal(
+                "built-in prompt package cannot be deleted",
+            ));
+        }
+
+        let pack_ids = self
+            .global_prompt_packs()?
+            .into_iter()
+            .filter(|pack| !pack.built_in && pack.distribution_folder == distribution_folder)
+            .map(|pack| pack.prompt_pack_id)
+            .collect::<Vec<_>>();
+        let mut deleted = false;
+        for prompt_pack_id in pack_ids {
+            deleted = self.delete_global_prompt_pack(&prompt_pack_id)? || deleted;
+        }
+
+        let dir = prompt_distribution_dir(&self.storage_state_dir()?, &distribution_folder);
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+            deleted = true;
+        }
+        Ok(deleted)
+    }
+
+    pub fn fork_prompt_pack_for_project(
         &self,
         project_id: &str,
         source_profile_id: &str,
         name: impl AsRef<str>,
+        distribution_folder: impl AsRef<str>,
         now_ms: i64,
-    ) -> Result<PromptProfile> {
-        let store = self.storage_store()?;
-        ensure_service_project_is_active(&store, project_id)?;
-        let source = store
-            .prompt_profile(source_profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
-        if !prompt_profile_available_to_project(&source, project_id) {
-            return Err(crate::ImporterError::internal(
-                "prompt profile is not available to this project",
-            ));
-        }
-        let source_version_id = source.active_version_id.as_deref().ok_or_else(|| {
-            crate::ImporterError::internal("prompt profile has no active version")
-        })?;
-        let source_version = store
-            .prompt_profile_version(source_version_id)?
-            .ok_or_else(|| crate::ImporterError::internal("active prompt version not found"))?;
-        let profile_id = format!(
-            "project-prompt-{}-{}-{}",
-            stable_id_fragment(project_id),
-            stable_id_fragment(source_profile_id),
-            now_ms
-        );
-        if store.prompt_profile(&profile_id)?.is_some() {
-            return Err(crate::ImporterError::internal(
-                "prompt profile fork already exists",
-            ));
-        }
-        let version_id = format!("{profile_id}-v1");
-        let profile = store.save_prompt_profile(PromptProfile {
-            prompt_profile_id: profile_id.clone(),
-            scope: PromptScope::Project,
-            project_id: Some(project_id.to_string()),
-            name: name.as_ref().trim().to_string(),
-            style_tags: source.style_tags,
-            scene_profile: source.scene_profile,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-        })?;
-        let source_prompt_text = source_version.prompt_text;
-        store.save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: version_id,
-            prompt_profile_id: profile.prompt_profile_id.clone(),
-            prompt_text: source_prompt_text.clone(),
-            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
-            prompt_hash: stable_prompt_hash(
-                MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION,
-                &source_prompt_text,
-            ),
-            created_at_ms: now_ms,
-        })?;
-        store
-            .prompt_profile(&profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))
+    ) -> Result<PromptPack> {
+        ensure_service_project_is_active(&self.storage_store()?, project_id)?;
+        self.fork_global_prompt_pack(source_profile_id, name, distribution_folder, now_ms)
     }
 
-    pub fn save_prompt_profile_version(
+    pub fn save_prompt_pack(
         &self,
         project_id: &str,
-        prompt_profile_id: &str,
+        prompt_pack_id: &str,
+        name: impl AsRef<str>,
+        style_tags: Vec<String>,
+        scene_profile: SceneProfile,
         prompt_text: impl AsRef<str>,
         now_ms: i64,
-    ) -> Result<PromptProfileVersion> {
-        let store = self.storage_store()?;
-        ensure_service_project_is_active(&store, project_id)?;
-        let profile = store
-            .prompt_profile(prompt_profile_id)?
-            .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
-        if profile.scope == PromptScope::Global && profile.built_in {
-            return Err(crate::ImporterError::internal(
-                "built-in prompt profiles must be forked before editing",
-            ));
-        }
-        if profile.scope != PromptScope::Project
-            || profile.project_id.as_deref() != Some(project_id)
-            || !profile.enabled
-        {
-            return Err(crate::ImporterError::internal(
-                "prompt profile is not editable for this project",
-            ));
-        }
-
-        let prompt_text = prompt_profile_content_json_from_input(prompt_text.as_ref())?;
-        let prompt_hash =
-            stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, prompt_text.as_str());
-        let version_id = format!(
-            "{}-v{}-{}",
-            stable_id_fragment(prompt_profile_id),
-            now_ms,
-            &prompt_hash["fnv1a64-".len()..]
-        );
-        if store.prompt_profile_version(&version_id)?.is_some() {
-            return Err(crate::ImporterError::internal(
-                "prompt profile version already exists",
-            ));
-        }
-        store.save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: version_id,
-            prompt_profile_id: prompt_profile_id.to_string(),
+    ) -> Result<PromptPack> {
+        ensure_service_project_is_active(&self.storage_store()?, project_id)?;
+        self.save_global_prompt_pack(
+            prompt_pack_id,
+            name,
+            style_tags,
+            scene_profile,
             prompt_text,
-            output_schema_version: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
-            prompt_hash,
-            created_at_ms: now_ms,
-        })
+            now_ms,
+        )
     }
 
     pub fn record_project_transfer(&self, project_id: &str, record: TransferRecord) -> Result<()> {
@@ -1112,7 +1062,10 @@ impl CameraConnectorService {
             &prompt_content,
             now_ms,
         )?;
-        if recommendation.status == SelectionRecommendationStatus::Pending && provider.is_some() {
+        if recommendation.status == SelectionRecommendationStatus::Pending
+            && provider.is_some()
+            && settings.auto_evaluate_on_upload
+        {
             let preselected_ids = preselected_asset_group_ids(&recommendation);
             evaluate_missing_model_candidates_for_burst(
                 &store,
@@ -1221,12 +1174,12 @@ impl CameraConnectorService {
             status: EvaluationRunStatus::Ready,
             provider_kind: provider.settings.provider_kind,
             provider_model: provider.settings.default_model.clone(),
-            prompt_profile_id: prompt_snapshot
+            prompt_pack_id: prompt_snapshot
                 .as_ref()
-                .map(|snapshot| snapshot.prompt_profile_id.clone()),
-            prompt_version_id: prompt_snapshot
+                .map(|snapshot| snapshot.prompt_pack_id.clone()),
+            prompt_pack_version: prompt_snapshot
                 .as_ref()
-                .map(|snapshot| snapshot.prompt_version_id.clone()),
+                .map(|snapshot| snapshot.prompt_pack_version.clone()),
             prompt_hash: prompt_snapshot
                 .as_ref()
                 .map(|snapshot| snapshot.prompt_hash.clone()),
@@ -2181,7 +2134,7 @@ fn burst_selection_recommendation_from_provider_or_evaluations(
     assessments: &[TechnicalAssessment],
     provider: Option<&RuntimeModelProvider>,
     candidate_visuals: &[SelectionCandidateVisualInput],
-    prompt_content: &PromptProfileContent,
+    prompt_content: &PromptPackContent,
     now_ms: i64,
 ) -> Result<SelectionRecommendation> {
     if let Some(provider) = provider.filter(|provider| {
@@ -2218,7 +2171,7 @@ fn project_selection_recommendation_from_provider_or_evaluations(
     burst_recommendations: &[SelectionRecommendation],
     provider: Option<&RuntimeModelProvider>,
     candidate_visuals: &[SelectionCandidateVisualInput],
-    prompt_content: &PromptProfileContent,
+    prompt_content: &PromptPackContent,
     now_ms: i64,
 ) -> Result<SelectionRecommendation> {
     if let Some(provider) = provider.filter(|provider| {
@@ -2324,12 +2277,12 @@ fn model_evaluation_for_upload(
         provider_model: provider
             .map(|provider| provider.settings.default_model)
             .unwrap_or_else(|| "model-stub-v1".to_string()),
-        prompt_profile_id: prompt_snapshot
+        prompt_pack_id: prompt_snapshot
             .as_ref()
-            .map(|snapshot| snapshot.prompt_profile_id.clone()),
-        prompt_version_id: prompt_snapshot
+            .map(|snapshot| snapshot.prompt_pack_id.clone()),
+        prompt_pack_version: prompt_snapshot
             .as_ref()
-            .map(|snapshot| snapshot.prompt_version_id.clone()),
+            .map(|snapshot| snapshot.prompt_pack_version.clone()),
         prompt_hash: prompt_snapshot
             .as_ref()
             .map(|snapshot| snapshot.prompt_hash.clone()),
@@ -2343,8 +2296,8 @@ fn model_evaluation_for_upload(
     store.save_evaluation_run(run)?;
     evaluation.run_id = run_id;
     if let Some(snapshot) = prompt_snapshot {
-        evaluation.prompt_profile_id = Some(snapshot.prompt_profile_id);
-        evaluation.prompt_version_id = Some(snapshot.prompt_version_id);
+        evaluation.prompt_pack_id = Some(snapshot.prompt_pack_id);
+        evaluation.prompt_pack_version = Some(snapshot.prompt_pack_version);
         evaluation.prompt_hash = Some(snapshot.prompt_hash);
     }
     Ok(evaluation)
@@ -2380,12 +2333,12 @@ fn burst_recommendation_run(
         provider_model: provider
             .map(|settings| settings.default_model)
             .unwrap_or_else(|| "model-stub-v1".to_string()),
-        prompt_profile_id: prompt_snapshot
+        prompt_pack_id: prompt_snapshot
             .as_ref()
-            .map(|snapshot| snapshot.prompt_profile_id.clone()),
-        prompt_version_id: prompt_snapshot
+            .map(|snapshot| snapshot.prompt_pack_id.clone()),
+        prompt_pack_version: prompt_snapshot
             .as_ref()
-            .map(|snapshot| snapshot.prompt_version_id.clone()),
+            .map(|snapshot| snapshot.prompt_pack_version.clone()),
         prompt_hash: prompt_snapshot
             .as_ref()
             .map(|snapshot| snapshot.prompt_hash.clone()),
@@ -2400,35 +2353,34 @@ fn burst_recommendation_run(
 
 #[derive(Debug, Clone)]
 struct PromptSnapshot {
-    prompt_profile_id: String,
-    prompt_version_id: String,
+    prompt_pack_id: String,
+    prompt_pack_version: String,
     prompt_hash: String,
-    prompt_content: PromptProfileContent,
+    prompt_content: PromptPackContent,
 }
 
 fn prompt_snapshot_for_settings(
     store: &SqliteStore,
     settings: &ProjectEvaluationSettings,
 ) -> Result<Option<PromptSnapshot>> {
-    let Some(prompt_profile_id) = settings.prompt_profile_id.as_deref() else {
+    let Some(prompt_pack_id) = settings.prompt_pack_id.as_deref() else {
         return Ok(None);
     };
-    let profile = store
-        .prompt_profiles_for_project(&settings.project_id)?
+    let pack = match builtin_prompt_packs()
         .into_iter()
-        .find(|profile| profile.prompt_profile_id == prompt_profile_id)
-        .ok_or_else(|| crate::ImporterError::internal("prompt profile not found"))?;
-    let Some(version_id) = profile.active_version_id else {
-        return Ok(None);
+        .find(|pack| pack.prompt_pack_id == prompt_pack_id)
+    {
+        Some(pack) => pack,
+        None => load_user_prompt_packs(&store.state_dir())?
+            .into_iter()
+            .find(|pack| pack.prompt_pack_id == prompt_pack_id)
+            .ok_or_else(|| crate::ImporterError::internal("prompt pack not found"))?,
     };
-    let version = store
-        .prompt_profile_version(&version_id)?
-        .ok_or_else(|| crate::ImporterError::internal("prompt version not found"))?;
     Ok(Some(PromptSnapshot {
-        prompt_profile_id: profile.prompt_profile_id,
-        prompt_version_id: version.prompt_version_id,
-        prompt_hash: version.prompt_hash,
-        prompt_content: prompt_profile_content_from_json(&version.prompt_text)?,
+        prompt_pack_id: pack.prompt_pack_id,
+        prompt_pack_version: pack.version,
+        prompt_hash: pack.prompt_hash,
+        prompt_content: prompt_pack_content_from_json(&pack.prompt_text)?,
     }))
 }
 
@@ -2551,8 +2503,8 @@ fn model_evaluation_skipped(
         strengths: Vec::new(),
         weaknesses: vec![summary.to_string()],
         technical_warnings: Vec::new(),
-        prompt_profile_id: None,
-        prompt_version_id: None,
+        prompt_pack_id: None,
+        prompt_pack_version: None,
         prompt_hash: None,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
@@ -2717,14 +2669,6 @@ fn ensure_service_project_is_active(store: &SqliteStore, project_id: &str) -> Re
     Ok(())
 }
 
-fn prompt_profile_available_to_project(profile: &PromptProfile, project_id: &str) -> bool {
-    profile.enabled
-        && match profile.scope {
-            PromptScope::Global => true,
-            PromptScope::Project => profile.project_id.as_deref() == Some(project_id),
-        }
-}
-
 fn should_schedule_subject_assessment_for_settings(settings: &ProjectEvaluationSettings) -> bool {
     settings.scene_profile == SceneProfile::Portrait
 }
@@ -2744,18 +2688,249 @@ fn stable_prompt_hash(output_schema_version: &str, prompt_text: &str) -> String 
     format!("fnv1a64-{hash:016x}")
 }
 
-fn prompt_profile_content_json_from_input(value: &str) -> Result<String> {
-    let trimmed = value.trim();
-    let content = serde_json::from_str::<PromptProfileContent>(trimmed)
-        .unwrap_or_else(|_| PromptProfileContent::new(trimmed));
-    serde_json::to_string(&content)
+fn builtin_prompt_packs() -> Vec<PromptPack> {
+    [
+        (
+            "general-default",
+            "通用评价",
+            "Camera Connector",
+            vec!["通用".to_string(), "均衡".to_string()],
+            SceneProfile::General,
+            "balanced photographic judgment with clear subject value and technical sanity",
+        ),
+        (
+            "portrait-conservative",
+            "人像稳健",
+            "Camera Connector",
+            vec!["人像".to_string(), "稳健".to_string()],
+            SceneProfile::Portrait,
+            "portrait-focused judgment with attention to expression, focus, skin tone, face visibility, and subject dignity",
+        ),
+        (
+            "landscape-technical",
+            "风光技术",
+            "Camera Connector",
+            vec!["风光".to_string(), "技术".to_string()],
+            SceneProfile::Landscape,
+            "landscape-focused judgment with emphasis on exposure, horizon, detail, color, atmosphere, and composition",
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(prompt_pack_id, name, author, style_tags, scene_profile, shared_preference)| {
+            let prompt_text = prompt_pack_content_json_from_input(shared_preference)
+                .expect("built-in prompt pack content should be valid JSON");
+            PromptPack {
+                prompt_pack_id: prompt_pack_id.to_string(),
+                distribution_folder: "builtin".to_string(),
+                name: name.to_string(),
+                version: "builtin-v1".to_string(),
+                author: author.to_string(),
+                style_tags,
+                scene_profile,
+                schema: MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string(),
+                capabilities: default_prompt_pack_capabilities(),
+                built_in: true,
+                enabled: true,
+                prompt_hash: stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, &prompt_text),
+                prompt_text,
+                updated_at_ms: 0,
+            }
+        },
+    )
+    .collect()
+}
+
+fn default_prompt_pack_capabilities() -> Vec<String> {
+    vec![
+        "single_evaluation".to_string(),
+        "burst_selection".to_string(),
+        "project_selection".to_string(),
+    ]
+}
+
+fn prompt_pack_sort_key(pack: &PromptPack) -> (u8, u8) {
+    let built_in_order = match pack.prompt_pack_id.as_str() {
+        "general-default" => 0,
+        "portrait-conservative" => 1,
+        "landscape-technical" => 2,
+        _ => 3,
+    };
+    (if pack.built_in { 0 } else { 1 }, built_in_order)
+}
+
+fn prompt_packs_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join("prompt-packs")
+}
+
+fn prompt_distribution_dir(state_dir: &Path, distribution_folder: &str) -> PathBuf {
+    prompt_packs_dir(state_dir).join(normalized_distribution_folder(distribution_folder))
+}
+
+fn prompt_pack_dir(state_dir: &Path, distribution_folder: &str, prompt_pack_id: &str) -> PathBuf {
+    prompt_distribution_dir(state_dir, distribution_folder).join(stable_id_fragment(prompt_pack_id))
+}
+
+fn unique_user_prompt_pack_id(state_dir: &Path, name: &str) -> Result<String> {
+    let base = stable_id_fragment(name);
+    let base = if base.is_empty() {
+        "prompt-pack".to_string()
+    } else {
+        base
+    };
+    let builtin_ids = builtin_prompt_packs()
+        .into_iter()
+        .map(|pack| pack.prompt_pack_id)
+        .collect::<HashSet<_>>();
+
+    for index in 1..=999 {
+        let candidate = if index == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{index}")
+        };
+        if builtin_ids.contains(&candidate) {
+            continue;
+        }
+        if !prompt_pack_dir_exists_anywhere(state_dir, &candidate)? {
+            return Ok(candidate);
+        }
+    }
+
+    Err(crate::ImporterError::internal(
+        "prompt pack name has too many duplicates",
+    ))
+}
+
+fn prompt_pack_dir_exists_anywhere(state_dir: &Path, prompt_pack_id: &str) -> Result<bool> {
+    let root = prompt_packs_dir(state_dir);
+    if !root.exists() {
+        return Ok(false);
+    }
+    let prompt_pack_dir_name = stable_id_fragment(prompt_pack_id);
+    for distribution_entry in fs::read_dir(root)? {
+        let distribution_entry = distribution_entry?;
+        if !distribution_entry.file_type()?.is_dir() {
+            continue;
+        }
+        if distribution_entry
+            .path()
+            .join(&prompt_pack_dir_name)
+            .exists()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn load_user_prompt_packs(state_dir: &Path) -> Result<Vec<PromptPack>> {
+    let root = prompt_packs_dir(state_dir);
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut packs = Vec::new();
+    for distribution_entry in fs::read_dir(root)? {
+        let distribution_entry = distribution_entry?;
+        if !distribution_entry.file_type()?.is_dir() {
+            continue;
+        }
+        let distribution_folder =
+            normalized_distribution_folder(&distribution_entry.file_name().to_string_lossy());
+        for pack_entry in fs::read_dir(distribution_entry.path())? {
+            let pack_entry = pack_entry?;
+            if !pack_entry.file_type()?.is_dir() {
+                continue;
+            }
+            let manifest_path = pack_entry.path().join("manifest.json");
+            let prompt_path = pack_entry.path().join("PROMPT.md");
+            if !manifest_path.exists() || !prompt_path.exists() {
+                continue;
+            }
+            let mut pack: PromptPack =
+                serde_json::from_str(&fs::read_to_string(&manifest_path)?)
+                    .map_err(|error| crate::ImporterError::internal(error.to_string()))?;
+            let prompt_markdown = fs::read_to_string(prompt_path)?;
+            pack.distribution_folder = normalized_distribution_folder(&pack.distribution_folder);
+            if pack.distribution_folder != distribution_folder {
+                pack.distribution_folder = distribution_folder.clone();
+            }
+            pack.prompt_text = prompt_pack_content_json_from_markdown(&prompt_markdown)?;
+            pack.prompt_hash =
+                stable_prompt_hash(MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION, &pack.prompt_text);
+            pack.schema = MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION.to_string();
+            pack.built_in = false;
+            packs.push(pack);
+        }
+    }
+    Ok(packs)
+}
+
+fn save_user_prompt_pack(state_dir: &Path, pack: &PromptPack) -> Result<PromptPack> {
+    if pack.built_in {
+        return Err(crate::ImporterError::internal(
+            "built-in prompt pack is read-only",
+        ));
+    }
+    let distribution_folder = normalized_distribution_folder(&pack.distribution_folder);
+    let dir = prompt_pack_dir(state_dir, &distribution_folder, &pack.prompt_pack_id);
+    fs::create_dir_all(&dir)?;
+    let prompt_markdown = prompt_pack_markdown_from_json(&pack.prompt_text)?;
+    let mut manifest = pack.clone();
+    manifest.distribution_folder = distribution_folder;
+    manifest.prompt_text.clear();
+    fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|error| crate::ImporterError::internal(error.to_string()))?,
+    )?;
+    fs::write(dir.join("PROMPT.md"), prompt_markdown)?;
+    Ok(pack.clone())
+}
+
+fn normalized_prompt_pack_name(name: &str, fallback: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        format!("{fallback} 副本")
+    } else {
+        name.to_string()
+    }
+}
+
+fn normalized_distribution_folder(value: &str) -> String {
+    let mut output = String::new();
+    for character in value.trim().chars() {
+        if character.is_alphanumeric() || character == '_' {
+            output.push(character);
+        } else if !output.ends_with('-') {
+            output.push('-');
+        }
+    }
+    let output = output.trim_matches(|character| character == '-' || character == '.');
+    if output.is_empty() {
+        "user".to_string()
+    } else {
+        output.to_string()
+    }
+}
+
+fn prompt_pack_content_json_from_input(value: &str) -> Result<String> {
+    prompt_pack_content_json_from_markdown(value)
+}
+
+fn prompt_pack_content_json_from_markdown(value: &str) -> Result<String> {
+    serde_json::to_string(&PromptPackContent::new(value.trim()))
         .map_err(|error| crate::ImporterError::internal(error.to_string()))
 }
 
-fn prompt_profile_content_from_json(value: &str) -> Result<PromptProfileContent> {
+fn prompt_pack_content_from_json(value: &str) -> Result<PromptPackContent> {
     serde_json::from_str(value).map_err(|error| {
-        crate::ImporterError::internal(format!("invalid prompt profile content: {error}"))
+        crate::ImporterError::internal(format!("invalid prompt pack content: {error}"))
     })
+}
+
+fn prompt_pack_markdown_from_json(value: &str) -> Result<String> {
+    Ok(prompt_pack_content_from_json(value)?.shared_preference)
 }
 
 fn stable_id_fragment(value: &str) -> String {

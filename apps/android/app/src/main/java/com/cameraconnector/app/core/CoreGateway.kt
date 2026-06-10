@@ -46,15 +46,36 @@ interface CoreGateway {
         name: String,
         styleTags: List<String>,
         sceneProfile: String,
+        distributionFolder: String,
         promptText: String,
     ): PromptProfileUi
-    suspend fun forkGlobalPromptProfile(sourceProfileId: String, name: String): PromptProfileUi
-    suspend fun saveGlobalPromptProfileVersion(promptProfileId: String, promptText: String): PromptProfileUi
+    suspend fun forkGlobalPromptProfile(
+        sourceProfileId: String,
+        name: String,
+        distributionFolder: String,
+    ): PromptProfileUi
+    suspend fun saveGlobalPromptPack(
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
+        promptText: String,
+    ): PromptProfileUi
+    suspend fun deleteGlobalPromptPack(promptPackId: String)
+    suspend fun deleteGlobalPromptPackage(distributionFolder: String)
     suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi>
-    suspend fun forkPromptProfile(projectId: String, sourceProfileId: String, name: String): PromptProfileUi
-    suspend fun savePromptProfileVersion(
+    suspend fun forkPromptProfile(
         projectId: String,
-        promptProfileId: String,
+        sourceProfileId: String,
+        name: String,
+        distributionFolder: String = "user",
+    ): PromptProfileUi
+    suspend fun savePromptPack(
+        projectId: String,
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi
     suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi
@@ -214,6 +235,7 @@ data class ModelProviderSettingsUi(
 
 data class PromptProfileUi(
     val promptProfileId: String,
+    val distributionFolder: String = "user",
     val scope: String,
     val projectId: String?,
     val name: String,
@@ -556,10 +578,12 @@ class PreviewCoreGateway : CoreGateway {
         name: String,
         styleTags: List<String>,
         sceneProfile: String,
+        distributionFolder: String,
         promptText: String,
     ): PromptProfileUi =
         PromptProfileUi(
             promptProfileId = "global-custom-${name.ifBlank { "prompt" }}",
+            distributionFolder = distributionFolder.ifBlank { "user" },
             scope = "global",
             projectId = null,
             name = name.ifBlank { "自定义提示词" },
@@ -572,12 +596,17 @@ class PreviewCoreGateway : CoreGateway {
             sharedPreference = promptText,
         )
 
-    override suspend fun forkGlobalPromptProfile(sourceProfileId: String, name: String): PromptProfileUi =
+    override suspend fun forkGlobalPromptProfile(
+        sourceProfileId: String,
+        name: String,
+        distributionFolder: String,
+    ): PromptProfileUi =
         previewPromptProfiles("")
             .firstOrNull { it.promptProfileId == sourceProfileId }
             ?.let { source ->
                 source.copy(
                     promptProfileId = "global-$sourceProfileId",
+                    distributionFolder = distributionFolder.ifBlank { "user" },
                     scope = "global",
                     projectId = null,
                     name = name.ifBlank { "自定义 ${source.name}" },
@@ -586,6 +615,7 @@ class PreviewCoreGateway : CoreGateway {
             }
             ?: PromptProfileUi(
                 promptProfileId = "global-custom",
+                distributionFolder = distributionFolder.ifBlank { "user" },
                 scope = "global",
                 projectId = null,
                 name = name.ifBlank { "自定义提示词" },
@@ -597,26 +627,41 @@ class PreviewCoreGateway : CoreGateway {
                 activePromptText = "",
             )
 
-    override suspend fun saveGlobalPromptProfileVersion(
-        promptProfileId: String,
+    override suspend fun saveGlobalPromptPack(
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         previewPromptProfiles("")
-            .firstOrNull { it.promptProfileId == promptProfileId }
-            ?.copy(builtIn = false, activeVersionId = "preview-version", activePromptText = promptText)
+            .firstOrNull { it.promptProfileId == promptPackId }
+            ?.copy(
+                name = name,
+                styleTags = styleTags,
+                sceneProfile = sceneProfile,
+                builtIn = false,
+                activeVersionId = "preview-version",
+                activePromptText = promptText,
+                sharedPreference = promptText,
+            )
             ?: PromptProfileUi(
-                promptProfileId = promptProfileId,
+                promptProfileId = promptPackId,
                 scope = "global",
                 projectId = null,
-                name = "自定义提示词",
-                styleTags = emptyList(),
-                sceneProfile = "general",
+                name = name.ifBlank { "自定义提示词" },
+                styleTags = styleTags,
+                sceneProfile = sceneProfile.ifBlank { "general" },
                 activeVersionId = "preview-version",
                 builtIn = false,
                 enabled = true,
                 activePromptText = promptText,
                 sharedPreference = promptText,
             )
+
+    override suspend fun deleteGlobalPromptPack(promptPackId: String) = Unit
+
+    override suspend fun deleteGlobalPromptPackage(distributionFolder: String) = Unit
 
     override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
         previewPromptProfiles(projectId)
@@ -625,11 +670,13 @@ class PreviewCoreGateway : CoreGateway {
         projectId: String,
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): PromptProfileUi =
         previewPromptProfiles(projectId)
             .firstOrNull { it.promptProfileId == sourceProfileId }
             ?.copy(
                 promptProfileId = "project-$sourceProfileId",
+                distributionFolder = distributionFolder.ifBlank { "user" },
                 scope = "project",
                 projectId = projectId,
                 name = name.ifBlank { "Custom prompt" },
@@ -637,6 +684,7 @@ class PreviewCoreGateway : CoreGateway {
             )
             ?: PromptProfileUi(
                 promptProfileId = "project-custom",
+                distributionFolder = distributionFolder.ifBlank { "user" },
                 scope = "project",
                 projectId = projectId,
                 name = name.ifBlank { "Custom prompt" },
@@ -647,15 +695,26 @@ class PreviewCoreGateway : CoreGateway {
                 enabled = true,
             )
 
-    override suspend fun savePromptProfileVersion(
+    override suspend fun savePromptPack(
         projectId: String,
-        promptProfileId: String,
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         previewPromptProfiles(projectId)
-            .firstOrNull { it.promptProfileId == promptProfileId }
-            ?.copy(builtIn = false, activeVersionId = "preview-version")
-            ?: forkPromptProfile(projectId, promptProfileId, "Custom prompt")
+            .firstOrNull { it.promptProfileId == promptPackId }
+            ?.copy(
+                name = name,
+                styleTags = styleTags,
+                sceneProfile = sceneProfile,
+                builtIn = false,
+                activeVersionId = "preview-version",
+                activePromptText = promptText,
+                sharedPreference = promptText,
+            )
+            ?: forkPromptProfile(projectId, promptPackId, name)
 
     override suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi =
         EvaluationRunUi(

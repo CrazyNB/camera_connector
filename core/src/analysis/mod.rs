@@ -9,8 +9,7 @@ pub use burst::{BurstGroup, BurstGroupingProfile};
 pub use config::{
     CvPolicy, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType,
     ModelProviderKind, ModelProviderSettings, ModelSendMode, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
-    PromptScope, SceneProfile, SubjectAssessment,
+    ProjectRecommendationMode, PromptPack, PromptPackContent, SceneProfile, SubjectAssessment,
 };
 pub use jobs::{
     AnalysisEntityType, AnalysisJob, AnalysisJobStatus, AnalysisJobType, NewAnalysisJob,

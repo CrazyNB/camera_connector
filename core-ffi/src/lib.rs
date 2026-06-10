@@ -11,9 +11,9 @@ use camera_connector_core::{
     AssetGroupSort, AssetUserMarks, CameraConnectorDashboard, CameraConnectorRuntime,
     CameraConnectorService, CvPolicy, EvaluationRun, ImporterError, ModelProviderKind,
     ModelProviderSettings, ModelSendMode, ObjectFormat, PreviewSample, Project,
-    ProjectEvaluationSettings, ProjectRecommendationMode, PromptProfile, PromptProfileVersion,
-    PushProtocol, ReceiverConfigRequest, ReceiverSettingsConfig, ReceiverSettingsUpdate,
-    SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation, StoredObjectLocation,
+    ProjectEvaluationSettings, ProjectRecommendationMode, PromptPack, PushProtocol,
+    ReceiverConfigRequest, ReceiverSettingsConfig, ReceiverSettingsUpdate, SceneProfile,
+    SelectionCandidateVisualInput, SelectionRecommendation, StoredObjectLocation,
     SubjectAssessment, TechnicalAssessmentPolicy,
 };
 use jni::errors::ThrowRuntimeExAndDefault;
@@ -128,8 +128,10 @@ struct MobileProjectEvaluationSettingsPatch {
     auto_evaluate_on_upload: Option<bool>,
     auto_burst_recommendation_enabled: Option<bool>,
     project_recommendation_mode: Option<String>,
-    prompt_profile_id: Option<String>,
-    model_provider_settings_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    prompt_pack_id: JsonPatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    model_provider_settings_id: JsonPatchField<String>,
     scene_profile: Option<String>,
     cv_policy: Option<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
@@ -702,10 +704,16 @@ impl MobileCore {
                 .map(parse_project_recommendation_mode)
                 .transpose()?
                 .unwrap_or(ProjectRecommendationMode::Manual),
-            prompt_profile_id: patch.prompt_profile_id.or(existing.prompt_profile_id),
-            model_provider_settings_id: patch
-                .model_provider_settings_id
-                .or(existing.model_provider_settings_id),
+            prompt_pack_id: match patch.prompt_pack_id {
+                JsonPatchField::Missing => existing.prompt_pack_id,
+                JsonPatchField::Null => None,
+                JsonPatchField::Value(prompt_pack_id) => Some(prompt_pack_id),
+            },
+            model_provider_settings_id: match patch.model_provider_settings_id {
+                JsonPatchField::Missing => existing.model_provider_settings_id,
+                JsonPatchField::Null => None,
+                JsonPatchField::Value(settings_id) => Some(settings_id),
+            },
             scene_profile: patch
                 .scene_profile
                 .as_deref()
@@ -736,49 +744,75 @@ impl MobileCore {
         )?)
     }
 
-    pub fn prompt_profiles_for_project_json(&self, project_id: String) -> MobileCoreResult<String> {
-        let profiles = self.service.prompt_profiles_for_project(&project_id)?;
+    pub fn prompt_packs_for_project_json(&self, project_id: String) -> MobileCoreResult<String> {
+        let profiles = self.service.prompt_packs_for_project(&project_id)?;
         let values = profiles
             .iter()
-            .map(prompt_profile_json_value)
+            .map(prompt_pack_json_value)
             .collect::<Vec<_>>();
         Ok(serde_json::to_string(&values)?)
     }
 
-    pub fn global_prompt_profiles_json(&self) -> MobileCoreResult<String> {
-        let profiles = self.service.global_prompt_profiles()?;
+    pub fn global_prompt_packs_json(&self) -> MobileCoreResult<String> {
+        let profiles = self.service.global_prompt_packs()?;
         let mut values = Vec::with_capacity(profiles.len());
         for profile in &profiles {
-            values.push(prompt_profile_json_value_with_text(
+            values.push(prompt_pack_json_value_with_text(
                 profile,
                 self.service
-                    .active_prompt_text_for_profile(&profile.prompt_profile_id)?,
+                    .prompt_markdown_for_pack(&profile.prompt_pack_id)?,
             ));
         }
         Ok(serde_json::to_string(&values)?)
     }
 
-    pub fn fork_global_prompt_profile_json(
+    pub fn fork_global_prompt_pack_json(
         &self,
         source_profile_id: String,
         name: String,
+        distribution_folder: String,
     ) -> MobileCoreResult<String> {
-        let profile = self.service.fork_global_prompt_profile(
+        let profile = self.service.fork_global_prompt_pack(
             &source_profile_id,
             name,
+            distribution_folder,
             self.next_action_time_ms(),
         )?;
-        Ok(serde_json::to_string(
-            &prompt_profile_json_value_with_text(
-                &profile,
-                self.service
-                    .active_prompt_text_for_profile(&profile.prompt_profile_id)?,
-            ),
-        )?)
+        Ok(serde_json::to_string(&prompt_pack_json_value_with_text(
+            &profile,
+            self.service
+                .prompt_markdown_for_pack(&profile.prompt_pack_id)?,
+        ))?)
     }
 
-    pub fn create_global_prompt_profile_json(
+    pub fn create_global_prompt_pack_json(
         &self,
+        name: String,
+        style_tags_json: String,
+        scene_profile: String,
+        distribution_folder: String,
+        prompt_text: String,
+    ) -> MobileCoreResult<String> {
+        let style_tags = serde_json::from_str::<Vec<String>>(&style_tags_json)
+            .map_err(|error| ImporterError::internal(format!("invalid style tags: {error}")))?;
+        let profile = self.service.create_global_prompt_pack(
+            name,
+            style_tags,
+            SceneProfile::from_str(&scene_profile),
+            distribution_folder,
+            prompt_text,
+            self.next_action_time_ms(),
+        )?;
+        Ok(serde_json::to_string(&prompt_pack_json_value_with_text(
+            &profile,
+            self.service
+                .prompt_markdown_for_pack(&profile.prompt_pack_id)?,
+        ))?)
+    }
+
+    pub fn save_global_prompt_pack_json(
+        &self,
+        prompt_pack_id: String,
         name: String,
         style_tags_json: String,
         scene_profile: String,
@@ -786,70 +820,86 @@ impl MobileCore {
     ) -> MobileCoreResult<String> {
         let style_tags = serde_json::from_str::<Vec<String>>(&style_tags_json)
             .map_err(|error| ImporterError::internal(format!("invalid style tags: {error}")))?;
-        let profile = self.service.create_global_prompt_profile(
+        let profile = self.service.save_global_prompt_pack(
+            &prompt_pack_id,
             name,
             style_tags,
             SceneProfile::from_str(&scene_profile),
             prompt_text,
             self.next_action_time_ms(),
         )?;
-        Ok(serde_json::to_string(
-            &prompt_profile_json_value_with_text(
-                &profile,
-                self.service
-                    .active_prompt_text_for_profile(&profile.prompt_profile_id)?,
-            ),
-        )?)
+        Ok(serde_json::to_string(&prompt_pack_json_value_with_text(
+            &profile,
+            self.service
+                .prompt_markdown_for_pack(&profile.prompt_pack_id)?,
+        ))?)
     }
 
-    pub fn save_global_prompt_version_json(
+    pub fn delete_global_prompt_pack_json(
         &self,
-        prompt_profile_id: String,
-        prompt_text: String,
+        prompt_pack_id: String,
     ) -> MobileCoreResult<String> {
-        let profile = self.service.save_global_prompt_profile_version(
-            &prompt_profile_id,
-            prompt_text,
-            self.next_action_time_ms(),
-        )?;
-        Ok(serde_json::to_string(
-            &prompt_profile_json_value_with_text(
-                &profile,
-                self.service
-                    .active_prompt_text_for_profile(&profile.prompt_profile_id)?,
-            ),
-        )?)
+        let deleted = self.service.delete_global_prompt_pack(&prompt_pack_id)?;
+        Ok(serde_json::to_string(&json!({
+            "prompt_pack_id": prompt_pack_id,
+            "deleted": deleted,
+        }))?)
     }
 
-    pub fn fork_prompt_profile_json(
+    pub fn delete_global_prompt_package_json(
+        &self,
+        distribution_folder: String,
+    ) -> MobileCoreResult<String> {
+        let deleted = self
+            .service
+            .delete_global_prompt_package(&distribution_folder)?;
+        Ok(serde_json::to_string(&json!({
+            "distribution_folder": distribution_folder,
+            "deleted": deleted,
+        }))?)
+    }
+
+    pub fn fork_prompt_pack_json(
         &self,
         project_id: String,
         source_profile_id: String,
         name: String,
+        distribution_folder: String,
     ) -> MobileCoreResult<String> {
-        let profile = self.service.fork_prompt_profile_for_project(
+        let profile = self.service.fork_prompt_pack_for_project(
             &project_id,
             &source_profile_id,
             name,
+            distribution_folder,
             self.next_action_time_ms(),
         )?;
-        Ok(serde_json::to_string(&prompt_profile_json_value(&profile))?)
+        Ok(serde_json::to_string(&prompt_pack_json_value(&profile))?)
     }
 
-    pub fn save_prompt_version_json(
+    pub fn save_prompt_pack_json(
         &self,
         project_id: String,
-        prompt_profile_id: String,
+        prompt_pack_id: String,
+        name: String,
+        style_tags_json: String,
+        scene_profile: String,
         prompt_text: String,
     ) -> MobileCoreResult<String> {
-        let version = self.service.save_prompt_profile_version(
+        let style_tags = serde_json::from_str::<Vec<String>>(&style_tags_json)
+            .map_err(|error| ImporterError::internal(format!("invalid style tags: {error}")))?;
+        let profile = self.service.save_prompt_pack(
             &project_id,
-            &prompt_profile_id,
+            &prompt_pack_id,
+            name,
+            style_tags,
+            SceneProfile::from_str(&scene_profile),
             prompt_text,
             self.next_action_time_ms(),
         )?;
-        Ok(serde_json::to_string(&prompt_profile_version_json_value(
-            &version,
+        Ok(serde_json::to_string(&prompt_pack_json_value_with_text(
+            &profile,
+            self.service
+                .prompt_markdown_for_pack(&profile.prompt_pack_id)?,
         ))?)
     }
 
@@ -1702,13 +1752,13 @@ pub unsafe extern "C" fn camera_connector_mobile_core_save_project_evaluation_se
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// `project_id` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_prompt_profiles_for_project_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_prompt_packs_for_project_json(
     core: *const MobileCore,
     project_id: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
         let project_id = required_c_string(project_id, "project_id")?;
-        let profiles = core_ref(core)?.prompt_profiles_for_project_json(project_id)?;
+        let profiles = core_ref(core)?.prompt_packs_for_project_json(project_id)?;
         parse_json_value(&profiles)
     })
 }
@@ -1717,11 +1767,11 @@ pub unsafe extern "C" fn camera_connector_mobile_core_prompt_profiles_for_projec
 ///
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_global_prompt_profiles_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_global_prompt_packs_json(
     core: *const MobileCore,
 ) -> *mut c_char {
     ffi_response(|| {
-        let profiles = core_ref(core)?.global_prompt_profiles_json()?;
+        let profiles = core_ref(core)?.global_prompt_packs_json()?;
         parse_json_value(&profiles)
     })
 }
@@ -1757,19 +1807,52 @@ pub unsafe extern "C" fn camera_connector_mobile_core_assess_asset_group_preview
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// String pointers must be valid, null-terminated UTF-8 C strings.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_create_global_prompt_profile_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_create_global_prompt_pack_json(
     core: *const MobileCore,
     name: *const c_char,
     style_tags_json: *const c_char,
     scene_profile: *const c_char,
+    distribution_folder: *const c_char,
     prompt_text: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
         let name = required_c_string(name, "name")?;
         let style_tags_json = required_c_string(style_tags_json, "style_tags_json")?;
         let scene_profile = required_c_string(scene_profile, "scene_profile")?;
+        let distribution_folder = required_c_string(distribution_folder, "distribution_folder")?;
         let prompt_text = required_c_string(prompt_text, "prompt_text")?;
-        let profile = core_ref(core)?.create_global_prompt_profile_json(
+        let profile = core_ref(core)?.create_global_prompt_pack_json(
+            name,
+            style_tags_json,
+            scene_profile,
+            distribution_folder,
+            prompt_text,
+        )?;
+        parse_json_value(&profile)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// String pointers must be valid, null-terminated UTF-8 C strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_save_global_prompt_pack_json(
+    core: *const MobileCore,
+    prompt_pack_id: *const c_char,
+    name: *const c_char,
+    style_tags_json: *const c_char,
+    scene_profile: *const c_char,
+    prompt_text: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let prompt_pack_id = required_c_string(prompt_pack_id, "prompt_pack_id")?;
+        let name = required_c_string(name, "name")?;
+        let style_tags_json = required_c_string(style_tags_json, "style_tags_json")?;
+        let scene_profile = required_c_string(scene_profile, "scene_profile")?;
+        let prompt_text = required_c_string(prompt_text, "prompt_text")?;
+        let profile = core_ref(core)?.save_global_prompt_pack_json(
+            prompt_pack_id,
             name,
             style_tags_json,
             scene_profile,
@@ -1782,19 +1865,32 @@ pub unsafe extern "C" fn camera_connector_mobile_core_create_global_prompt_profi
 /// # Safety
 ///
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
-/// String pointers must be valid, null-terminated UTF-8 C strings.
+/// `prompt_pack_id` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_save_global_prompt_version_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_delete_global_prompt_pack_json(
     core: *const MobileCore,
-    prompt_profile_id: *const c_char,
-    prompt_text: *const c_char,
+    prompt_pack_id: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
-        let prompt_profile_id = required_c_string(prompt_profile_id, "prompt_profile_id")?;
-        let prompt_text = required_c_string(prompt_text, "prompt_text")?;
-        let profile =
-            core_ref(core)?.save_global_prompt_version_json(prompt_profile_id, prompt_text)?;
-        parse_json_value(&profile)
+        let prompt_pack_id = required_c_string(prompt_pack_id, "prompt_pack_id")?;
+        let result = core_ref(core)?.delete_global_prompt_pack_json(prompt_pack_id)?;
+        parse_json_value(&result)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `distribution_folder` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_delete_global_prompt_package_json(
+    core: *const MobileCore,
+    distribution_folder: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let distribution_folder = required_c_string(distribution_folder, "distribution_folder")?;
+        let result = core_ref(core)?.delete_global_prompt_package_json(distribution_folder)?;
+        parse_json_value(&result)
     })
 }
 
@@ -1803,18 +1899,24 @@ pub unsafe extern "C" fn camera_connector_mobile_core_save_global_prompt_version
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// String pointers must be valid, null-terminated UTF-8 C strings.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_fork_prompt_profile_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_fork_prompt_pack_json(
     core: *const MobileCore,
     project_id: *const c_char,
     source_profile_id: *const c_char,
     name: *const c_char,
+    distribution_folder: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
         let project_id = required_c_string(project_id, "project_id")?;
         let source_profile_id = required_c_string(source_profile_id, "source_profile_id")?;
         let name = required_c_string(name, "name")?;
-        let profile =
-            core_ref(core)?.fork_prompt_profile_json(project_id, source_profile_id, name)?;
+        let distribution_folder = required_c_string(distribution_folder, "distribution_folder")?;
+        let profile = core_ref(core)?.fork_prompt_pack_json(
+            project_id,
+            source_profile_id,
+            name,
+            distribution_folder,
+        )?;
         parse_json_value(&profile)
     })
 }
@@ -1824,18 +1926,30 @@ pub unsafe extern "C" fn camera_connector_mobile_core_fork_prompt_profile_json(
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// String pointers must be valid, null-terminated UTF-8 C strings.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_save_prompt_version_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_save_prompt_pack_json(
     core: *const MobileCore,
     project_id: *const c_char,
-    prompt_profile_id: *const c_char,
+    prompt_pack_id: *const c_char,
+    name: *const c_char,
+    style_tags_json: *const c_char,
+    scene_profile: *const c_char,
     prompt_text: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
         let project_id = required_c_string(project_id, "project_id")?;
-        let prompt_profile_id = required_c_string(prompt_profile_id, "prompt_profile_id")?;
+        let prompt_pack_id = required_c_string(prompt_pack_id, "prompt_pack_id")?;
+        let name = required_c_string(name, "name")?;
+        let style_tags_json = required_c_string(style_tags_json, "style_tags_json")?;
+        let scene_profile = required_c_string(scene_profile, "scene_profile")?;
         let prompt_text = required_c_string(prompt_text, "prompt_text")?;
-        let version =
-            core_ref(core)?.save_prompt_version_json(project_id, prompt_profile_id, prompt_text)?;
+        let version = core_ref(core)?.save_prompt_pack_json(
+            project_id,
+            prompt_pack_id,
+            name,
+            style_tags_json,
+            scene_profile,
+            prompt_text,
+        )?;
         parse_json_value(&version)
     })
 }
@@ -2084,7 +2198,7 @@ fn project_evaluation_settings_json_value(settings: &ProjectEvaluationSettings) 
         "auto_evaluate_on_upload": settings.auto_evaluate_on_upload,
         "auto_burst_recommendation_enabled": settings.auto_burst_recommendation_enabled,
         "project_recommendation_mode": settings.project_recommendation_mode.as_str(),
-        "prompt_profile_id": settings.prompt_profile_id,
+        "prompt_pack_id": settings.prompt_pack_id,
         "model_provider_settings_id": settings.model_provider_settings_id,
         "scene_profile": settings.scene_profile.as_str(),
         "cv_policy": settings.cv_policy.as_str(),
@@ -2096,37 +2210,28 @@ fn project_evaluation_settings_json_value(settings: &ProjectEvaluationSettings) 
     })
 }
 
-fn prompt_profile_json_value(profile: &PromptProfile) -> Value {
+fn prompt_pack_json_value(profile: &PromptPack) -> Value {
     json!({
-        "prompt_profile_id": profile.prompt_profile_id,
-        "scope": profile.scope.as_str(),
-        "project_id": profile.project_id,
+        "prompt_pack_id": profile.prompt_pack_id,
+        "distribution_folder": profile.distribution_folder,
         "name": profile.name,
+        "version": profile.version,
+        "author": profile.author,
         "style_tags": profile.style_tags,
         "scene_profile": profile.scene_profile.as_str(),
-        "active_version_id": profile.active_version_id,
+        "schema": profile.schema,
+        "capabilities": profile.capabilities,
         "built_in": profile.built_in,
         "enabled": profile.enabled,
+        "prompt_hash": profile.prompt_hash,
+        "updated_at_ms": profile.updated_at_ms,
     })
 }
 
-fn prompt_profile_json_value_with_text(
-    profile: &PromptProfile,
-    prompt_text: Option<String>,
-) -> Value {
-    let mut value = prompt_profile_json_value(profile);
-    value["active_prompt_text"] = prompt_text.map(Value::String).unwrap_or(Value::Null);
+fn prompt_pack_json_value_with_text(profile: &PromptPack, prompt_text: Option<String>) -> Value {
+    let mut value = prompt_pack_json_value(profile);
+    value["prompt_text"] = prompt_text.map(Value::String).unwrap_or(Value::Null);
     value
-}
-
-fn prompt_profile_version_json_value(version: &PromptProfileVersion) -> Value {
-    json!({
-        "prompt_version_id": version.prompt_version_id,
-        "prompt_profile_id": version.prompt_profile_id,
-        "output_schema_version": version.output_schema_version,
-        "prompt_hash": version.prompt_hash,
-        "created_at_ms": version.created_at_ms,
-    })
 }
 
 fn evaluation_run_json_value(run: &EvaluationRun) -> Value {
@@ -2138,8 +2243,8 @@ fn evaluation_run_json_value(run: &EvaluationRun) -> Value {
         "status": run.status.as_str(),
         "provider_kind": run.provider_kind.as_str(),
         "provider_model": run.provider_model,
-        "prompt_profile_id": run.prompt_profile_id,
-        "prompt_version_id": run.prompt_version_id,
+        "prompt_pack_id": run.prompt_pack_id,
+        "prompt_pack_version": run.prompt_pack_version,
         "prompt_hash": run.prompt_hash,
         "error_message": run.error_message,
         "started_at_ms": run.started_at_ms,
@@ -2963,7 +3068,7 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_savePr
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_promptProfilesForProjectJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_PromptPacksForProjectJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
@@ -2973,7 +3078,7 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_prompt
         let project_id = required_java_string(env, project_id, "project_id");
         java_response(env, || {
             let result =
-                mobile_core_from_handle(handle)?.prompt_profiles_for_project_json(project_id?)?;
+                mobile_core_from_handle(handle)?.prompt_packs_for_project_json(project_id?)?;
             parse_json_value(&result)
         })
     })
@@ -2981,14 +3086,14 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_prompt
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_globalPromptProfilesJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_globalPromptPacksJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
 ) -> jstring {
     env.with_env(|env| {
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?.global_prompt_profiles_json()?;
+            let result = mobile_core_from_handle(handle)?.global_prompt_packs_json()?;
             parse_json_value(&result)
         })
     })
@@ -2996,19 +3101,25 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_global
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkGlobalPromptProfileJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkGlobalPromptPackJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
     source_profile_id: JString,
     name: JString,
+    distribution_folder: JString,
 ) -> jstring {
     env.with_env(|env| {
         let source_profile_id = required_java_string(env, source_profile_id, "source_profile_id");
         let name = required_java_string(env, name, "name");
+        let distribution_folder =
+            required_java_string(env, distribution_folder, "distribution_folder");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?
-                .fork_global_prompt_profile_json(source_profile_id?, name?)?;
+            let result = mobile_core_from_handle(handle)?.fork_global_prompt_pack_json(
+                source_profile_id?,
+                name?,
+                distribution_folder?,
+            )?;
             parse_json_value(&result)
         })
     })
@@ -3016,22 +3127,57 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkGl
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_createGlobalPromptProfileJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_createGlobalPromptPackJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
     name: JString,
     style_tags_json: JString,
     scene_profile: JString,
+    distribution_folder: JString,
     prompt_text: JString,
 ) -> jstring {
     env.with_env(|env| {
         let name = required_java_string(env, name, "name");
         let style_tags_json = required_java_string(env, style_tags_json, "style_tags_json");
         let scene_profile = required_java_string(env, scene_profile, "scene_profile");
+        let distribution_folder =
+            required_java_string(env, distribution_folder, "distribution_folder");
         let prompt_text = required_java_string(env, prompt_text, "prompt_text");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?.create_global_prompt_profile_json(
+            let result = mobile_core_from_handle(handle)?.create_global_prompt_pack_json(
+                name?,
+                style_tags_json?,
+                scene_profile?,
+                distribution_folder?,
+                prompt_text?,
+            )?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveGlobalPromptPackJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    prompt_pack_id: JString,
+    name: JString,
+    style_tags_json: JString,
+    scene_profile: JString,
+    prompt_text: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let prompt_pack_id = required_java_string(env, prompt_pack_id, "prompt_pack_id");
+        let name = required_java_string(env, name, "name");
+        let style_tags_json = required_java_string(env, style_tags_json, "style_tags_json");
+        let scene_profile = required_java_string(env, scene_profile, "scene_profile");
+        let prompt_text = required_java_string(env, prompt_text, "prompt_text");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?.save_global_prompt_pack_json(
+                prompt_pack_id?,
                 name?,
                 style_tags_json?,
                 scene_profile?,
@@ -3044,19 +3190,17 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_create
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveGlobalPromptVersionJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_deleteGlobalPromptPackJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
-    prompt_profile_id: JString,
-    prompt_text: JString,
+    prompt_pack_id: JString,
 ) -> jstring {
     env.with_env(|env| {
-        let prompt_profile_id = required_java_string(env, prompt_profile_id, "prompt_profile_id");
-        let prompt_text = required_java_string(env, prompt_text, "prompt_text");
+        let prompt_pack_id = required_java_string(env, prompt_pack_id, "prompt_pack_id");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?
-                .save_global_prompt_version_json(prompt_profile_id?, prompt_text?)?;
+            let result =
+                mobile_core_from_handle(handle)?.delete_global_prompt_pack_json(prompt_pack_id?)?;
             parse_json_value(&result)
         })
     })
@@ -3064,23 +3208,46 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_saveGl
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkPromptProfileJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_deleteGlobalPromptPackageJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    distribution_folder: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let distribution_folder =
+            required_java_string(env, distribution_folder, "distribution_folder");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?
+                .delete_global_prompt_package_json(distribution_folder?)?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkPromptPackJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
     project_id: JString,
     source_profile_id: JString,
     name: JString,
+    distribution_folder: JString,
 ) -> jstring {
     env.with_env(|env| {
         let project_id = required_java_string(env, project_id, "project_id");
         let source_profile_id = required_java_string(env, source_profile_id, "source_profile_id");
         let name = required_java_string(env, name, "name");
+        let distribution_folder =
+            required_java_string(env, distribution_folder, "distribution_folder");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?.fork_prompt_profile_json(
+            let result = mobile_core_from_handle(handle)?.fork_prompt_pack_json(
                 project_id?,
                 source_profile_id?,
                 name?,
+                distribution_folder?,
             )?;
             parse_json_value(&result)
         })
@@ -3089,22 +3256,31 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_forkPr
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_savePromptVersionJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_savePromptPackJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
     project_id: JString,
-    prompt_profile_id: JString,
+    prompt_pack_id: JString,
+    name: JString,
+    style_tags_json: JString,
+    scene_profile: JString,
     prompt_text: JString,
 ) -> jstring {
     env.with_env(|env| {
         let project_id = required_java_string(env, project_id, "project_id");
-        let prompt_profile_id = required_java_string(env, prompt_profile_id, "prompt_profile_id");
+        let prompt_pack_id = required_java_string(env, prompt_pack_id, "prompt_pack_id");
+        let name = required_java_string(env, name, "name");
+        let style_tags_json = required_java_string(env, style_tags_json, "style_tags_json");
+        let scene_profile = required_java_string(env, scene_profile, "scene_profile");
         let prompt_text = required_java_string(env, prompt_text, "prompt_text");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?.save_prompt_version_json(
+            let result = mobile_core_from_handle(handle)?.save_prompt_pack_json(
                 project_id?,
-                prompt_profile_id?,
+                prompt_pack_id?,
+                name?,
+                style_tags_json?,
+                scene_profile?,
                 prompt_text?,
             )?;
             parse_json_value(&result)

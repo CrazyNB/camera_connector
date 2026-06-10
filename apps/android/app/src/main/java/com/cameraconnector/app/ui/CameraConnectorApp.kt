@@ -92,6 +92,7 @@ fun CameraConnectorApp(
     var settingsPromptProfilesOpen by remember { mutableStateOf(false) }
     var editingPromptProfileId by rememberSaveable { mutableStateOf<String?>(null) }
     var creatingPromptProfile by rememberSaveable { mutableStateOf(false) }
+    var creatingPromptProfilePackage by rememberSaveable { mutableStateOf("user") }
     var accountDetail by remember { mutableStateOf<DeviceAccount?>(null) }
     var addingAccount by remember { mutableStateOf(false) }
     var actionError by remember { mutableStateOf<String?>(null) }
@@ -517,27 +518,36 @@ fun CameraConnectorApp(
                         }
                         PromptProfileEditorScreen(
                             profile = editingProfile,
+                            initialDistributionFolder = creatingPromptProfilePackage,
                             actionError = actionError,
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
                             onBack = {
                                 editingPromptProfileId = null
                                 creatingPromptProfile = false
+                                creatingPromptProfilePackage = "user"
                             },
-                            onSave = { profile, name, promptText ->
+                            onSave = { profile, name, styleTags, sceneProfile, distributionFolder, promptText ->
                                 runAction(if (profile.builtIn) "正在复制提示词" else "正在保存提示词") {
                                     val saved = if (profile.builtIn) {
                                         val forked = coreGateway.forkGlobalPromptProfile(
                                             profile.promptProfileId,
                                             name,
+                                            distributionFolder,
                                         )
-                                        coreGateway.saveGlobalPromptProfileVersion(
+                                        coreGateway.saveGlobalPromptPack(
                                             forked.promptProfileId,
+                                            name,
+                                            styleTags,
+                                            sceneProfile,
                                             promptText,
                                         )
                                     } else {
-                                        coreGateway.saveGlobalPromptProfileVersion(
+                                        coreGateway.saveGlobalPromptPack(
                                             profile.promptProfileId,
+                                            name,
+                                            styleTags,
+                                            sceneProfile,
                                             promptText,
                                         )
                                     }
@@ -550,17 +560,24 @@ fun CameraConnectorApp(
                                     editingPromptProfileId = saved.promptProfileId
                                 }
                             },
-                            onCreate = { name, styleTags, sceneProfile, promptText ->
+                            onCreate = { name, styleTags, sceneProfile, distributionFolder, promptText ->
                                 runAction("正在创建提示词") {
-                                    coreGateway.createGlobalPromptProfile(
+                                    val saved = coreGateway.createGlobalPromptProfile(
                                         name = name,
                                         styleTags = styleTags,
                                         sceneProfile = sceneProfile,
+                                        distributionFolder = distributionFolder,
                                         promptText = promptText,
                                     )
-                                    globalPromptProfiles = coreGateway.loadGlobalPromptProfiles()
+                                    val loaded = coreGateway.loadGlobalPromptProfiles()
+                                    globalPromptProfiles = if (loaded.any { it.promptProfileId == saved.promptProfileId }) {
+                                        loaded
+                                    } else {
+                                        loaded + saved
+                                    }
                                     creatingPromptProfile = false
-                                    editingPromptProfileId = null
+                                    creatingPromptProfilePackage = "user"
+                                    editingPromptProfileId = saved.promptProfileId
                                     settingsPromptProfilesOpen = true
                                 }
                             },
@@ -573,11 +590,38 @@ fun CameraConnectorApp(
                             actionInFlight = actionInFlight,
                             onClearActionError = { actionError = null },
                             onBack = { settingsPromptProfilesOpen = false },
-                            onCreatePromptProfile = {
+                            onCreatePromptPackage = {
                                 editingPromptProfileId = null
+                                creatingPromptProfilePackage = ""
+                                creatingPromptProfile = true
+                            },
+                            onCreatePromptProfileInPackage = { packageFolder ->
+                                editingPromptProfileId = null
+                                creatingPromptProfilePackage = packageFolder
                                 creatingPromptProfile = true
                             },
                             onOpenPromptProfile = { promptId -> editingPromptProfileId = promptId },
+                            onDeletePromptProfile = { promptId ->
+                                runAction("正在删除提示词") {
+                                    coreGateway.deleteGlobalPromptPack(promptId)
+                                    globalPromptProfiles = coreGateway.loadGlobalPromptProfiles()
+                                    if (editingPromptProfileId == promptId) {
+                                        editingPromptProfileId = null
+                                    }
+                                }
+                            },
+                            onDeletePromptPackage = { packageFolder ->
+                                runAction("正在删除提示词包") {
+                                    coreGateway.deleteGlobalPromptPackage(packageFolder)
+                                    globalPromptProfiles = coreGateway.loadGlobalPromptProfiles()
+                                    if (editingPromptProfileId?.let { promptId ->
+                                            globalPromptProfiles.none { it.promptProfileId == promptId }
+                                        } == true
+                                    ) {
+                                        editingPromptProfileId = null
+                                    }
+                                }
+                            },
                             modifier = Modifier.padding(padding),
                         )
                     } else {

@@ -714,6 +714,7 @@ internal fun ProjectAssetsScreen(
                     notificationPermissionGranted = notificationPermissionGranted,
                     actionsEnabled = actionsEnabled,
                     onOpenProjects = onOpenProjects,
+                    onOpenProjectIntelligence = onOpenProjectIntelligence,
                     onConfigureAccount = onConfigureAccount,
                     onRequestNotificationPermission = onRequestNotificationPermission,
                     onStartReceiver = onStartReceiver,
@@ -1023,6 +1024,7 @@ internal fun ProjectLaunchHeader(
     projectState: ProjectState,
     actionsEnabled: Boolean,
     onOpenProjects: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1057,6 +1059,17 @@ internal fun ProjectLaunchHeader(
             )
         }
         IconButton(
+            onClick = onOpenProjectIntelligence,
+            enabled = project != null,
+            modifier = Modifier.size(34.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = "项目智能",
+                tint = if (project != null) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
             onClick = onCollapse,
             modifier = Modifier.size(34.dp),
         ) {
@@ -1076,6 +1089,7 @@ internal fun ProjectReceiverLaunchPanel(
     notificationPermissionGranted: Boolean,
     actionsEnabled: Boolean,
     onOpenProjects: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     onConfigureAccount: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartReceiver: (ReceiverSettings, String) -> Unit,
@@ -1136,6 +1150,7 @@ internal fun ProjectReceiverLaunchPanel(
                 projectState = projectState,
                 actionsEnabled = actionsEnabled,
                 onOpenProjects = onOpenProjects,
+                onOpenProjectIntelligence = onOpenProjectIntelligence,
                 onCollapse = onCollapse,
             )
             Spacer(Modifier.height(10.dp))

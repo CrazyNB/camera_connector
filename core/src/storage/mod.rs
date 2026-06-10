@@ -16,14 +16,13 @@ use crate::{
     EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource, ImporterError,
     ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind,
     ModelProviderKind, NewAnalysisJob, ObjectFormat, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
-    PromptScope, PushProtocol, ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup,
-    ReceivedAssetTechnicalDefectSummary, ReceiverAccountConfig, ReceiverAuthMode,
-    ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, SceneProfile, SelectionRecommendation,
-    SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
-    StoredObjectLocation, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy,
-    TechnicalAssessmentStatus, TechnicalDefectFlag, TechnicalGateStatus, TransferRecord,
-    TransferStatus,
+    ProjectRecommendationMode, PushProtocol, ReceivedAsset, ReceivedAssetBurstSummary,
+    ReceivedAssetGroup, ReceivedAssetTechnicalDefectSummary, ReceiverAccountConfig,
+    ReceiverAuthMode, ReceiverRuntimePhase, ReceiverRuntimeStatus, Result, SceneProfile,
+    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SelectionSource, StoredObjectLocation, SubjectAssessment, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag, TechnicalGateStatus,
+    TransferRecord, TransferStatus,
 };
 
 pub use pipeline::{LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, StagedObject};
@@ -276,15 +275,19 @@ impl SqliteStore {
             access_lock: sqlite_access_lock(&path),
             db_path: path,
         };
-        store.with_write_connection(|connection| {
-            initialize_schema(connection, &store.db_path)?;
-            seed_builtin_prompt_profiles(connection)
-        })?;
+        store.with_write_connection(|connection| initialize_schema(connection, &store.db_path))?;
         Ok(store)
     }
 
     pub fn open_state_dir(state_dir: impl AsRef<Path>) -> Result<Self> {
         Self::open(state_dir.as_ref().join(DB_FILENAME))
+    }
+
+    pub fn state_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 
     pub fn create_project(&self, name: impl AsRef<str>) -> Result<Project> {
@@ -386,31 +389,6 @@ impl SqliteStore {
             project_by_id(connection, project_id)?.ok_or_else(|| {
                 rusqlite::Error::InvalidParameterName("project not found".to_string())
             })
-        })
-    }
-
-    pub fn prompt_profiles_for_project(&self, project_id: &str) -> Result<Vec<PromptProfile>> {
-        self.with_read_connection(|connection| prompt_profiles_for_project(connection, project_id))
-    }
-
-    pub fn prompt_profile(&self, profile_id: &str) -> Result<Option<PromptProfile>> {
-        self.with_read_connection(|connection| prompt_profile_by_id(connection, profile_id))
-    }
-
-    pub fn prompt_profile_version(&self, version_id: &str) -> Result<Option<PromptProfileVersion>> {
-        self.with_read_connection(|connection| prompt_profile_version_by_id(connection, version_id))
-    }
-
-    pub fn save_prompt_profile(&self, profile: PromptProfile) -> Result<PromptProfile> {
-        self.with_connection(|connection| save_prompt_profile_for_connection(connection, profile))
-    }
-
-    pub fn save_prompt_profile_version(
-        &self,
-        version: PromptProfileVersion,
-    ) -> Result<PromptProfileVersion> {
-        self.with_connection(|connection| {
-            save_prompt_profile_version_for_connection(connection, version)
         })
     }
 
@@ -2871,7 +2849,7 @@ fn latest_any_model_evaluation_for_asset_group(
         .query_row(
             "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
                     run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
-                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    technical_warnings_json, prompt_pack_id, prompt_pack_version, prompt_hash,
                     created_at_ms, updated_at_ms
              FROM model_evaluations
              WHERE asset_group_id = ?1
@@ -3043,35 +3021,12 @@ fn initialize_schema(
             default_output_target_id TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS prompt_profiles (
-            prompt_profile_id TEXT PRIMARY KEY,
-            scope TEXT NOT NULL,
-            project_id TEXT,
-            name TEXT NOT NULL,
-            style_tags_json TEXT NOT NULL,
-            scene_profile TEXT NOT NULL,
-            active_version_id TEXT,
-            built_in INTEGER NOT NULL,
-            enabled INTEGER NOT NULL,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS prompt_profile_versions (
-            prompt_version_id TEXT PRIMARY KEY,
-            prompt_profile_id TEXT NOT NULL REFERENCES prompt_profiles(prompt_profile_id),
-            prompt_text TEXT NOT NULL,
-            output_schema_version TEXT NOT NULL,
-            prompt_hash TEXT NOT NULL,
-            created_at_ms INTEGER NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS project_evaluation_settings (
             project_id TEXT PRIMARY KEY REFERENCES projects(project_id),
             auto_evaluate_on_upload INTEGER NOT NULL,
             auto_burst_recommendation_enabled INTEGER NOT NULL,
             project_recommendation_mode TEXT NOT NULL,
-            prompt_profile_id TEXT,
+            prompt_pack_id TEXT,
             model_provider_settings_id TEXT,
             scene_profile TEXT NOT NULL,
             cv_policy TEXT NOT NULL,
@@ -3090,8 +3045,8 @@ fn initialize_schema(
             status TEXT NOT NULL,
             provider_kind TEXT NOT NULL,
             provider_model TEXT NOT NULL,
-            prompt_profile_id TEXT,
-            prompt_version_id TEXT,
+            prompt_pack_id TEXT,
+            prompt_pack_version TEXT,
             prompt_hash TEXT,
             settings_snapshot_json TEXT NOT NULL,
             error_message TEXT,
@@ -3319,8 +3274,8 @@ fn initialize_schema(
             strengths_json TEXT NOT NULL,
             weaknesses_json TEXT NOT NULL,
             technical_warnings_json TEXT NOT NULL,
-            prompt_profile_id TEXT,
-            prompt_version_id TEXT,
+            prompt_pack_id TEXT,
+            prompt_pack_version TEXT,
             prompt_hash TEXT,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL
@@ -3351,8 +3306,6 @@ fn initialize_schema(
         CREATE INDEX IF NOT EXISTS idx_publish_queue_state ON publish_queue(state, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_background_jobs_claim ON background_jobs(status, priority, next_attempt_at_ms, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_background_jobs_dedupe ON background_jobs(dedupe_key);
-        CREATE INDEX IF NOT EXISTS idx_prompt_profiles_scope_project ON prompt_profiles(scope, project_id, enabled);
-        CREATE INDEX IF NOT EXISTS idx_prompt_versions_profile ON prompt_profile_versions(prompt_profile_id, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_evaluation_runs_project ON evaluation_runs(project_id, run_type, status, created_at_ms);
         CREATE INDEX IF NOT EXISTS idx_subject_assessments_group ON subject_assessments(project_id, asset_group_id, subject_type);
         CREATE INDEX IF NOT EXISTS idx_burst_groups_project ON burst_groups(project_id, updated_at_ms);
@@ -3400,6 +3353,8 @@ fn ensure_wal_mode(
 fn reset_incompatible_development_tables(
     connection: &Connection,
 ) -> std::result::Result<(), rusqlite::Error> {
+    connection.execute("DROP TABLE IF EXISTS prompt_pack_versions_removed", [])?;
+
     reset_table_if_missing_columns(
         connection,
         "selection_recommendations",
@@ -3438,8 +3393,8 @@ fn reset_incompatible_development_tables(
             "strengths_json",
             "weaknesses_json",
             "technical_warnings_json",
-            "prompt_profile_id",
-            "prompt_version_id",
+            "prompt_pack_id",
+            "prompt_pack_version",
             "prompt_hash",
             "created_at_ms",
             "updated_at_ms",
@@ -3470,8 +3425,8 @@ fn reset_incompatible_development_tables(
             "status",
             "provider_kind",
             "provider_model",
-            "prompt_profile_id",
-            "prompt_version_id",
+            "prompt_pack_id",
+            "prompt_pack_version",
             "prompt_hash",
             "settings_snapshot_json",
             "error_message",
@@ -3488,7 +3443,7 @@ fn reset_incompatible_development_tables(
             "auto_evaluate_on_upload",
             "auto_burst_recommendation_enabled",
             "project_recommendation_mode",
-            "prompt_profile_id",
+            "prompt_pack_id",
             "model_provider_settings_id",
             "scene_profile",
             "cv_policy",
@@ -3531,296 +3486,6 @@ fn table_columns(
     Ok(columns)
 }
 
-fn seed_builtin_prompt_profiles(
-    connection: &Connection,
-) -> std::result::Result<(), rusqlite::Error> {
-    let built_ins = [
-        (
-            "general-default",
-            "General Default",
-            vec!["general".to_string(), "balanced".to_string()],
-            SceneProfile::General,
-            "Evaluate the image for technical quality, subject clarity, composition, and selection usefulness.",
-            "builtin-general-default-v1",
-        ),
-        (
-            "portrait-conservative",
-            "Portrait Conservative",
-            vec!["portrait".to_string(), "conservative".to_string()],
-            SceneProfile::Portrait,
-            "Evaluate portrait candidates conservatively with attention to expression, focus, skin tone, and subject dignity.",
-            "builtin-portrait-conservative-v1",
-        ),
-        (
-            "landscape-technical",
-            "Landscape Technical",
-            vec!["landscape".to_string(), "technical".to_string()],
-            SceneProfile::Landscape,
-            "Evaluate landscape candidates with emphasis on exposure, horizon, fine detail, color, and atmospheric clarity.",
-            "builtin-landscape-technical-v1",
-        ),
-    ];
-
-    for (profile_id, name, tags, scene_profile, prompt_text, prompt_hash) in built_ins {
-        let version_id = format!("{profile_id}-v1");
-        save_prompt_profile_for_connection(
-            connection,
-            PromptProfile {
-                prompt_profile_id: profile_id.to_string(),
-                scope: PromptScope::Global,
-                project_id: None,
-                name: name.to_string(),
-                style_tags: tags.clone(),
-                scene_profile,
-                active_version_id: None,
-                built_in: true,
-                enabled: true,
-                created_at_ms: 0,
-                updated_at_ms: 0,
-            },
-        )?;
-        let prompt_text = serde_json::to_string(&PromptProfileContent::new(prompt_text))
-            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-        let version = PromptProfileVersion {
-            prompt_version_id: version_id.clone(),
-            prompt_profile_id: profile_id.to_string(),
-            prompt_text,
-            output_schema_version: "model-evaluation-v1".to_string(),
-            prompt_hash: prompt_hash.to_string(),
-            created_at_ms: 0,
-        };
-        save_prompt_profile_version_for_connection(connection, version)?;
-        save_prompt_profile_for_connection(
-            connection,
-            PromptProfile {
-                prompt_profile_id: profile_id.to_string(),
-                scope: PromptScope::Global,
-                project_id: None,
-                name: name.to_string(),
-                style_tags: tags,
-                scene_profile,
-                active_version_id: Some(version_id),
-                built_in: true,
-                enabled: true,
-                created_at_ms: 0,
-                updated_at_ms: 0,
-            },
-        )?;
-    }
-    Ok(())
-}
-
-fn prompt_profiles_for_project(
-    connection: &Connection,
-    project_id: &str,
-) -> std::result::Result<Vec<PromptProfile>, rusqlite::Error> {
-    let mut statement = connection.prepare(
-        "SELECT prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
-                active_version_id, built_in, enabled, created_at_ms, updated_at_ms
-         FROM prompt_profiles
-         WHERE enabled = 1
-           AND (scope = 'global' OR (scope = 'project' AND project_id = ?1))
-         ORDER BY CASE prompt_profile_id
-                    WHEN 'general-default' THEN 0
-                    WHEN 'portrait-conservative' THEN 1
-                    WHEN 'landscape-technical' THEN 2
-                    ELSE 3
-                  END ASC,
-                  scope ASC,
-                  name ASC,
-                  prompt_profile_id ASC",
-    )?;
-    let rows = statement.query_map(params![project_id], prompt_profile_from_row)?;
-    collect_rows(rows)
-}
-
-fn prompt_profile_by_id(
-    connection: &Connection,
-    profile_id: &str,
-) -> std::result::Result<Option<PromptProfile>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
-                    active_version_id, built_in, enabled, created_at_ms, updated_at_ms
-             FROM prompt_profiles
-             WHERE prompt_profile_id = ?1",
-            params![profile_id],
-            prompt_profile_from_row,
-        )
-        .optional()
-}
-
-fn save_prompt_profile_for_connection(
-    connection: &Connection,
-    profile: PromptProfile,
-) -> std::result::Result<PromptProfile, rusqlite::Error> {
-    validate_prompt_profile(connection, &profile)?;
-    connection.execute(
-        "INSERT INTO prompt_profiles (
-            prompt_profile_id, scope, project_id, name, style_tags_json, scene_profile,
-            active_version_id, built_in, enabled, created_at_ms, updated_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-         ON CONFLICT(prompt_profile_id) DO UPDATE SET
-            scope = excluded.scope,
-            project_id = excluded.project_id,
-            name = excluded.name,
-            style_tags_json = excluded.style_tags_json,
-            scene_profile = excluded.scene_profile,
-            active_version_id = excluded.active_version_id,
-            built_in = excluded.built_in,
-            enabled = excluded.enabled,
-            updated_at_ms = excluded.updated_at_ms",
-        params![
-            &profile.prompt_profile_id,
-            profile.scope.as_str(),
-            profile.project_id.as_deref(),
-            &profile.name,
-            string_vec_json(&profile.style_tags)?,
-            profile.scene_profile.as_str(),
-            profile.active_version_id.as_deref(),
-            profile.built_in,
-            profile.enabled,
-            profile.created_at_ms,
-            profile.updated_at_ms,
-        ],
-    )?;
-    prompt_profile_by_id(connection, &profile.prompt_profile_id)?.ok_or_else(|| {
-        rusqlite::Error::InvalidParameterName("prompt profile not found".to_string())
-    })
-}
-
-fn validate_prompt_profile(
-    connection: &Connection,
-    profile: &PromptProfile,
-) -> std::result::Result<(), rusqlite::Error> {
-    match profile.scope {
-        PromptScope::Global => {
-            if profile.project_id.is_some() {
-                return Err(sqlite_data_error(
-                    "global prompt profile cannot have project_id",
-                ));
-            }
-        }
-        PromptScope::Project => {
-            let Some(project_id) = profile.project_id.as_deref() else {
-                return Err(sqlite_data_error(
-                    "project prompt profile requires project_id",
-                ));
-            };
-            ensure_project_exists(connection, project_id)?;
-        }
-    }
-
-    if let Some(active_version_id) = profile.active_version_id.as_deref() {
-        let owner_profile_id = connection
-            .query_row(
-                "SELECT prompt_profile_id
-                 FROM prompt_profile_versions
-                 WHERE prompt_version_id = ?1",
-                params![active_version_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        match owner_profile_id {
-            Some(owner_profile_id) if owner_profile_id == profile.prompt_profile_id => {}
-            Some(_) => {
-                return Err(sqlite_data_error(
-                    "active prompt version belongs to another profile",
-                ));
-            }
-            None => return Err(sqlite_data_error("active prompt version not found")),
-        }
-    }
-
-    Ok(())
-}
-
-fn prompt_profile_from_row(row: &Row<'_>) -> std::result::Result<PromptProfile, rusqlite::Error> {
-    let scope: String = row.get(1)?;
-    let scene_profile: String = row.get(5)?;
-    Ok(PromptProfile {
-        prompt_profile_id: row.get(0)?,
-        scope: PromptScope::from_str(&scope),
-        project_id: row.get(2)?,
-        name: row.get(3)?,
-        style_tags: string_vec_from_json(row.get::<_, String>(4)?)?,
-        scene_profile: SceneProfile::from_str(&scene_profile),
-        active_version_id: row.get(6)?,
-        built_in: row.get(7)?,
-        enabled: row.get(8)?,
-        created_at_ms: row.get(9)?,
-        updated_at_ms: row.get(10)?,
-    })
-}
-
-fn prompt_profile_version_by_id(
-    connection: &Connection,
-    version_id: &str,
-) -> std::result::Result<Option<PromptProfileVersion>, rusqlite::Error> {
-    connection
-        .query_row(
-            "SELECT prompt_version_id, prompt_profile_id, prompt_text, output_schema_version,
-                    prompt_hash, created_at_ms
-             FROM prompt_profile_versions
-             WHERE prompt_version_id = ?1",
-            params![version_id],
-            prompt_profile_version_from_row,
-        )
-        .optional()
-}
-
-fn save_prompt_profile_version_for_connection(
-    connection: &Connection,
-    version: PromptProfileVersion,
-) -> std::result::Result<PromptProfileVersion, rusqlite::Error> {
-    connection.execute(
-        "INSERT INTO prompt_profile_versions (
-            prompt_version_id, prompt_profile_id, prompt_text, output_schema_version,
-            prompt_hash, created_at_ms
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(prompt_version_id) DO UPDATE SET
-            prompt_profile_id = excluded.prompt_profile_id,
-            prompt_text = excluded.prompt_text,
-            output_schema_version = excluded.output_schema_version,
-            prompt_hash = excluded.prompt_hash,
-            created_at_ms = excluded.created_at_ms",
-        params![
-            version.prompt_version_id,
-            version.prompt_profile_id,
-            version.prompt_text,
-            version.output_schema_version,
-            version.prompt_hash,
-            version.created_at_ms,
-        ],
-    )?;
-    connection.execute(
-        "UPDATE prompt_profiles
-         SET active_version_id = ?1, updated_at_ms = MAX(updated_at_ms, ?2)
-         WHERE prompt_profile_id = ?3",
-        params![
-            version.prompt_version_id,
-            version.created_at_ms,
-            version.prompt_profile_id,
-        ],
-    )?;
-    prompt_profile_version_by_id(connection, &version.prompt_version_id)?.ok_or_else(|| {
-        rusqlite::Error::InvalidParameterName("prompt profile version not found".to_string())
-    })
-}
-
-fn prompt_profile_version_from_row(
-    row: &Row<'_>,
-) -> std::result::Result<PromptProfileVersion, rusqlite::Error> {
-    Ok(PromptProfileVersion {
-        prompt_version_id: row.get(0)?,
-        prompt_profile_id: row.get(1)?,
-        prompt_text: row.get(2)?,
-        output_schema_version: row.get(3)?,
-        prompt_hash: row.get(4)?,
-        created_at_ms: row.get(5)?,
-    })
-}
-
 fn project_evaluation_settings_for_project(
     connection: &Connection,
     project_id: &str,
@@ -3844,7 +3509,7 @@ fn project_evaluation_settings_by_project_id(
         .query_row(
             "SELECT project_id, auto_evaluate_on_upload,
                     auto_burst_recommendation_enabled, project_recommendation_mode,
-                    prompt_profile_id, model_provider_settings_id, scene_profile, cv_policy,
+                    prompt_pack_id, model_provider_settings_id, scene_profile, cv_policy,
                     cv_policy_overrides_json, allow_risky_model_selects, max_image_side,
                     batch_size, updated_at_ms
              FROM project_evaluation_settings
@@ -3864,7 +3529,7 @@ fn save_project_evaluation_settings_for_connection(
     connection.execute(
         "INSERT INTO project_evaluation_settings (
             project_id, auto_evaluate_on_upload,
-            auto_burst_recommendation_enabled, project_recommendation_mode, prompt_profile_id,
+            auto_burst_recommendation_enabled, project_recommendation_mode, prompt_pack_id,
             model_provider_settings_id, scene_profile, cv_policy, cv_policy_overrides_json,
             allow_risky_model_selects, max_image_side, batch_size, updated_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
@@ -3872,7 +3537,7 @@ fn save_project_evaluation_settings_for_connection(
             auto_evaluate_on_upload = excluded.auto_evaluate_on_upload,
             auto_burst_recommendation_enabled = excluded.auto_burst_recommendation_enabled,
             project_recommendation_mode = excluded.project_recommendation_mode,
-            prompt_profile_id = excluded.prompt_profile_id,
+            prompt_pack_id = excluded.prompt_pack_id,
             model_provider_settings_id = excluded.model_provider_settings_id,
             scene_profile = excluded.scene_profile,
             cv_policy = excluded.cv_policy,
@@ -3886,7 +3551,7 @@ fn save_project_evaluation_settings_for_connection(
             settings.auto_evaluate_on_upload,
             settings.auto_burst_recommendation_enabled,
             settings.project_recommendation_mode.as_str(),
-            settings.prompt_profile_id.as_deref(),
+            settings.prompt_pack_id.as_deref(),
             settings.model_provider_settings_id.as_deref(),
             settings.scene_profile.as_str(),
             settings.cv_policy.as_str(),
@@ -3903,46 +3568,15 @@ fn save_project_evaluation_settings_for_connection(
 }
 
 fn validate_project_evaluation_settings(
-    connection: &Connection,
+    _connection: &Connection,
     settings: &ProjectEvaluationSettings,
 ) -> std::result::Result<(), rusqlite::Error> {
-    let Some(prompt_profile_id) = settings.prompt_profile_id.as_deref() else {
-        return Ok(());
-    };
-
-    let profile = prompt_profile_by_id(connection, prompt_profile_id)?
-        .ok_or_else(|| sqlite_data_error("prompt profile not found"))?;
-    match profile.scope {
-        PromptScope::Global => validate_prompt_profile_is_usable(connection, &profile),
-        PromptScope::Project => {
-            if profile.project_id.as_deref() == Some(settings.project_id.as_str()) {
-                validate_prompt_profile_is_usable(connection, &profile)
-            } else {
-                Err(sqlite_data_error(
-                    "project prompt profile belongs to another project",
-                ))
-            }
-        }
-    }
-}
-
-fn validate_prompt_profile_is_usable(
-    connection: &Connection,
-    profile: &PromptProfile,
-) -> std::result::Result<(), rusqlite::Error> {
-    if !profile.enabled {
-        return Err(sqlite_data_error("prompt profile is disabled"));
-    }
-    let active_version_id = profile
-        .active_version_id
+    if settings
+        .prompt_pack_id
         .as_deref()
-        .ok_or_else(|| sqlite_data_error("prompt profile has no active version"))?;
-    let active_version = prompt_profile_version_by_id(connection, active_version_id)?
-        .ok_or_else(|| sqlite_data_error("active prompt version not found"))?;
-    if active_version.prompt_profile_id != profile.prompt_profile_id {
-        return Err(sqlite_data_error(
-            "active prompt version belongs to another profile",
-        ));
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err(sqlite_data_error("prompt pack id cannot be blank"));
     }
     Ok(())
 }
@@ -3961,7 +3595,7 @@ fn project_evaluation_settings_from_row(
         project_recommendation_mode: ProjectRecommendationMode::from_str(
             &project_recommendation_mode,
         ),
-        prompt_profile_id: row.get(4)?,
+        prompt_pack_id: row.get(4)?,
         model_provider_settings_id: row.get(5)?,
         scene_profile: SceneProfile::from_str(&scene_profile),
         cv_policy: CvPolicy::from_str(&cv_policy),
@@ -3981,7 +3615,7 @@ fn save_evaluation_run_for_connection(
     connection.execute(
         "INSERT INTO evaluation_runs (
             run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
-            prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+            prompt_pack_id, prompt_pack_version, prompt_hash, settings_snapshot_json,
             error_message, started_at_ms, completed_at_ms, created_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(run_id) DO UPDATE SET
@@ -3991,8 +3625,8 @@ fn save_evaluation_run_for_connection(
             status = excluded.status,
             provider_kind = excluded.provider_kind,
             provider_model = excluded.provider_model,
-            prompt_profile_id = excluded.prompt_profile_id,
-            prompt_version_id = excluded.prompt_version_id,
+            prompt_pack_id = excluded.prompt_pack_id,
+            prompt_pack_version = excluded.prompt_pack_version,
             prompt_hash = excluded.prompt_hash,
             settings_snapshot_json = excluded.settings_snapshot_json,
             error_message = excluded.error_message,
@@ -4007,8 +3641,8 @@ fn save_evaluation_run_for_connection(
             run.status.as_str(),
             run.provider_kind.as_str(),
             run.provider_model,
-            run.prompt_profile_id,
-            run.prompt_version_id,
+            run.prompt_pack_id,
+            run.prompt_pack_version,
             run.prompt_hash,
             run.settings_snapshot_json,
             run.error_message,
@@ -4029,7 +3663,7 @@ fn evaluation_run_by_id(
     connection
         .query_row(
             "SELECT run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
-                    prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+                    prompt_pack_id, prompt_pack_version, prompt_hash, settings_snapshot_json,
                     error_message, started_at_ms, completed_at_ms, created_at_ms
              FROM evaluation_runs
              WHERE run_id = ?1",
@@ -4047,7 +3681,7 @@ fn latest_evaluation_run(
     connection
         .query_row(
             "SELECT run_id, project_id, run_type, trigger, status, provider_kind, provider_model,
-                    prompt_profile_id, prompt_version_id, prompt_hash, settings_snapshot_json,
+                    prompt_pack_id, prompt_pack_version, prompt_hash, settings_snapshot_json,
                     error_message, started_at_ms, completed_at_ms, created_at_ms
              FROM evaluation_runs
              WHERE project_id = ?1 AND run_type = ?2
@@ -4072,8 +3706,8 @@ fn evaluation_run_from_row(row: &Row<'_>) -> std::result::Result<EvaluationRun, 
         status: EvaluationRunStatus::from_str(&status),
         provider_kind: ModelProviderKind::from_str(&provider_kind),
         provider_model: row.get(6)?,
-        prompt_profile_id: row.get(7)?,
-        prompt_version_id: row.get(8)?,
+        prompt_pack_id: row.get(7)?,
+        prompt_pack_version: row.get(8)?,
         prompt_hash: row.get(9)?,
         settings_snapshot_json: row.get(10)?,
         error_message: row.get(11)?,
@@ -4989,7 +4623,7 @@ fn save_model_evaluation_for_connection(
         "INSERT INTO model_evaluations (
             evaluation_id, run_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
             status, score, tier, selectable, summary, strengths_json, weaknesses_json,
-            technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+            technical_warnings_json, prompt_pack_id, prompt_pack_version, prompt_hash,
             created_at_ms, updated_at_ms
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(evaluation_id) DO UPDATE SET
@@ -5006,8 +4640,8 @@ fn save_model_evaluation_for_connection(
             strengths_json = excluded.strengths_json,
             weaknesses_json = excluded.weaknesses_json,
             technical_warnings_json = excluded.technical_warnings_json,
-            prompt_profile_id = excluded.prompt_profile_id,
-            prompt_version_id = excluded.prompt_version_id,
+            prompt_pack_id = excluded.prompt_pack_id,
+            prompt_pack_version = excluded.prompt_pack_version,
             prompt_hash = excluded.prompt_hash,
             updated_at_ms = excluded.updated_at_ms",
         params![
@@ -5025,8 +4659,8 @@ fn save_model_evaluation_for_connection(
             string_vec_json(&evaluation.strengths)?,
             string_vec_json(&evaluation.weaknesses)?,
             string_vec_json(&evaluation.technical_warnings)?,
-            evaluation.prompt_profile_id,
-            evaluation.prompt_version_id,
+            evaluation.prompt_pack_id,
+            evaluation.prompt_pack_version,
             evaluation.prompt_hash,
             evaluation.created_at_ms,
             evaluation.updated_at_ms,
@@ -5044,7 +4678,7 @@ fn model_evaluation_by_id(
         .query_row(
             "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
                     run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
-                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    technical_warnings_json, prompt_pack_id, prompt_pack_version, prompt_hash,
                     created_at_ms, updated_at_ms
              FROM model_evaluations
              WHERE evaluation_id = ?1",
@@ -5063,7 +4697,7 @@ fn latest_model_evaluation_for_asset_group(
         .query_row(
             "SELECT evaluation_id, project_id, asset_group_id, evaluator_kind, evaluator_version,
                     run_id, status, score, tier, selectable, summary, strengths_json, weaknesses_json,
-                    technical_warnings_json, prompt_profile_id, prompt_version_id, prompt_hash,
+                    technical_warnings_json, prompt_pack_id, prompt_pack_version, prompt_hash,
                     created_at_ms, updated_at_ms
              FROM model_evaluations
              WHERE asset_group_id = ?1 AND evaluator_version = ?2
@@ -5112,8 +4746,8 @@ fn model_evaluation_from_row(
         strengths: string_vec_from_json(row.get::<_, String>(11)?)?,
         weaknesses: string_vec_from_json(row.get::<_, String>(12)?)?,
         technical_warnings: string_vec_from_json(row.get::<_, String>(13)?)?,
-        prompt_profile_id: row.get(14)?,
-        prompt_version_id: row.get(15)?,
+        prompt_pack_id: row.get(14)?,
+        prompt_pack_version: row.get(15)?,
         prompt_hash: row.get(16)?,
         created_at_ms: row.get(17)?,
         updated_at_ms: row.get(18)?,

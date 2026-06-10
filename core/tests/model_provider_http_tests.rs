@@ -8,7 +8,7 @@ use camera_connector_core::{
     recommend_selection_with_model_provider, AssetGroupModelEvaluationInput,
     CameraConnectorService, ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier,
     ModelEvaluatorKind, ModelProviderKind, ModelProviderSettings, ModelSendMode, PreviewSample,
-    ProjectEvaluationSettings, PromptProfileContent, SelectionCandidateVisualInput,
+    ProjectEvaluationSettings, PromptPackContent, SelectionCandidateVisualInput,
     SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
     StoredObjectLocation, TransferRecord, TransferStatus,
 };
@@ -51,15 +51,16 @@ fn upload_model_evaluation_uses_configured_openai_compatible_provider() {
     enable_upload_model_evaluation(&service, &project.project_id);
     select_model_provider(&service, &project.project_id, "global");
     let prompt = service
-        .create_global_prompt_profile(
-            "纪实测试偏好",
-            vec!["纪实".to_string()],
+        .create_global_prompt_pack(
+            "通用评价偏好",
+            vec!["通用".to_string()],
             camera_connector_core::SceneProfile::General,
-            "共享偏好：偏纪实，优先自然瞬间。",
+            "user",
+            "偏好主体清晰、情绪自然、技术稳定的照片。",
             2_000,
         )
         .expect("prompt profile should create");
-    select_prompt_profile(&service, &project.project_id, &prompt.prompt_profile_id);
+    select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
     service
         .record_project_transfer(
             &project.project_id,
@@ -96,7 +97,7 @@ fn upload_model_evaluation_uses_configured_openai_compatible_provider() {
     assert!(request.contains("\"model\":\"gpt-test\""));
     assert!(request.contains("Camera Connector"));
     assert!(request.contains("technical_gate"));
-    assert!(request.contains("共享偏好：偏纪实，优先自然瞬间。"));
+    assert!(request.contains("偏好主体清晰、情绪自然、技术稳定的照片。"));
     assert!(request.contains("Evaluation task instruction"));
     assert!(
         request.contains("\"type\":\"image_url\""),
@@ -682,15 +683,16 @@ fn burst_selection_recommendation_uses_configured_model_provider_decision() {
         .expect("provider should save");
     select_model_provider(&service, &project.project_id, "selector");
     let prompt = service
-        .create_global_prompt_profile(
-            "连拍测试偏好",
+        .create_global_prompt_pack(
+            "连拍优选偏好",
             vec!["连拍".to_string()],
             camera_connector_core::SceneProfile::General,
-            "共享偏好：连拍里优先决定性瞬间。",
+            "user",
+            "连拍优选时优先选择决定性瞬间，其次考虑技术质量。",
             2_100,
         )
         .expect("prompt profile should create");
-    select_prompt_profile(&service, &project.project_id, &prompt.prompt_profile_id);
+    select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
 
     let recommendation = service
         .recommend_burst_group_from_model_with_candidate_visuals(
@@ -734,7 +736,7 @@ fn burst_selection_recommendation_uses_configured_model_provider_decision() {
     assert!(request.contains("data:image/jpeg;base64,c2VydmljZS1i"));
     assert!(request.contains("technically stronger but less expressive"));
     assert!(request.contains("better decisive moment"));
-    assert!(request.contains("共享偏好：连拍里优先决定性瞬间。"));
+    assert!(request.contains("连拍优选时优先选择决定性瞬间，其次考虑技术质量。"));
     assert!(request.contains("Burst selection instruction"));
     assert!(!request.contains("Project selection instruction"));
 }
@@ -1094,15 +1096,16 @@ fn project_selection_recommendation_uses_configured_model_provider_decision() {
         .expect("provider should save");
     select_model_provider(&service, &project.project_id, "project-selector");
     let prompt = service
-        .create_global_prompt_profile(
-            "项目测试偏好",
+        .create_global_prompt_pack(
+            "项目优选偏好",
             vec!["项目".to_string()],
             camera_connector_core::SceneProfile::General,
-            "共享偏好：项目优选要看系列完整度。",
+            "user",
+            "项目优选时偏好有叙事感、可交付、可入选作品集的照片。",
             2_200,
         )
         .expect("prompt profile should create");
-    select_prompt_profile(&service, &project.project_id, &prompt.prompt_profile_id);
+    select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
 
     let recommendation = service
         .generate_project_recommendation(&project.project_id, 30_000)
@@ -1123,7 +1126,7 @@ fn project_selection_recommendation_uses_configured_model_provider_decision() {
     assert!(request.contains("project"));
     assert!(request.contains("clean but ordinary"));
     assert!(request.contains("portfolio-worthy storytelling frame"));
-    assert!(request.contains("共享偏好：项目优选要看系列完整度。"));
+    assert!(request.contains("项目优选时偏好有叙事感、可交付、可入选作品集的照片。"));
     assert!(request.contains("Project selection instruction"));
     assert!(!request.contains("Burst selection instruction"));
 }
@@ -1315,7 +1318,7 @@ fn burst_selection_recommendation_sends_candidate_preview_images() {
         42_000,
         &provider,
         "sk-visual-selector",
-        &PromptProfileContent::new("Prefer the frame with stronger photographic expression."),
+        &PromptPackContent::new("Prefer the frame with stronger photographic expression."),
     )
     .expect("visual recommendation should succeed");
 
@@ -1420,7 +1423,7 @@ fn enable_upload_model_evaluation(service: &CameraConnectorService, project_id: 
         .expect("settings should load")
         .expect("settings should exist");
     settings.auto_evaluate_on_upload = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     service
         .save_project_evaluation_settings(ProjectEvaluationSettings { ..settings })
         .expect("settings should save");
@@ -1437,16 +1440,12 @@ fn select_model_provider(service: &CameraConnectorService, project_id: &str, set
         .expect("settings should save");
 }
 
-fn select_prompt_profile(
-    service: &CameraConnectorService,
-    project_id: &str,
-    prompt_profile_id: &str,
-) {
+fn select_prompt_pack(service: &CameraConnectorService, project_id: &str, prompt_pack_id: &str) {
     let mut settings = service
         .project_evaluation_settings(project_id)
         .expect("settings should load")
         .expect("settings should exist");
-    settings.prompt_profile_id = Some(prompt_profile_id.to_string());
+    settings.prompt_pack_id = Some(prompt_pack_id.to_string());
     service
         .save_project_evaluation_settings(settings)
         .expect("settings should save");
@@ -1511,8 +1510,8 @@ fn model_evaluation(
         strengths: Vec::new(),
         weaknesses: Vec::new(),
         technical_warnings: Vec::new(),
-        prompt_profile_id: None,
-        prompt_version_id: None,
+        prompt_pack_id: None,
+        prompt_pack_version: None,
         prompt_hash: None,
         created_at_ms: 1_500,
         updated_at_ms: 1_500,

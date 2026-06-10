@@ -277,7 +277,7 @@ class NativeDashboardMappingTest {
         ).toProjectEvaluationSettingsJson()
 
         assertEquals("manual", json.getString("project_recommendation_mode"))
-        assertEquals("prompt-portrait", json.getString("prompt_profile_id"))
+        assertEquals("prompt-portrait", json.getString("prompt_pack_id"))
         assertEquals(1024, json.getInt("max_image_side"))
         assertEquals(2, json.getInt("batch_size"))
     }
@@ -378,13 +378,11 @@ class NativeDashboardMappingTest {
             org.json.JSONArray()
                 .put(
                     JSONObject()
-                        .put("prompt_profile_id", "portrait-conservative")
-                        .put("scope", "global")
-                        .put("project_id", JSONObject.NULL)
+                        .put("prompt_pack_id", "portrait-conservative")
                         .put("name", "Portrait Conservative")
                         .put("style_tags", org.json.JSONArray().put("portrait").put("conservative"))
                         .put("scene_profile", "portrait")
-                        .put("active_version_id", "version-1")
+                        .put("version", "builtin-v1")
                         .put("built_in", true)
                         .put("enabled", true),
                 ),
@@ -394,38 +392,28 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun promptProfilesMapStructuredPromptContent() {
+    fun promptProfilesMapMarkdownPromptContent() {
         val profiles = mapPromptProfiles(
             org.json.JSONArray()
                 .put(
                     JSONObject()
-                        .put("prompt_profile_id", "documentary-custom")
-                        .put("scope", "global")
-                        .put("project_id", JSONObject.NULL)
+                        .put("prompt_pack_id", "documentary-custom")
                         .put("name", "Documentary Custom")
                         .put("style_tags", org.json.JSONArray().put("documentary"))
                         .put("scene_profile", "general")
-                        .put("active_version_id", "version-2")
+                        .put("version", "user-1")
                         .put("built_in", false)
                         .put("enabled", true)
-                        .put(
-                            "active_prompt_text",
-                            JSONObject()
-                                .put("shared_preference", "Prefer quiet documentary emotion.")
-                                .put("evaluation_instruction", "Evaluate technical and story value.")
-                                .put("burst_selection_instruction", "Pick the decisive frame.")
-                                .put("project_selection_instruction", "Build a coherent set.")
-                                .toString(),
-                        ),
+                        .put("prompt_text", "Prefer quiet documentary emotion."),
                 ),
         )
 
         val profile = profiles.single()
         assertEquals("Prefer quiet documentary emotion.", profile.activePromptText)
         assertEquals("Prefer quiet documentary emotion.", profile.sharedPreference)
-        assertEquals("Evaluate technical and story value.", profile.evaluationInstruction)
-        assertEquals("Pick the decisive frame.", profile.burstSelectionInstruction)
-        assertEquals("Build a coherent set.", profile.projectSelectionInstruction)
+        assertNull(profile.evaluationInstruction)
+        assertNull(profile.burstSelectionInstruction)
+        assertNull(profile.projectSelectionInstruction)
     }
 
     @Test

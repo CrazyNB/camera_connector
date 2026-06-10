@@ -210,6 +210,16 @@ internal fun promptProfileDisplayName(profile: PromptProfileUi): String {
     }
 }
 
+internal fun promptPackageFolder(profile: PromptProfileUi): String =
+    profile.distributionFolder.trim().ifBlank { "user" }
+
+internal fun promptPackageLabel(folder: String): String =
+    when (folder.trim().ifBlank { "user" }) {
+        "user" -> "我的提示词包"
+        "builtin" -> "内置提示词包"
+        else -> folder
+    }
+
 internal fun promptStyleTagLabel(value: String): String =
     when (value.trim().lowercase()) {
         "general" -> "通用"

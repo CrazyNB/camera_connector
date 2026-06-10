@@ -19,8 +19,8 @@ fn stub_evaluation_scores_passed_asset_group_as_good_candidate() {
     assert_eq!(evaluation.score, 72);
     assert_eq!(evaluation.tier, ModelEvaluationTier::Good);
     assert!(evaluation.selectable);
-    assert_eq!(evaluation.prompt_profile_id, None);
-    assert_eq!(evaluation.prompt_version_id, None);
+    assert_eq!(evaluation.prompt_pack_id, None);
+    assert_eq!(evaluation.prompt_pack_version, None);
     assert_eq!(evaluation.prompt_hash, None);
 }
 

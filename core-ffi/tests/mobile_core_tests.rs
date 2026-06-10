@@ -1,4 +1,4 @@
-﻿use camera_connector_core::{
+use camera_connector_core::{
     AssetGroupQuery, CameraConnectorService, ModelProviderKind, ModelProviderSettings,
     ModelSendMode, PublishTransferMetadata, StoredObjectLocation, TransferRecord, TransferStatus,
 };
@@ -112,7 +112,7 @@ fn mobile_core_asset_group_json_exposes_model_evaluator_kind() {
         .unwrap()
         .unwrap();
     settings.auto_evaluate_on_upload = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     service
@@ -237,7 +237,7 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
                     "auto_evaluate_on_upload":true,
                     "auto_burst_recommendation_enabled":false,
                     "project_recommendation_mode":"manual",
-                    "prompt_profile_id":null,
+                    "prompt_pack_id":null,
                     "model_provider_settings_id":"photo-eval-model",
                     "scene_profile":"portrait",
                     "cv_policy":"strict",
@@ -306,6 +306,40 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
         serde_json::json!(0.32)
     );
 
+    let selected_prompt: Value = serde_json::from_str(
+        &core
+            .save_project_evaluation_settings_json(
+                project_id.clone(),
+                r#"{
+                    "prompt_pack_id":"general-default"
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selected_prompt["prompt_pack_id"], "general-default");
+    assert_eq!(
+        selected_prompt["model_provider_settings_id"],
+        "photo-eval-model"
+    );
+
+    let cleared_prompt_and_provider: Value = serde_json::from_str(
+        &core
+            .save_project_evaluation_settings_json(
+                project_id.clone(),
+                r#"{
+                    "prompt_pack_id":null,
+                    "model_provider_settings_id":null
+                }"#
+                .to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(cleared_prompt_and_provider["prompt_pack_id"].is_null());
+    assert!(cleared_prompt_and_provider["model_provider_settings_id"].is_null());
+
     let preserved: Value = serde_json::from_str(
         &core
             .save_project_evaluation_settings_json(
@@ -344,16 +378,16 @@ fn mobile_core_round_trips_project_evaluation_settings_and_manual_mode() {
 }
 
 #[test]
-fn mobile_core_lists_forks_and_versions_prompt_profiles_json() {
+fn mobile_core_lists_forks_and_edits_prompt_packs_json() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
     let service = CameraConnectorService::new(Some(config_path.clone()));
-    let project = service.create_project("Prompt Profiles").unwrap();
+    let project = service.create_project("Prompt Packs").unwrap();
     let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
 
     let profiles: Value = serde_json::from_str(
         &core
-            .prompt_profiles_for_project_json(project.project_id.clone())
+            .prompt_packs_for_project_json(project.project_id.clone())
             .unwrap(),
     )
     .unwrap();
@@ -361,44 +395,88 @@ fn mobile_core_lists_forks_and_versions_prompt_profiles_json() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|profile| profile["prompt_profile_id"] == "general-default")
+        .find(|profile| profile["prompt_pack_id"] == "general-default")
         .unwrap();
-    assert_eq!(built_in["scope"], "global");
     assert_eq!(built_in["built_in"], true);
     assert!(built_in["style_tags"]
         .as_array()
         .unwrap()
-        .contains(&Value::String("general".to_string())));
+        .contains(&Value::String("通用".to_string())));
 
     let forked: Value = serde_json::from_str(
         &core
-            .fork_prompt_profile_json(
+            .fork_prompt_pack_json(
                 project.project_id.clone(),
                 "general-default".to_string(),
                 "Client Editorial".to_string(),
+                "client-pack".to_string(),
             )
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(forked["scope"], "project");
-    assert_eq!(forked["project_id"], project.project_id);
     assert_eq!(forked["built_in"], false);
+    assert_eq!(forked["author"], "user");
 
     let edited: Value = serde_json::from_str(
         &core
-            .save_prompt_version_json(
-                project.project_id,
-                forked["prompt_profile_id"].as_str().unwrap().to_string(),
+            .save_prompt_pack_json(
+                project.project_id.clone(),
+                forked["prompt_pack_id"].as_str().unwrap().to_string(),
+                "Client Editorial Edited".to_string(),
+                r#"["client","edited"]"#.to_string(),
+                "general".to_string(),
                 "Return concise project recommendations.".to_string(),
             )
             .unwrap(),
     )
     .unwrap();
     assert_eq!(
-        edited["prompt_profile_id"],
-        forked["prompt_profile_id"].as_str().unwrap()
+        edited["prompt_pack_id"],
+        forked["prompt_pack_id"].as_str().unwrap()
     );
-    assert!(edited["prompt_version_id"].as_str().unwrap().contains("-v"));
+    assert!(edited["version"].as_str().unwrap().starts_with("user-"));
+    assert_eq!(
+        edited["prompt_text"],
+        "Return concise project recommendations."
+    );
+
+    let deleted: Value = serde_json::from_str(
+        &core
+            .delete_global_prompt_pack_json(forked["prompt_pack_id"].as_str().unwrap().to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(deleted["deleted"], true);
+    let remaining: Value = serde_json::from_str(
+        &core
+            .prompt_packs_for_project_json(project.project_id.clone())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(!remaining.as_array().unwrap().iter().any(|profile| {
+        profile["prompt_pack_id"] == forked["prompt_pack_id"].as_str().unwrap()
+    }));
+
+    let package_pack: Value = serde_json::from_str(
+        &core
+            .create_global_prompt_pack_json(
+                "Package Delete Candidate".to_string(),
+                r#"["client"]"#.to_string(),
+                "general".to_string(),
+                "delete-package".to_string(),
+                "Temporary package prompt.".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(package_pack["distribution_folder"], "delete-package");
+    let package_deleted: Value = serde_json::from_str(
+        &core
+            .delete_global_prompt_package_json("delete-package".to_string())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(package_deleted["deleted"], true);
 }
 
 #[test]
@@ -444,7 +522,7 @@ fn mobile_core_rejects_invalid_settings_enum_json() {
             "auto_evaluate_on_upload": false,
             "auto_burst_recommendation_enabled": true,
             "project_recommendation_mode": "manual",
-            "prompt_profile_id": null,
+            "prompt_pack_id": null,
             "scene_profile": "general",
             "cv_policy": "standard",
             "allow_risky_model_selects": false,
@@ -468,31 +546,36 @@ fn mobile_core_uses_monotonic_action_timestamps_for_prompt_edits() {
 
     let first: Value = serde_json::from_str(
         &core
-            .fork_prompt_profile_json(
+            .fork_prompt_pack_json(
                 project.project_id.clone(),
                 "general-default".to_string(),
                 "Editable A".to_string(),
+                "user".to_string(),
             )
             .unwrap(),
     )
     .unwrap();
     let second: Value = serde_json::from_str(
         &core
-            .fork_prompt_profile_json(
+            .fork_prompt_pack_json(
                 project.project_id.clone(),
                 "general-default".to_string(),
                 "Editable B".to_string(),
+                "user".to_string(),
             )
             .unwrap(),
     )
     .unwrap();
-    assert_ne!(first["prompt_profile_id"], second["prompt_profile_id"]);
+    assert_ne!(first["prompt_pack_id"], second["prompt_pack_id"]);
 
     let first_version: Value = serde_json::from_str(
         &core
-            .save_prompt_version_json(
+            .save_prompt_pack_json(
                 project.project_id.clone(),
-                first["prompt_profile_id"].as_str().unwrap().to_string(),
+                first["prompt_pack_id"].as_str().unwrap().to_string(),
+                "Editable B Revised".to_string(),
+                r#"["editable","first"]"#.to_string(),
+                "general".to_string(),
                 "Prompt version one".to_string(),
             )
             .unwrap(),
@@ -500,18 +583,18 @@ fn mobile_core_uses_monotonic_action_timestamps_for_prompt_edits() {
     .unwrap();
     let second_version: Value = serde_json::from_str(
         &core
-            .save_prompt_version_json(
+            .save_prompt_pack_json(
                 project.project_id,
-                first["prompt_profile_id"].as_str().unwrap().to_string(),
+                first["prompt_pack_id"].as_str().unwrap().to_string(),
+                "Editable B Revised Again".to_string(),
+                r#"["editable","second"]"#.to_string(),
+                "general".to_string(),
                 "Prompt version one".to_string(),
             )
             .unwrap(),
     )
     .unwrap();
-    assert_ne!(
-        first_version["prompt_version_id"],
-        second_version["prompt_version_id"]
-    );
+    assert_ne!(first_version["version"], second_version["version"]);
 }
 
 #[test]
@@ -600,7 +683,7 @@ fn mobile_core_generates_project_recommendation_with_candidate_visuals_json() {
         .project_evaluation_settings(&project.project_id)
         .unwrap()
         .unwrap();
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     for (transfer_id, path, completed_at_ms) in [
@@ -714,7 +797,7 @@ fn mobile_core_round_trips_subject_assessment_json() {
             "auto_evaluate_on_upload":false,
             "auto_burst_recommendation_enabled":true,
             "project_recommendation_mode":"manual",
-            "prompt_profile_id":null,
+            "prompt_pack_id":null,
             "scene_profile":"portrait",
             "cv_policy":"standard",
             "allow_risky_model_selects":false
@@ -1348,7 +1431,7 @@ fn mobile_core_exposes_model_evaluation_and_technical_gate_json() {
         .unwrap()
         .unwrap();
     settings.auto_evaluate_on_upload = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     service
@@ -1428,7 +1511,7 @@ fn mobile_core_enqueues_manual_model_evaluation_json() {
         .unwrap()
         .unwrap();
     settings.auto_evaluate_on_upload = false;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     service
@@ -1502,7 +1585,7 @@ fn mobile_core_evaluates_manual_model_inputs_json() {
         .unwrap()
         .unwrap();
     settings.auto_evaluate_on_upload = false;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     service
@@ -1586,7 +1669,7 @@ fn mobile_core_recommends_burst_group_with_candidate_visuals_json() {
         .unwrap();
     settings.auto_evaluate_on_upload = false;
     settings.auto_burst_recommendation_enabled = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
+    settings.prompt_pack_id = Some("general-default".to_string());
     settings.model_provider_settings_id = Some("global".to_string());
     service.save_project_evaluation_settings(settings).unwrap();
     for (transfer_id, path, completed_at_ms) in [
