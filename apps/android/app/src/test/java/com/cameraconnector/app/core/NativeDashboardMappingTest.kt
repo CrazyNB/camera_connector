@@ -249,11 +249,10 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun projectEvaluationSettingsMapDefaultsModelEvaluationOff() {
+    fun projectEvaluationSettingsMapDefaultsConcreteActionsOff() {
         val settings = mapProjectEvaluationSettings(JSONObject().put("project_id", "project-client"))
 
         assertEquals("project-client", settings.projectId)
-        assertFalse(settings.modelEvaluationEnabled)
         assertFalse(settings.autoEvaluateOnUpload)
         assertTrue(settings.autoBurstRecommendationEnabled)
         assertEquals("manual", settings.projectRecommendationMode)
@@ -266,7 +265,6 @@ class NativeDashboardMappingTest {
     fun projectEvaluationSettingsSerializeManualRecommendationMode() {
         val json = ProjectEvaluationSettingsUi(
             projectId = "project-client",
-            modelEvaluationEnabled = true,
             autoEvaluateOnUpload = true,
             autoBurstRecommendationEnabled = false,
             projectRecommendationMode = "automatic",
@@ -279,9 +277,50 @@ class NativeDashboardMappingTest {
         ).toProjectEvaluationSettingsJson()
 
         assertEquals("manual", json.getString("project_recommendation_mode"))
-        assertEquals("prompt-portrait", json.getString("prompt_profile_id"))
+        assertEquals("prompt-portrait", json.getString("prompt_pack_id"))
         assertEquals(1024, json.getInt("max_image_side"))
         assertEquals(2, json.getInt("batch_size"))
+    }
+
+    @Test
+    fun projectEvaluationSettingsMapAndSerializeCvPolicyOverrides() {
+        val overridesJson = JSONObject()
+            .put("blur_severe_edge_threshold", 0.04)
+            .put("blur_severe_frequency_threshold", 0.04)
+            .put("blur_high_edge_threshold", 0.12)
+            .put("blur_high_frequency_threshold", 0.12)
+            .put("highlight_clip_threshold", 245)
+            .put("shadow_clip_threshold", 10)
+            .put("clipping_high_ratio", 0.08)
+            .put("clipping_high_connected_ratio", 0.08)
+            .put("clipping_severe_ratio", 0.50)
+            .put("clipping_severe_connected_ratio", 0.50)
+            .put("color_cast_high_threshold", 0.42)
+            .put("color_cast_severe_threshold", 0.70)
+            .put("face_eye_open_warn_threshold", 0.35)
+            .put("face_exposure_warn_ratio", 0.25)
+            .put("face_color_cast_warn_threshold", 0.42)
+        val settings = mapProjectEvaluationSettings(
+            JSONObject()
+                .put("project_id", "project-client")
+                .put("cv_policy_overrides", overridesJson),
+        )
+
+        assertEquals(0.08, settings.cvPolicyOverrides?.clippingHighRatio)
+        assertEquals(245, settings.cvPolicyOverrides?.highlightClipThreshold)
+        assertEquals(0.42, settings.cvPolicyOverrides?.colorCastHighThreshold)
+        assertEquals(0.35, settings.cvPolicyOverrides?.faceEyeOpenWarnThreshold)
+        assertEquals(0.25, settings.cvPolicyOverrides?.faceExposureWarnRatio)
+        assertEquals(0.42, settings.cvPolicyOverrides?.faceColorCastWarnThreshold)
+
+        val serialized = settings.toProjectEvaluationSettingsJson()
+            .getJSONObject("cv_policy_overrides")
+        assertEquals(0.08, serialized.getDouble("clipping_high_ratio"), 0.0001)
+        assertEquals(245, serialized.getInt("highlight_clip_threshold"))
+        assertEquals(0.42, serialized.getDouble("color_cast_high_threshold"), 0.0001)
+        assertEquals(0.35, serialized.getDouble("face_eye_open_warn_threshold"), 0.0001)
+        assertEquals(0.25, serialized.getDouble("face_exposure_warn_ratio"), 0.0001)
+        assertEquals(0.42, serialized.getDouble("face_color_cast_warn_threshold"), 0.0001)
     }
 
     @Test
@@ -339,13 +378,11 @@ class NativeDashboardMappingTest {
             org.json.JSONArray()
                 .put(
                     JSONObject()
-                        .put("prompt_profile_id", "portrait-conservative")
-                        .put("scope", "global")
-                        .put("project_id", JSONObject.NULL)
+                        .put("prompt_pack_id", "portrait-conservative")
                         .put("name", "Portrait Conservative")
                         .put("style_tags", org.json.JSONArray().put("portrait").put("conservative"))
                         .put("scene_profile", "portrait")
-                        .put("active_version_id", "version-1")
+                        .put("version", "builtin-v1")
                         .put("built_in", true)
                         .put("enabled", true),
                 ),
@@ -355,38 +392,28 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun promptProfilesMapStructuredPromptContent() {
+    fun promptProfilesMapMarkdownPromptContent() {
         val profiles = mapPromptProfiles(
             org.json.JSONArray()
                 .put(
                     JSONObject()
-                        .put("prompt_profile_id", "documentary-custom")
-                        .put("scope", "global")
-                        .put("project_id", JSONObject.NULL)
+                        .put("prompt_pack_id", "documentary-custom")
                         .put("name", "Documentary Custom")
                         .put("style_tags", org.json.JSONArray().put("documentary"))
                         .put("scene_profile", "general")
-                        .put("active_version_id", "version-2")
+                        .put("version", "user-1")
                         .put("built_in", false)
                         .put("enabled", true)
-                        .put(
-                            "active_prompt_text",
-                            JSONObject()
-                                .put("shared_preference", "Prefer quiet documentary emotion.")
-                                .put("evaluation_instruction", "Evaluate technical and story value.")
-                                .put("burst_selection_instruction", "Pick the decisive frame.")
-                                .put("project_selection_instruction", "Build a coherent set.")
-                                .toString(),
-                        ),
+                        .put("prompt_text", "Prefer quiet documentary emotion."),
                 ),
         )
 
         val profile = profiles.single()
         assertEquals("Prefer quiet documentary emotion.", profile.activePromptText)
         assertEquals("Prefer quiet documentary emotion.", profile.sharedPreference)
-        assertEquals("Evaluate technical and story value.", profile.evaluationInstruction)
-        assertEquals("Pick the decisive frame.", profile.burstSelectionInstruction)
-        assertEquals("Build a coherent set.", profile.projectSelectionInstruction)
+        assertNull(profile.evaluationInstruction)
+        assertNull(profile.burstSelectionInstruction)
+        assertNull(profile.projectSelectionInstruction)
     }
 
     @Test

@@ -26,6 +26,9 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     fun moveProjectGroup(sourceProjectId: String, groupId: String, targetProjectId: String): JSONObject =
         call { moveProjectGroupJson(handle, sourceProjectId, groupId, targetProjectId) }
 
+    fun deleteProjectGroup(projectId: String, groupId: String): JSONObject =
+        call { deleteProjectGroupJson(handle, projectId, groupId) }
+
     fun setAssetGroupUserMarks(
         projectId: String,
         groupId: String,
@@ -180,31 +183,56 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         call { saveProjectEvaluationSettingsJson(handle, projectId, settingsJson) }
 
     fun promptProfilesForProject(projectId: String): JSONArray =
-        call { promptProfilesForProjectJson(handle, projectId) }.optJSONArray("value")
+        call { PromptPacksForProjectJson(handle, projectId) }.optJSONArray("value")
             ?: JSONArray()
 
     fun globalPromptProfiles(): JSONArray =
-        call { globalPromptProfilesJson(handle) }.optJSONArray("value") ?: JSONArray()
+        call { globalPromptPacksJson(handle) }.optJSONArray("value") ?: JSONArray()
 
-    fun forkGlobalPromptProfile(sourceProfileId: String, name: String): JSONObject =
-        call { forkGlobalPromptProfileJson(handle, sourceProfileId, name) }
+    fun forkGlobalPromptProfile(sourceProfileId: String, name: String, distributionFolder: String): JSONObject =
+        call { forkGlobalPromptPackJson(handle, sourceProfileId, name, distributionFolder) }
 
     fun createGlobalPromptProfile(
         name: String,
         styleTagsJson: String,
         sceneProfile: String,
+        distributionFolder: String,
         promptText: String,
     ): JSONObject =
-        call { createGlobalPromptProfileJson(handle, name, styleTagsJson, sceneProfile, promptText) }
+        call { createGlobalPromptPackJson(handle, name, styleTagsJson, sceneProfile, distributionFolder, promptText) }
 
-    fun saveGlobalPromptVersion(promptProfileId: String, promptText: String): JSONObject =
-        call { saveGlobalPromptVersionJson(handle, promptProfileId, promptText) }
+    fun saveGlobalPromptVersion(
+        promptProfileId: String,
+        name: String,
+        styleTagsJson: String,
+        sceneProfile: String,
+        promptText: String,
+    ): JSONObject =
+        call { saveGlobalPromptPackJson(handle, promptProfileId, name, styleTagsJson, sceneProfile, promptText) }
 
-    fun forkPromptProfile(projectId: String, sourceProfileId: String, name: String): JSONObject =
-        call { forkPromptProfileJson(handle, projectId, sourceProfileId, name) }
+    fun deleteGlobalPromptPack(promptProfileId: String): JSONObject =
+        call { deleteGlobalPromptPackJson(handle, promptProfileId) }
 
-    fun savePromptVersion(projectId: String, promptProfileId: String, promptText: String): JSONObject =
-        call { savePromptVersionJson(handle, projectId, promptProfileId, promptText) }
+    fun deleteGlobalPromptPackage(distributionFolder: String): JSONObject =
+        call { deleteGlobalPromptPackageJson(handle, distributionFolder) }
+
+    fun forkPromptProfile(
+        projectId: String,
+        sourceProfileId: String,
+        name: String,
+        distributionFolder: String,
+    ): JSONObject =
+        call { forkPromptPackJson(handle, projectId, sourceProfileId, name, distributionFolder) }
+
+    fun savePromptVersion(
+        projectId: String,
+        promptProfileId: String,
+        name: String,
+        styleTagsJson: String,
+        sceneProfile: String,
+        promptText: String,
+    ): JSONObject =
+        call { savePromptPackJson(handle, projectId, promptProfileId, name, styleTagsJson, sceneProfile, promptText) }
 
     fun generateProjectRecommendation(projectId: String): JSONObject =
         call { generateProjectRecommendationJson(handle, projectId) }
@@ -347,6 +375,7 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         groupId: String,
         targetProjectId: String,
     ): String
+    private external fun deleteProjectGroupJson(handle: Long, projectId: String, groupId: String): String
     private external fun setAssetGroupUserMarksJson(
         handle: Long,
         projectId: String,
@@ -406,35 +435,46 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         projectId: String,
         settingsJson: String,
     ): String
-    private external fun promptProfilesForProjectJson(handle: Long, projectId: String): String
-    private external fun globalPromptProfilesJson(handle: Long): String
-    private external fun forkGlobalPromptProfileJson(
+    private external fun PromptPacksForProjectJson(handle: Long, projectId: String): String
+    private external fun globalPromptPacksJson(handle: Long): String
+    private external fun forkGlobalPromptPackJson(
         handle: Long,
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): String
-    private external fun createGlobalPromptProfileJson(
+    private external fun createGlobalPromptPackJson(
         handle: Long,
+        name: String,
+        styleTagsJson: String,
+        sceneProfile: String,
+        distributionFolder: String,
+        promptText: String,
+    ): String
+    private external fun saveGlobalPromptPackJson(
+        handle: Long,
+        promptProfileId: String,
         name: String,
         styleTagsJson: String,
         sceneProfile: String,
         promptText: String,
     ): String
-    private external fun saveGlobalPromptVersionJson(
-        handle: Long,
-        promptProfileId: String,
-        promptText: String,
-    ): String
-    private external fun forkPromptProfileJson(
+    private external fun deleteGlobalPromptPackJson(handle: Long, promptProfileId: String): String
+    private external fun deleteGlobalPromptPackageJson(handle: Long, distributionFolder: String): String
+    private external fun forkPromptPackJson(
         handle: Long,
         projectId: String,
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): String
-    private external fun savePromptVersionJson(
+    private external fun savePromptPackJson(
         handle: Long,
         projectId: String,
         promptProfileId: String,
+        name: String,
+        styleTagsJson: String,
+        sceneProfile: String,
         promptText: String,
     ): String
     private external fun generateProjectRecommendationJson(handle: Long, projectId: String): String

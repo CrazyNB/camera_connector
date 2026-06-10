@@ -1,45 +1,362 @@
+use std::fs;
+
 use camera_connector_core::{
     AnalysisJobType, CameraConnectorConfig, CameraConnectorService, CvPolicy, EvaluationRun,
     EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ModelProviderKind,
-    ModelProviderSettings, ModelSendMode, ProjectRecommendationMode, PromptProfile,
-    PromptProfileVersion, PromptScope, SceneProfile, SqliteStore, StoredObjectLocation,
-    SubjectAssessment, TransferRecord, TransferStatus,
+    ModelProviderSettings, ModelSendMode, ProjectRecommendationMode, SceneProfile, SqliteStore,
+    StoredObjectLocation, SubjectAssessment, TechnicalAssessmentPolicy, TransferRecord,
+    TransferStatus,
 };
-use rusqlite::{params, Connection};
 
 #[test]
-fn evaluation_config_tests_service_creates_global_prompt_profile_from_shared_preference() {
+fn evaluation_config_tests_service_creates_user_prompt_pack_from_shared_preference() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
 
-    let profile = service
-        .create_global_prompt_profile(
-            "纪实偏好",
-            vec!["纪实".to_string(), "人像".to_string()],
+    let pack = service
+        .create_global_prompt_pack(
+            "Documentary Preference",
+            vec!["documentary".to_string(), "portrait".to_string()],
             SceneProfile::General,
-            "偏纪实，优先情绪、主体清晰和自然肤色。",
+            "user",
+            "Prefer quiet documentary emotion.",
             10_000,
         )
-        .expect("prompt profile should create");
-    let version_id = profile
-        .active_version_id
-        .as_deref()
-        .expect("created profile should have an active version")
-        .to_string();
-    let version = service
-        .storage_store()
-        .expect("store should open")
-        .prompt_profile_version(&version_id)
-        .expect("version should query")
-        .expect("version should exist");
+        .expect("prompt pack should create");
 
-    assert_eq!(profile.scope, PromptScope::Global);
-    assert!(!profile.built_in);
-    assert_eq!(profile.name, "纪实偏好");
-    assert!(version.prompt_text.contains("shared_preference"));
-    assert!(version
+    assert_eq!(pack.name, "Documentary Preference");
+    assert_eq!(pack.prompt_pack_id, "documentary-preference");
+    assert!(!pack.built_in);
+    assert_eq!(pack.version, "user-10000");
+    assert!(pack.prompt_hash.starts_with("fnv1a64-"));
+    assert!(pack.prompt_text.contains("shared_preference"));
+    assert!(pack
         .prompt_text
-        .contains("偏纪实，优先情绪、主体清晰和自然肤色。"));
+        .contains("Prefer quiet documentary emotion."));
+    assert!(service
+        .prompt_text_for_pack(&pack.prompt_pack_id)
+        .expect("prompt text should load")
+        .expect("prompt text should exist")
+        .contains("Prefer quiet documentary emotion."));
+    assert_eq!(
+        service
+            .prompt_markdown_for_pack(&pack.prompt_pack_id)
+            .expect("prompt markdown should load")
+            .expect("prompt markdown should exist"),
+        "Prefer quiet documentary emotion."
+    );
+
+    let prompt_pack_root = service
+        .storage_state_dir()
+        .expect("storage state dir should resolve")
+        .join("prompt-packs");
+    assert!(prompt_pack_root
+        .join("user")
+        .join("documentary-preference")
+        .exists());
+    let prompt_file = fs::read_dir(prompt_pack_root.join("user"))
+        .expect("prompt pack root should exist")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().join("PROMPT.md"))
+        .find(|path| path.exists())
+        .expect("prompt markdown file should exist");
+    let prompt_markdown = fs::read_to_string(prompt_file).expect("prompt markdown should read");
+    assert_eq!(prompt_markdown, "Prefer quiet documentary emotion.");
+    assert!(!prompt_markdown.contains("shared_preference"));
+}
+
+#[test]
+fn evaluation_config_tests_user_prompt_pack_uses_shareable_folder_names() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+
+    let first = service
+        .create_global_prompt_pack(
+            "xx",
+            vec!["test".to_string()],
+            SceneProfile::General,
+            "portrait-pack",
+            "First prompt.",
+            10_000,
+        )
+        .expect("first prompt pack should create");
+    let second = service
+        .create_global_prompt_pack(
+            "xx",
+            vec!["test".to_string()],
+            SceneProfile::General,
+            "portrait-pack",
+            "Second prompt.",
+            10_001,
+        )
+        .expect("duplicate prompt pack should create with short suffix");
+
+    assert_eq!(first.prompt_pack_id, "xx");
+    assert_eq!(first.distribution_folder, "portrait-pack");
+    assert_eq!(second.prompt_pack_id, "xx-2");
+    assert_eq!(second.distribution_folder, "portrait-pack");
+
+    let prompt_pack_root = service
+        .storage_state_dir()
+        .expect("storage state dir should resolve")
+        .join("prompt-packs");
+    assert_eq!(
+        fs::read_to_string(
+            prompt_pack_root
+                .join("portrait-pack")
+                .join("xx")
+                .join("PROMPT.md"),
+        )
+        .expect("first prompt should read"),
+        "First prompt."
+    );
+    assert_eq!(
+        fs::read_to_string(
+            prompt_pack_root
+                .join("portrait-pack")
+                .join("xx-2")
+                .join("PROMPT.md"),
+        )
+        .expect("second prompt should read"),
+        "Second prompt."
+    );
+}
+
+#[test]
+fn evaluation_config_tests_user_prompt_pack_keeps_json_like_markdown_literal() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let json_like_markdown = r#"{"shared_preference":"Keep this literal markdown."}"#;
+
+    let pack = service
+        .create_global_prompt_pack(
+            "Json Looking Prompt",
+            vec!["literal".to_string()],
+            SceneProfile::General,
+            "user",
+            json_like_markdown,
+            12_000,
+        )
+        .expect("prompt pack should create");
+
+    assert_eq!(
+        service
+            .prompt_markdown_for_pack(&pack.prompt_pack_id)
+            .expect("prompt markdown should load")
+            .expect("prompt markdown should exist"),
+        json_like_markdown
+    );
+
+    let prompt_file = service
+        .storage_state_dir()
+        .expect("storage state dir should resolve")
+        .join("prompt-packs")
+        .join("user")
+        .join(&pack.prompt_pack_id)
+        .join("PROMPT.md");
+    assert_eq!(
+        fs::read_to_string(prompt_file).expect("prompt markdown should read"),
+        json_like_markdown
+    );
+}
+
+#[test]
+fn evaluation_config_tests_delete_user_prompt_pack_removes_files_and_project_references() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let project = service
+        .create_project("Prompt Delete Project")
+        .expect("project should create");
+    let pack = service
+        .create_global_prompt_pack(
+            "Delete Me",
+            vec!["custom".to_string()],
+            SceneProfile::General,
+            "my-pack",
+            "Temporary preference.",
+            13_000,
+        )
+        .expect("prompt pack should create");
+    let prompt_pack_dir = service
+        .storage_state_dir()
+        .expect("storage state dir should resolve")
+        .join("prompt-packs")
+        .join("my-pack")
+        .join(&pack.prompt_pack_id);
+
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should load")
+        .expect("settings should exist");
+    settings.prompt_pack_id = Some(pack.prompt_pack_id.clone());
+    service
+        .save_project_evaluation_settings(settings)
+        .expect("settings should save selected prompt pack");
+
+    let deleted = service
+        .delete_global_prompt_pack(&pack.prompt_pack_id)
+        .expect("prompt pack should delete");
+
+    assert!(deleted);
+    assert!(!prompt_pack_dir.exists());
+    assert!(service
+        .prompt_pack_by_id(&pack.prompt_pack_id)
+        .expect("prompt pack lookup should succeed")
+        .is_none());
+    assert_eq!(
+        service
+            .project_evaluation_settings(&project.project_id)
+            .expect("settings should reload")
+            .expect("settings should exist")
+            .prompt_pack_id,
+        None
+    );
+}
+
+#[test]
+fn evaluation_config_tests_delete_built_in_prompt_pack_is_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+
+    let error = service
+        .delete_global_prompt_pack("general-default")
+        .expect_err("built-in prompt pack should not delete")
+        .to_string();
+
+    assert!(error.contains("built-in prompt packs cannot be deleted"));
+    assert!(service
+        .prompt_pack_by_id("general-default")
+        .expect("built-in prompt pack should still load")
+        .is_some());
+}
+
+#[test]
+fn evaluation_config_tests_delete_user_prompt_package_removes_all_packs_in_package() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    let project = service
+        .create_project("Prompt Package Delete Project")
+        .expect("project should create");
+    let first = service
+        .create_global_prompt_pack(
+            "Package One",
+            vec!["custom".to_string()],
+            SceneProfile::General,
+            "shareable-pack",
+            "First preference.",
+            14_000,
+        )
+        .expect("first prompt pack should create");
+    let second = service
+        .create_global_prompt_pack(
+            "Package Two",
+            vec!["custom".to_string()],
+            SceneProfile::Portrait,
+            "shareable-pack",
+            "Second preference.",
+            14_001,
+        )
+        .expect("second prompt pack should create");
+    let other = service
+        .create_global_prompt_pack(
+            "Other Package",
+            vec!["custom".to_string()],
+            SceneProfile::General,
+            "other-pack",
+            "Other preference.",
+            14_002,
+        )
+        .expect("other prompt pack should create");
+
+    let mut settings = service
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should load")
+        .expect("settings should exist");
+    settings.prompt_pack_id = Some(second.prompt_pack_id.clone());
+    service
+        .save_project_evaluation_settings(settings)
+        .expect("settings should save selected prompt pack");
+
+    let deleted = service
+        .delete_global_prompt_package("shareable-pack")
+        .expect("prompt package should delete");
+
+    assert!(deleted);
+    assert!(service
+        .prompt_pack_by_id(&first.prompt_pack_id)
+        .expect("first lookup should succeed")
+        .is_none());
+    assert!(service
+        .prompt_pack_by_id(&second.prompt_pack_id)
+        .expect("second lookup should succeed")
+        .is_none());
+    assert!(service
+        .prompt_pack_by_id(&other.prompt_pack_id)
+        .expect("other lookup should succeed")
+        .is_some());
+    assert_eq!(
+        service
+            .project_evaluation_settings(&project.project_id)
+            .expect("settings should reload")
+            .expect("settings should exist")
+            .prompt_pack_id,
+        None
+    );
+    assert!(!service
+        .storage_state_dir()
+        .expect("storage state dir should resolve")
+        .join("prompt-packs")
+        .join("shareable-pack")
+        .exists());
+}
+
+#[test]
+fn evaluation_config_tests_delete_built_in_prompt_package_is_rejected() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+
+    let error = service
+        .delete_global_prompt_package("builtin")
+        .expect_err("built-in prompt package should not delete")
+        .to_string();
+
+    assert!(error.contains("built-in prompt package cannot be deleted"));
+}
+
+#[test]
+fn evaluation_config_tests_corrupt_user_prompt_pack_reports_load_error() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+    service
+        .create_global_prompt_pack(
+            "Broken Pack",
+            vec!["broken".to_string()],
+            SceneProfile::General,
+            "user",
+            "This prompt will be corrupted.",
+            11_000,
+        )
+        .expect("prompt pack should create");
+
+    let manifest_file = fs::read_dir(
+        service
+            .storage_state_dir()
+            .expect("storage state dir should resolve")
+            .join("prompt-packs")
+            .join("user"),
+    )
+    .expect("prompt pack root should exist")
+    .filter_map(|entry| entry.ok())
+    .map(|entry| entry.path().join("manifest.json"))
+    .find(|path| path.exists())
+    .expect("manifest should exist");
+    fs::write(manifest_file, "{not valid json").expect("manifest should corrupt");
+
+    let error = service
+        .global_prompt_packs()
+        .expect_err("corrupt user prompt pack should fail loudly")
+        .to_string();
+    assert!(!error.contains("prompt pack not found"));
 }
 
 #[test]
@@ -64,11 +381,6 @@ fn evaluation_config_tests_enums_round_trip_and_fallback() {
         ModelSendMode::from_str("unexpected"),
         ModelSendMode::PreviewOnly
     );
-
-    for variant in [PromptScope::Global, PromptScope::Project] {
-        assert_eq!(PromptScope::from_str(variant.as_str()), variant);
-    }
-    assert_eq!(PromptScope::from_str("unexpected"), PromptScope::Global);
 
     for variant in [
         SceneProfile::General,
@@ -307,132 +619,17 @@ fn evaluation_config_tests_delete_model_provider_profile_removes_only_that_resou
     assert_eq!(profiles[0].default_model, "gpt-photo-eval");
 }
 
-#[test]
-fn evaluation_config_tests_store_seeds_builtin_prompt_profiles_with_active_versions() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let profiles = store
-        .prompt_profiles_for_project("project-missing")
-        .expect("profiles should query");
-
-    let ids = profiles
-        .iter()
-        .map(|profile| profile.prompt_profile_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        ids,
-        vec![
-            "general-default",
-            "portrait-conservative",
-            "landscape-technical"
-        ]
-    );
-    assert!(profiles
-        .iter()
-        .all(|profile| profile.scope == PromptScope::Global));
-    assert!(profiles.iter().all(|profile| profile.built_in));
-    assert!(profiles.iter().all(|profile| profile.enabled));
-    assert_eq!(
-        profile_style_tags(&profiles, "general-default"),
-        vec!["general".to_string(), "balanced".to_string()]
-    );
-    assert_eq!(
-        profile_style_tags(&profiles, "portrait-conservative"),
-        vec!["portrait".to_string(), "conservative".to_string()]
-    );
-    assert_eq!(
-        profile_style_tags(&profiles, "landscape-technical"),
-        vec!["landscape".to_string(), "technical".to_string()]
-    );
-
-    for profile in profiles {
-        let active_version_id = profile
-            .active_version_id
-            .as_deref()
-            .expect("built-in profile should have active version");
-        let version = store
-            .prompt_profile_version(active_version_id)
-            .expect("version should query")
-            .expect("active version should exist");
-        assert_eq!(version.prompt_profile_id, profile.prompt_profile_id);
-        assert!(!version.prompt_text.is_empty());
-        assert!(!version.prompt_hash.is_empty());
-    }
-}
-
-#[test]
-fn evaluation_config_tests_builtin_prompt_seed_repairs_missing_builtins_when_custom_rows_exist() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let db_path = temp_dir.path().join("state.sqlite");
-    {
-        let store = SqliteStore::open(&db_path).expect("store should open");
-        let project = store
-            .create_project("Custom Prompt Project")
-            .expect("project should create");
-        store
-            .save_prompt_profile(PromptProfile {
-                prompt_profile_id: "custom-only".to_string(),
-                scope: PromptScope::Project,
-                project_id: Some(project.project_id),
-                name: "Custom Only".to_string(),
-                style_tags: vec!["custom".to_string()],
-                scene_profile: SceneProfile::Custom,
-                active_version_id: None,
-                built_in: false,
-                enabled: true,
-                created_at_ms: 10,
-                updated_at_ms: 10,
-            })
-            .expect("custom profile should save");
-    }
-    {
-        let connection = Connection::open(&db_path).expect("db should open");
-        connection
-            .execute("DELETE FROM prompt_profile_versions", [])
-            .expect("versions should delete");
-        connection
-            .execute(
-                "DELETE FROM prompt_profiles WHERE prompt_profile_id <> ?1",
-                params!["custom-only"],
-            )
-            .expect("built-ins should delete");
-    }
-
-    let reopened = SqliteStore::open(&db_path).expect("store should reopen");
-    let profiles = reopened
-        .prompt_profiles_for_project("project-missing")
-        .expect("profiles should query");
-    let ids = profiles
-        .iter()
-        .map(|profile| profile.prompt_profile_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(ids.contains(&"general-default"));
-    assert!(ids.contains(&"portrait-conservative"));
-    assert!(ids.contains(&"landscape-technical"));
-}
-
-fn profile_style_tags(profiles: &[PromptProfile], profile_id: &str) -> Vec<String> {
-    profiles
-        .iter()
-        .find(|profile| profile.prompt_profile_id == profile_id)
-        .expect("profile should be seeded")
-        .style_tags
-        .clone()
-}
-
 fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEvaluationSettings {
     camera_connector_core::ProjectEvaluationSettings {
         project_id: project_id.to_string(),
-        model_evaluation_enabled: false,
         auto_evaluate_on_upload: false,
         auto_burst_recommendation_enabled: true,
         project_recommendation_mode: ProjectRecommendationMode::Manual,
-        prompt_profile_id: None,
+        prompt_pack_id: None,
         model_provider_settings_id: None,
         scene_profile: SceneProfile::General,
         cv_policy: CvPolicy::Standard,
+        cv_policy_overrides: None,
         allow_risky_model_selects: false,
         max_image_side: None,
         batch_size: None,
@@ -441,414 +638,39 @@ fn base_project_settings(project_id: &str) -> camera_connector_core::ProjectEval
 }
 
 #[test]
-fn evaluation_config_tests_new_project_gets_default_evaluation_settings_with_model_evaluation_disabled(
-) {
+fn evaluation_config_tests_project_settings_round_trip_cv_policy_overrides() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
     let project = store
-        .create_project("Evaluation Defaults")
+        .create_project("Custom CV Policy")
         .expect("project should create");
+    let mut settings = base_project_settings(&project.project_id);
+    let mut policy = TechnicalAssessmentPolicy::standard();
+    policy.clipping_high_ratio = 0.07;
+    policy.clipping_high_connected_ratio = 0.11;
+    settings.cv_policy_overrides = Some(policy);
 
-    let settings = store
+    let saved = store
+        .save_project_evaluation_settings(settings.clone())
+        .expect("settings should save");
+    let reloaded = store
         .project_evaluation_settings(&project.project_id)
         .expect("settings should query")
         .expect("settings should exist");
 
-    assert_eq!(settings.project_id, project.project_id);
-    assert!(!settings.model_evaluation_enabled);
-    assert!(!settings.auto_evaluate_on_upload);
-    assert!(settings.auto_burst_recommendation_enabled);
-    assert_eq!(
-        settings.project_recommendation_mode,
-        ProjectRecommendationMode::Manual
-    );
-    assert_eq!(settings.prompt_profile_id, None);
-    assert_eq!(settings.scene_profile, SceneProfile::General);
-    assert_eq!(settings.cv_policy, CvPolicy::Standard);
-    assert!(!settings.allow_risky_model_selects);
-    assert_eq!(settings.max_image_side, None);
-    assert_eq!(settings.batch_size, None);
-}
+    assert_eq!(saved.cv_policy_overrides, Some(policy));
+    assert_eq!(reloaded.cv_policy_overrides, Some(policy));
 
-#[test]
-fn evaluation_config_tests_prompt_profile_and_version_save_query_preserves_prompt_text_and_hash() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let project = store
-        .create_project("Prompt Project")
-        .expect("project should create");
-    let profile = PromptProfile {
-        prompt_profile_id: "project-prompt".to_string(),
-        scope: PromptScope::Project,
-        project_id: Some(project.project_id.clone()),
-        name: "Project Prompt".to_string(),
-        style_tags: vec!["portrait".to_string(), "soft-light".to_string()],
-        scene_profile: SceneProfile::Portrait,
-        active_version_id: None,
-        built_in: false,
-        enabled: true,
-        created_at_ms: 2000,
-        updated_at_ms: 2000,
-    };
-    let version = PromptProfileVersion {
-        prompt_version_id: "project-prompt-v1".to_string(),
-        prompt_profile_id: "project-prompt".to_string(),
-        prompt_text: "Judge focus, expression, and skin tone conservatively.".to_string(),
-        output_schema_version: "model-evaluation-v1".to_string(),
-        prompt_hash: "hash-project-prompt-v1".to_string(),
-        created_at_ms: 2100,
-    };
-
-    store
-        .save_prompt_profile(profile)
-        .expect("profile should save");
-    store
-        .save_prompt_profile_version(version.clone())
-        .expect("version should save");
-
-    let loaded = store
-        .prompt_profile_version("project-prompt-v1")
-        .expect("version should query")
-        .expect("version should exist");
-    assert_eq!(loaded, version);
-
-    let mut loaded_profiles = store
-        .prompt_profiles_for_project(&project.project_id)
-        .expect("profiles should query");
-    loaded_profiles.retain(|loaded| loaded.prompt_profile_id == "project-prompt");
-    assert_eq!(loaded_profiles.len(), 1);
-    assert_eq!(
-        loaded_profiles[0].style_tags,
-        vec!["portrait".to_string(), "soft-light".to_string()]
-    );
-}
-
-#[test]
-fn evaluation_config_tests_rejects_orphan_prompt_version_with_foreign_keys_enabled() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let version = PromptProfileVersion {
-        prompt_version_id: "orphan-version".to_string(),
-        prompt_profile_id: "missing-profile".to_string(),
-        prompt_text: "This should not persist.".to_string(),
-        output_schema_version: "model-evaluation-v1".to_string(),
-        prompt_hash: "hash-orphan".to_string(),
-        created_at_ms: 42,
-    };
-
-    assert!(store.save_prompt_profile_version(version).is_err());
-    assert!(store
-        .prompt_profile_version("orphan-version")
-        .expect("version lookup should query")
-        .is_none());
-}
-
-#[test]
-fn evaluation_config_tests_rejects_inconsistent_prompt_profiles() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let project = store
-        .create_project("Prompt Validation Project")
-        .expect("project should create");
-
-    assert!(store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "bad-global".to_string(),
-            scope: PromptScope::Global,
-            project_id: Some(project.project_id.clone()),
-            name: "Bad Global".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 100,
-        })
-        .is_err());
-
-    assert!(store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "bad-project".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some("missing-project".to_string()),
-            name: "Bad Project".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 100,
-        })
-        .is_err());
-
-    store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "profile-a".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id.clone()),
-            name: "Profile A".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 100,
-        })
-        .expect("profile a should save");
-    store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "profile-b".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id.clone()),
-            name: "Profile B".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 100,
-        })
-        .expect("profile b should save");
-    store
-        .save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: "profile-b-v1".to_string(),
-            prompt_profile_id: "profile-b".to_string(),
-            prompt_text: "Profile B text".to_string(),
-            output_schema_version: "model-evaluation-v1".to_string(),
-            prompt_hash: "hash-profile-b".to_string(),
-            created_at_ms: 110,
-        })
-        .expect("profile b version should save");
-
-    assert!(store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "profile-a".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id),
-            name: "Profile A".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: Some("profile-b-v1".to_string()),
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 120,
-        })
-        .is_err());
-}
-
-#[test]
-fn evaluation_config_tests_rejects_inconsistent_project_evaluation_settings() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let first_project = store
-        .create_project("First Project")
-        .expect("first project should create");
-    let second_project = store
-        .create_project("Second Project")
-        .expect("second project should create");
-    let second_profile = PromptProfile {
-        prompt_profile_id: "second-project-profile".to_string(),
-        scope: PromptScope::Project,
-        project_id: Some(second_project.project_id.clone()),
-        name: "Second Project Profile".to_string(),
-        style_tags: vec![],
-        scene_profile: SceneProfile::General,
-        active_version_id: None,
-        built_in: false,
-        enabled: true,
-        created_at_ms: 100,
-        updated_at_ms: 100,
-    };
-    store
-        .save_prompt_profile(second_profile)
-        .expect("second project profile should save");
-
-    let mut settings = base_project_settings(&first_project.project_id);
-    settings.model_evaluation_enabled = true;
-    settings.prompt_profile_id = None;
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = false;
-    settings.prompt_profile_id = Some("missing-profile".to_string());
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.prompt_profile_id = Some("second-project-profile".to_string());
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
-    store
-        .save_project_evaluation_settings(settings.clone())
-        .expect("global prompt profile should be accepted");
-
-    let first_profile = PromptProfile {
-        prompt_profile_id: "first-project-profile".to_string(),
-        scope: PromptScope::Project,
-        project_id: Some(first_project.project_id.clone()),
-        name: "First Project Profile".to_string(),
-        style_tags: vec![],
-        scene_profile: SceneProfile::General,
-        active_version_id: None,
-        built_in: false,
-        enabled: true,
-        created_at_ms: 100,
-        updated_at_ms: 100,
-    };
-    store
-        .save_prompt_profile(first_profile)
-        .expect("first project profile should save");
-    store
-        .save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: "first-project-profile-v1".to_string(),
-            prompt_profile_id: "first-project-profile".to_string(),
-            prompt_text: "First project prompt text".to_string(),
-            output_schema_version: "model-evaluation-v1".to_string(),
-            prompt_hash: "hash-first-project".to_string(),
-            created_at_ms: 110,
-        })
-        .expect("first project profile version should save");
-    settings.prompt_profile_id = Some("first-project-profile".to_string());
+    settings.cv_policy_overrides = None;
     store
         .save_project_evaluation_settings(settings)
-        .expect("same project prompt profile should be accepted");
-}
+        .expect("settings should clear override");
+    let cleared = store
+        .project_evaluation_settings(&project.project_id)
+        .expect("settings should reload")
+        .expect("settings should exist");
 
-#[test]
-fn evaluation_config_tests_project_settings_require_usable_prompt_profiles() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let project = store
-        .create_project("Prompt Usability Project")
-        .expect("project should create");
-
-    store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "disabled-project-profile".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id.clone()),
-            name: "Disabled Project Profile".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 100,
-            updated_at_ms: 100,
-        })
-        .expect("disabled profile should initially save");
-    store
-        .save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: "disabled-project-profile-v1".to_string(),
-            prompt_profile_id: "disabled-project-profile".to_string(),
-            prompt_text: "Disabled prompt text".to_string(),
-            output_schema_version: "model-evaluation-v1".to_string(),
-            prompt_hash: "hash-disabled".to_string(),
-            created_at_ms: 110,
-        })
-        .expect("disabled profile version should save");
-    store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "disabled-project-profile".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id.clone()),
-            name: "Disabled Project Profile".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: Some("disabled-project-profile-v1".to_string()),
-            built_in: false,
-            enabled: false,
-            created_at_ms: 100,
-            updated_at_ms: 120,
-        })
-        .expect("disabled profile should update");
-
-    store
-        .save_prompt_profile(PromptProfile {
-            prompt_profile_id: "no-active-project-profile".to_string(),
-            scope: PromptScope::Project,
-            project_id: Some(project.project_id.clone()),
-            name: "No Active Project Profile".to_string(),
-            style_tags: vec![],
-            scene_profile: SceneProfile::General,
-            active_version_id: None,
-            built_in: false,
-            enabled: true,
-            created_at_ms: 200,
-            updated_at_ms: 200,
-        })
-        .expect("no-active profile should save");
-
-    let mut settings = base_project_settings(&project.project_id);
-    settings.model_evaluation_enabled = true;
-    settings.prompt_profile_id = Some("disabled-project-profile".to_string());
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = false;
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = true;
-    settings.prompt_profile_id = Some("no-active-project-profile".to_string());
-    assert!(store
-        .save_project_evaluation_settings(settings.clone())
-        .is_err());
-
-    settings.model_evaluation_enabled = false;
-    settings.prompt_profile_id = None;
-    store
-        .save_project_evaluation_settings(settings.clone())
-        .expect("disabled model evaluation may omit prompt");
-
-    settings.model_evaluation_enabled = true;
-    settings.prompt_profile_id = Some("general-default".to_string());
-    store
-        .save_project_evaluation_settings(settings.clone())
-        .expect("enabled model evaluation accepts usable global prompt");
-
-    let project_profile = PromptProfile {
-        prompt_profile_id: "usable-project-profile".to_string(),
-        scope: PromptScope::Project,
-        project_id: Some(project.project_id.clone()),
-        name: "Usable Project Profile".to_string(),
-        style_tags: vec![],
-        scene_profile: SceneProfile::General,
-        active_version_id: None,
-        built_in: false,
-        enabled: true,
-        created_at_ms: 300,
-        updated_at_ms: 300,
-    };
-    store
-        .save_prompt_profile(project_profile)
-        .expect("usable profile should save");
-    store
-        .save_prompt_profile_version(PromptProfileVersion {
-            prompt_version_id: "usable-project-profile-v1".to_string(),
-            prompt_profile_id: "usable-project-profile".to_string(),
-            prompt_text: "Usable prompt text".to_string(),
-            output_schema_version: "model-evaluation-v1".to_string(),
-            prompt_hash: "hash-usable".to_string(),
-            created_at_ms: 310,
-        })
-        .expect("usable profile version should save");
-    settings.prompt_profile_id = Some("usable-project-profile".to_string());
-    store
-        .save_project_evaluation_settings(settings)
-        .expect("enabled model evaluation accepts usable project prompt");
+    assert_eq!(cleared.cv_policy_overrides, None);
 }
 
 #[test]
@@ -866,8 +688,8 @@ fn evaluation_config_tests_evaluation_run_save_query_preserves_manual_trigger_an
         status: EvaluationRunStatus::Ready,
         provider_kind: ModelProviderKind::Imported,
         provider_model: "imported-evaluator-v1".to_string(),
-        prompt_profile_id: Some("general-default".to_string()),
-        prompt_version_id: Some("general-default-v1".to_string()),
+        prompt_pack_id: Some("general-default".to_string()),
+        prompt_pack_version: Some("general-default-v1".to_string()),
         prompt_hash: Some("builtin-general-default-v1".to_string()),
         settings_snapshot_json: "{\"manual\":true}".to_string(),
         error_message: None,

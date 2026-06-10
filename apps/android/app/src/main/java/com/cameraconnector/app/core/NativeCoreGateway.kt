@@ -106,6 +106,13 @@ class NativeCoreGateway(
         refresh()
     }
 
+    override suspend fun deleteProjectGroup(projectId: String, groupId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteProjectGroup(projectId, groupId)
+        }
+        refresh()
+    }
+
     override suspend fun setAssetGroupUserMarks(
         projectId: String,
         groupId: String,
@@ -220,6 +227,7 @@ class NativeCoreGateway(
         name: String,
         styleTags: List<String>,
         sceneProfile: String,
+        distributionFolder: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
@@ -231,6 +239,7 @@ class NativeCoreGateway(
                     name,
                     tagsJson.toString(),
                     sceneProfile,
+                    distributionFolder,
                     promptText,
                 ),
             )
@@ -239,18 +248,44 @@ class NativeCoreGateway(
     override suspend fun forkGlobalPromptProfile(
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name))
+            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name, distributionFolder))
         }
 
-    override suspend fun saveGlobalPromptProfileVersion(
-        promptProfileId: String,
+    override suspend fun saveGlobalPromptPack(
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.saveGlobalPromptVersion(promptProfileId, promptText))
+            val tagsJson = JSONArray()
+            styleTags.forEach { tagsJson.put(it) }
+            mapPromptProfile(
+                nativeCore.saveGlobalPromptVersion(
+                    promptPackId,
+                    name,
+                    tagsJson.toString(),
+                    sceneProfile,
+                    promptText,
+                ),
+            )
         }
+
+    override suspend fun deleteGlobalPromptPack(promptPackId: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteGlobalPromptPack(promptPackId)
+        }
+    }
+
+    override suspend fun deleteGlobalPromptPackage(distributionFolder: String) {
+        withContext(Dispatchers.IO) {
+            nativeCore.deleteGlobalPromptPackage(distributionFolder)
+        }
+    }
 
     override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
         withContext(Dispatchers.IO) {
@@ -261,18 +296,33 @@ class NativeCoreGateway(
         projectId: String,
         sourceProfileId: String,
         name: String,
+        distributionFolder: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name))
+            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name, distributionFolder))
         }
 
-    override suspend fun savePromptProfileVersion(
+    override suspend fun savePromptPack(
         projectId: String,
-        promptProfileId: String,
+        promptPackId: String,
+        name: String,
+        styleTags: List<String>,
+        sceneProfile: String,
         promptText: String,
     ): PromptProfileUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.savePromptVersion(projectId, promptProfileId, promptText))
+            val tagsJson = JSONArray()
+            styleTags.forEach { tagsJson.put(it) }
+            mapPromptProfile(
+                nativeCore.savePromptVersion(
+                    projectId,
+                    promptPackId,
+                    name,
+                    tagsJson.toString(),
+                    sceneProfile,
+                    promptText,
+                ),
+            )
         }
 
     override suspend fun generateProjectRecommendation(projectId: String): EvaluationRunUi =
@@ -815,14 +865,14 @@ internal fun ModelProviderSettingsUi.toModelProviderSettingsJson(): JSONObject =
 internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationSettingsUi =
     ProjectEvaluationSettingsUi(
         projectId = value.optString("project_id"),
-        modelEvaluationEnabled = value.optBoolean("model_evaluation_enabled", false),
         autoEvaluateOnUpload = value.optBoolean("auto_evaluate_on_upload", false),
         autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
         projectRecommendationMode = "manual",
-        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
+        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
         modelProviderSettingsId = jsonStringOrNull(value, "model_provider_settings_id"),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
         cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
+        cvPolicyOverrides = value.optJSONObject("cv_policy_overrides")?.toTechnicalAssessmentPolicyUi(),
         allowRiskyModelSelects = value.optBoolean("allow_risky_model_selects", false),
         maxImageSide = value.optIntOrNull("max_image_side"),
         batchSize = value.optIntOrNull("batch_size"),
@@ -832,18 +882,55 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
 internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSONObject =
     JSONObject()
         .put("project_id", projectId)
-        .put("model_evaluation_enabled", modelEvaluationEnabled)
         .put("auto_evaluate_on_upload", autoEvaluateOnUpload)
         .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
         .put("project_recommendation_mode", "manual")
-        .put("prompt_profile_id", promptProfileId ?: JSONObject.NULL)
+        .put("prompt_pack_id", promptProfileId ?: JSONObject.NULL)
         .put("model_provider_settings_id", modelProviderSettingsId ?: JSONObject.NULL)
         .put("scene_profile", sceneProfile.ifBlank { "general" })
         .put("cv_policy", cvPolicy.ifBlank { "standard" })
+        .put("cv_policy_overrides", cvPolicyOverrides?.toJson() ?: JSONObject.NULL)
         .put("allow_risky_model_selects", allowRiskyModelSelects)
         .put("max_image_side", maxImageSide ?: JSONObject.NULL)
         .put("batch_size", batchSize ?: JSONObject.NULL)
         .put("updated_at_ms", updatedAtMs)
+
+private fun JSONObject.toTechnicalAssessmentPolicyUi(): TechnicalAssessmentPolicyUi =
+    TechnicalAssessmentPolicyUi(
+        blurSevereEdgeThreshold = optDouble("blur_severe_edge_threshold"),
+        blurSevereFrequencyThreshold = optDouble("blur_severe_frequency_threshold"),
+        blurHighEdgeThreshold = optDouble("blur_high_edge_threshold"),
+        blurHighFrequencyThreshold = optDouble("blur_high_frequency_threshold"),
+        highlightClipThreshold = optInt("highlight_clip_threshold"),
+        shadowClipThreshold = optInt("shadow_clip_threshold"),
+        clippingHighRatio = optDouble("clipping_high_ratio"),
+        clippingHighConnectedRatio = optDouble("clipping_high_connected_ratio"),
+        clippingSevereRatio = optDouble("clipping_severe_ratio"),
+        clippingSevereConnectedRatio = optDouble("clipping_severe_connected_ratio"),
+        colorCastHighThreshold = optDouble("color_cast_high_threshold"),
+        colorCastSevereThreshold = optDouble("color_cast_severe_threshold"),
+        faceEyeOpenWarnThreshold = optDouble("face_eye_open_warn_threshold", 0.35),
+        faceExposureWarnRatio = optDouble("face_exposure_warn_ratio", 0.25),
+        faceColorCastWarnThreshold = optDouble("face_color_cast_warn_threshold", 0.42),
+    )
+
+private fun TechnicalAssessmentPolicyUi.toJson(): JSONObject =
+    JSONObject()
+        .put("blur_severe_edge_threshold", blurSevereEdgeThreshold)
+        .put("blur_severe_frequency_threshold", blurSevereFrequencyThreshold)
+        .put("blur_high_edge_threshold", blurHighEdgeThreshold)
+        .put("blur_high_frequency_threshold", blurHighFrequencyThreshold)
+        .put("highlight_clip_threshold", highlightClipThreshold)
+        .put("shadow_clip_threshold", shadowClipThreshold)
+        .put("clipping_high_ratio", clippingHighRatio)
+        .put("clipping_high_connected_ratio", clippingHighConnectedRatio)
+        .put("clipping_severe_ratio", clippingSevereRatio)
+        .put("clipping_severe_connected_ratio", clippingSevereConnectedRatio)
+        .put("color_cast_high_threshold", colorCastHighThreshold)
+        .put("color_cast_severe_threshold", colorCastSevereThreshold)
+        .put("face_eye_open_warn_threshold", faceEyeOpenWarnThreshold)
+        .put("face_exposure_warn_ratio", faceExposureWarnRatio)
+        .put("face_color_cast_warn_threshold", faceColorCastWarnThreshold)
 
 internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
     if (profiles == null) {
@@ -857,35 +944,28 @@ internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
 }
 
 internal fun mapPromptProfile(value: JSONObject): PromptProfileUi {
-    val activePromptText = jsonStringOrNull(value, "active_prompt_text")
-    val promptContent = parsePromptProfileContent(activePromptText)
-    val sharedPreference = promptContent?.optString("shared_preference")
+    val activePromptText = jsonStringOrNull(value, "prompt_text")
+    val promptMarkdown = activePromptText
         ?.trim()
         ?.takeIf { it.isNotBlank() }
-        ?: activePromptText
     return PromptProfileUi(
-        promptProfileId = value.optString("prompt_profile_id"),
-        scope = value.optString("scope").ifBlank { "global" },
-        projectId = jsonStringOrNull(value, "project_id"),
+        promptProfileId = value.optString("prompt_pack_id"),
+        distributionFolder = value.optString("distribution_folder").ifBlank { "user" },
+        scope = if (value.optBoolean("built_in", false)) "built_in" else "user",
+        projectId = null,
         name = value.optString("name"),
         styleTags = value.optJSONArray("style_tags").toStringList(),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
-        activeVersionId = jsonStringOrNull(value, "active_version_id"),
+        activeVersionId = jsonStringOrNull(value, "version"),
         builtIn = value.optBoolean("built_in", false),
         enabled = value.optBoolean("enabled", true),
-        activePromptText = sharedPreference,
-        sharedPreference = sharedPreference,
-        evaluationInstruction = jsonStringOrNull(promptContent, "evaluation_instruction"),
-        burstSelectionInstruction = jsonStringOrNull(promptContent, "burst_selection_instruction"),
-        projectSelectionInstruction = jsonStringOrNull(promptContent, "project_selection_instruction"),
+        activePromptText = promptMarkdown,
+        sharedPreference = promptMarkdown,
+        evaluationInstruction = null,
+        burstSelectionInstruction = null,
+        projectSelectionInstruction = null,
     )
 }
-
-private fun parsePromptProfileContent(value: String?): JSONObject? =
-    value
-        ?.trim()
-        ?.takeIf { it.startsWith("{") }
-        ?.let { runCatching { JSONObject(it) }.getOrNull() }
 
 internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
     EvaluationRunUi(
@@ -896,8 +976,8 @@ internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
         status = value.optString("status"),
         providerKind = value.optString("provider_kind").ifBlank { "none" },
         providerModel = value.optString("provider_model"),
-        promptProfileId = jsonStringOrNull(value, "prompt_profile_id"),
-        promptVersionId = jsonStringOrNull(value, "prompt_version_id"),
+        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
+        promptVersionId = jsonStringOrNull(value, "prompt_pack_version"),
         promptHash = jsonStringOrNull(value, "prompt_hash"),
         errorMessage = jsonStringOrNull(value, "error_message"),
         startedAtMs = value.optLongOrNull("started_at_ms"),

@@ -180,7 +180,6 @@ selected prompt version and project scene profile determine behavior.
 ```text
 project_evaluation_settings
   project_id TEXT PRIMARY KEY
-  model_evaluation_enabled INTEGER NOT NULL
   auto_evaluate_on_upload INTEGER NOT NULL
   auto_burst_recommendation_enabled INTEGER NOT NULL
   project_recommendation_mode TEXT NOT NULL  -- manual
@@ -300,8 +299,7 @@ publish completed
   -> enqueue universal technical assessment
   -> if project.scene_profile == portrait:
        enqueue portrait subject assessment
-  -> if project.model_evaluation_enabled
-       and project.auto_evaluate_on_upload
+  -> if project.auto_evaluate_on_upload
        and provider is configured:
        enqueue asset model evaluation
   -> if provider missing:
@@ -415,9 +413,9 @@ When API key/provider is missing:
 
 ### Pipeline
 
-- Universal technical assessment runs even when model evaluation is disabled.
+- Universal technical assessment always runs independently of model provider state.
 - Portrait subject assessment runs only for portrait projects.
-- Auto model evaluation runs only when project setting is enabled and provider
+- Auto model evaluation runs only when upload-time evaluation is enabled and provider
   is configured.
 - Auto burst recommendation is project-configurable.
 - Project recommendation is manual-only.

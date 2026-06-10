@@ -9,8 +9,7 @@ pub use burst::{BurstGroup, BurstGroupingProfile};
 pub use config::{
     CvPolicy, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType,
     ModelProviderKind, ModelProviderSettings, ModelSendMode, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
-    PromptScope, SceneProfile, SubjectAssessment,
+    ProjectRecommendationMode, PromptPack, PromptPackContent, SceneProfile, SubjectAssessment,
 };
 pub use jobs::{
     AnalysisEntityType, AnalysisJob, AnalysisJobStatus, AnalysisJobType, NewAnalysisJob,
@@ -27,6 +26,7 @@ pub use recommendation::{
     SelectionSource,
 };
 pub use technical::{
-    assess_preview_sample, PreviewSample, TechnicalAssessment, TechnicalAssessmentStatus,
-    TechnicalDefectFlag, TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+    assess_preview_sample, assess_preview_sample_with_policy, PreviewSample, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
+    TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
 };

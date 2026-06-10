@@ -1,5 +1,6 @@
 package com.cameraconnector.app.ui
 
+import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.EvaluationRunUi
 import com.cameraconnector.app.core.PhotoSortMode
 import com.cameraconnector.app.core.ProjectAsset
@@ -9,6 +10,7 @@ import com.cameraconnector.app.core.ProjectAssetUserMarks
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.TechnicalAssessmentPolicyUi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,6 +18,176 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProjectUiModelsTest {
+    @Test
+    fun cvThresholdControlSpecsExposeUserFacingRiskKnobsInsteadOfInternalThresholds() {
+        val controls = cvThresholdControlSpecs(
+            TechnicalAssessmentPolicyUi(
+                blurSevereEdgeThreshold = 0.04,
+                blurSevereFrequencyThreshold = 0.04,
+                blurHighEdgeThreshold = 0.12,
+                blurHighFrequencyThreshold = 0.12,
+                highlightClipThreshold = 245,
+                shadowClipThreshold = 10,
+                clippingHighRatio = 0.12,
+                clippingHighConnectedRatio = 0.18,
+                clippingSevereRatio = 0.50,
+                clippingSevereConnectedRatio = 0.50,
+                colorCastHighThreshold = 0.42,
+                colorCastSevereThreshold = 0.70,
+                faceEyeOpenWarnThreshold = 0.35,
+                faceExposureWarnRatio = 0.25,
+                faceColorCastWarnThreshold = 0.42,
+            ),
+        )
+
+        assertEquals(
+            listOf("失焦灵敏度", "死黑/死白灵敏度", "偏色灵敏度"),
+            controls.map { it.title },
+        )
+        assertEquals(38, controls.first { it.key == CvThresholdControlKey.BlurHigh }.displayPercent)
+        assertEquals(
+            59,
+            controls.first { it.key == CvThresholdControlKey.Clipping }.displayPercent,
+        )
+        assertEquals(
+            56,
+            controls.first { it.key == CvThresholdControlKey.ColorCast }.displayPercent,
+        )
+        assertEquals(
+            "当前：边缘和高频细节都低于 12% 时标记失焦；低于 4% 视为严重。",
+            controls.first { it.key == CvThresholdControlKey.BlurHigh }.description,
+        )
+        assertEquals(
+            "当前：近黑 <=10 / 近白 >=245，占比超过 12% 或连片超过 18% 时标记；50% 以上视为严重。",
+            controls.first { it.key == CvThresholdControlKey.Clipping }.description,
+        )
+        assertEquals(
+            "当前：RGB 通道相对亮度差异超过 0.42 时标记偏色；超过 0.70 视为严重。",
+            controls.first { it.key == CvThresholdControlKey.ColorCast }.description,
+        )
+    }
+
+    @Test
+    fun portraitCvThresholdControlSpecsExposeFaceSpecificRiskKnobs() {
+        val controls = cvThresholdControlSpecs(
+            TechnicalAssessmentPolicyUi(
+                blurSevereEdgeThreshold = 0.04,
+                blurSevereFrequencyThreshold = 0.04,
+                blurHighEdgeThreshold = 0.12,
+                blurHighFrequencyThreshold = 0.12,
+                highlightClipThreshold = 245,
+                shadowClipThreshold = 10,
+                clippingHighRatio = 0.12,
+                clippingHighConnectedRatio = 0.18,
+                clippingSevereRatio = 0.50,
+                clippingSevereConnectedRatio = 0.50,
+                colorCastHighThreshold = 0.42,
+                colorCastSevereThreshold = 0.70,
+                faceEyeOpenWarnThreshold = 0.35,
+                faceExposureWarnRatio = 0.25,
+                faceColorCastWarnThreshold = 0.42,
+            ),
+            sceneProfile = "portrait",
+        )
+
+        assertEquals(
+            listOf(
+                CvThresholdControlKey.BlurHigh,
+                CvThresholdControlKey.Clipping,
+                CvThresholdControlKey.ColorCast,
+                CvThresholdControlKey.FaceEyes,
+                CvThresholdControlKey.FaceExposure,
+                CvThresholdControlKey.FaceColorCast,
+            ),
+            controls.map { it.key },
+        )
+    }
+
+    @Test
+    fun cvThresholdControlUpdatesPairedTechnicalFields() {
+        val policy = TechnicalAssessmentPolicyUi(
+            blurSevereEdgeThreshold = 0.04,
+            blurSevereFrequencyThreshold = 0.04,
+            blurHighEdgeThreshold = 0.12,
+            blurHighFrequencyThreshold = 0.12,
+            highlightClipThreshold = 245,
+            shadowClipThreshold = 10,
+            clippingHighRatio = 0.12,
+            clippingHighConnectedRatio = 0.18,
+            clippingSevereRatio = 0.50,
+            clippingSevereConnectedRatio = 0.50,
+            colorCastHighThreshold = 0.42,
+            colorCastSevereThreshold = 0.70,
+            faceEyeOpenWarnThreshold = 0.35,
+            faceExposureWarnRatio = 0.25,
+            faceColorCastWarnThreshold = 0.42,
+        )
+
+        val blurUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.BlurHigh, 0.75)
+        assertEquals(0.18, blurUpdated.blurHighEdgeThreshold, 0.0001)
+        assertEquals(0.18, blurUpdated.blurHighFrequencyThreshold, 0.0001)
+
+        val clippingUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.Clipping, 1.0)
+        assertEquals(0.04, clippingUpdated.clippingHighRatio, 0.0001)
+        assertEquals(0.04, clippingUpdated.clippingHighConnectedRatio, 0.0001)
+        assertEquals(0.35, clippingUpdated.clippingSevereRatio, 0.0001)
+        assertEquals(0.35, clippingUpdated.clippingSevereConnectedRatio, 0.0001)
+
+        val colorCastUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.ColorCast, 1.0)
+        assertEquals(0.28, colorCastUpdated.colorCastHighThreshold, 0.0001)
+        assertEquals(0.50, colorCastUpdated.colorCastSevereThreshold, 0.0001)
+
+        val faceEyesUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.FaceEyes, 1.0)
+        assertEquals(0.55, faceEyesUpdated.faceEyeOpenWarnThreshold, 0.0001)
+
+        val faceExposureUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.FaceExposure, 1.0)
+        assertEquals(0.12, faceExposureUpdated.faceExposureWarnRatio, 0.0001)
+
+        val faceColorCastUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.FaceColorCast, 1.0)
+        assertEquals(0.28, faceColorCastUpdated.faceColorCastWarnThreshold, 0.0001)
+    }
+
+    @Test
+    fun detailCarouselHeightKeepsLandscapePhotosCompact() {
+        assertEquals(300.dp, detailCarouselHeight(null))
+        assertEquals(220.dp, detailCarouselHeight(1.5f))
+        assertEquals(480.dp, detailCarouselHeight(0.67f))
+    }
+
+    @Test
+    fun detailInfoLinesArePreparedForCompactGrid() {
+        val asset = projectAsset(
+            id = "group-a",
+            displayPath = "DCIM/100/DSC_0001.JPG",
+        ).copy(
+            displaySource = "Verify Camera",
+            username = "camera-a",
+            originalPath = "DCIM/100/DSC_0001.JPG",
+            sizeBytes = 12_345,
+            rawPath = "DCIM/100/DSC_0001.NEF",
+            jpegPath = "DCIM/100/DSC_0001.JPG",
+        )
+
+        assertEquals(
+            listOf(
+                "来源" to "Verify Camera",
+                "账号" to "camera-a",
+                "原始路径" to "DCIM/100/DSC_0001.JPG",
+                "接收时间" to formatEpochMillisTextForDisplay(asset.receivedAt),
+                "文件大小" to "12345 bytes",
+            ),
+            photoDetailSourceLines(asset),
+        )
+        assertEquals(
+            listOf(
+                "位置" to "DCIM/100/DSC_0001.JPG",
+                "RAW" to "DCIM/100/DSC_0001.NEF",
+                "JPEG" to "DCIM/100/DSC_0001.JPG",
+            ),
+            photoDetailFileLines(asset),
+        )
+    }
+
     @Test
     fun globalDestinationsMatchProjectFirstNavigation() {
         assertEquals(listOf("项目", "账号", "设置"), GlobalDestination.entries.map { it.label })
@@ -29,11 +201,58 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun projectWorkspaceNavigationPreservesPhotoListAcrossBottomTabs() {
+        val openState = ProjectWorkspaceNavigationState(workspaceOpen = true)
+        val closedState = ProjectWorkspaceNavigationState(workspaceOpen = false)
+
+        assertTrue(
+            projectWorkspaceStateAfterBottomDestinationClick(
+                current = openState,
+                destination = GlobalDestination.Settings,
+            ).workspaceOpen,
+        )
+        assertTrue(
+            projectWorkspaceStateAfterBottomDestinationClick(
+                current = openState,
+                destination = GlobalDestination.Projects,
+            ).workspaceOpen,
+        )
+        assertFalse(
+            projectWorkspaceStateAfterBottomDestinationClick(
+                current = closedState,
+                destination = GlobalDestination.Projects,
+            ).workspaceOpen,
+        )
+        assertFalse(projectWorkspaceStateAfterOpenProjects(openState).workspaceOpen)
+    }
+
+    @Test
+    fun projectWorkspaceVisibilityNeedsBothUserIntentAndActiveProject() {
+        assertTrue(projectWorkspaceVisible(workspaceOpen = true, activeProjectId = "project-client"))
+        assertFalse(projectWorkspaceVisible(workspaceOpen = true, activeProjectId = null))
+        assertFalse(projectWorkspaceVisible(workspaceOpen = false, activeProjectId = "project-client"))
+    }
+
+    @Test
     fun projectPhotoCollectionLabelsUseCurrentProductSemantics() {
         assertEquals(
             listOf("全部", "模型优选", "收藏", "标记", "技术风险", "待分析"),
             ProjectPhotoCollection.entries.map { it.label },
         )
+    }
+
+    @Test
+    fun selectingProjectModelProviderDoesNotImplicitlyRequirePromptProfile() {
+        val settings = ProjectEvaluationSettingsUi(
+            projectId = "project-1",
+            modelProviderSettingsId = null,
+            promptProfileId = null,
+        )
+
+        val updated = projectSettingsAfterModelProviderSelection(settings, "provider-openai")
+
+        assertEquals("provider-openai", updated.modelProviderSettingsId)
+        assertNull(updated.promptProfileId)
     }
 
     @Test
@@ -142,6 +361,26 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun deletingPhotoFromDetailReturnsToListInsteadOfSiblingPhoto() {
+        val burst = ProjectAssetBurst(
+            burstGroupId = "burst-1",
+            memberCount = 2,
+            recommendationStatus = "ready",
+            bestAssetGroupId = "group-a",
+            bestScore = 0.88,
+        )
+        val first = projectAsset(id = "group-a").copy(burst = burst)
+        val second = projectAsset(id = "group-b").copy(burst = burst)
+        val burstMembers = listOf(
+            BurstMemberFilmstripItemUi(first, badgeText = "1/2", scoreText = null),
+            BurstMemberFilmstripItemUi(second, badgeText = "2/2", scoreText = null),
+        )
+
+        assertNull(photoDetailSelectionAfterDelete(first, burstMembers))
+        assertEquals(second, photoDetailSelectionAfterSplit(first, burstMembers))
+    }
+
+    @Test
     fun technicalRiskReasonsAreLocalizedForProjectGrid() {
         val asset = projectAsset(id = "group-risk").copy(
             technicalGateStatus = "warn",
@@ -156,6 +395,38 @@ class ProjectUiModelsTest {
         )
 
         assertEquals("细节偏软", asset.tileSmartMeta())
+    }
+
+    @Test
+    fun technicalRiskBadgesNormalizeBackendGateStatus() {
+        val asset = projectAsset(id = "group-risk").copy(
+            technicalGateStatus = " WARN ",
+        )
+
+        assertTrue(asset.hasTechnicalRisk())
+        assertEquals("风险", asset.tilePrimaryBadgeText())
+        assertEquals(ElementDanger, asset.tilePrimaryBadgeColor())
+        assertEquals("风险", asset.tileAnalysisBadgeText())
+        assertEquals("存在技术风险", asset.smartSummaryText())
+    }
+
+    @Test
+    fun algorithmRecommendationMatchesStableAssetSelectionId() {
+        val displayPath = "DCIM/100NIKON/DSC_0001.JPG"
+        val asset = projectAsset(id = "", displayPath = displayPath).copy(
+            groupKey = "DSC_0001",
+            burst = ProjectAssetBurst(
+                burstGroupId = "burst-1",
+                memberCount = 2,
+                recommendationStatus = "ready",
+                bestAssetGroupId = displayPath,
+                bestScore = 0.91,
+            ),
+        )
+
+        assertEquals(displayPath, asset.assetSelectionId())
+        assertTrue(asset.isBestRecommendedAsset())
+        assertEquals("优选", asset.recommendationBadgeText())
     }
 
     @Test
@@ -243,6 +514,13 @@ class ProjectUiModelsTest {
 
         assertEquals(listOf(single), targets.assetGroups)
         assertTrue(targets.burstGroups.isEmpty())
+    }
+
+    @Test
+    fun projectEvaluationFeedbackNamesBurstFlowAsEvaluation() {
+        assertEquals("已完成单张评价 2", projectEvaluationFeedback(2, 0))
+        assertEquals("已完成连拍评价 1", projectEvaluationFeedback(0, 1))
+        assertEquals("已完成单张评价 2 · 连拍评价 1", projectEvaluationFeedback(2, 1))
     }
 
     @Test

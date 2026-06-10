@@ -21,8 +21,33 @@ internal enum class ProjectDestination(val label: String) {
     Photos("照片"),
 }
 
+internal data class ProjectWorkspaceNavigationState(
+    val workspaceOpen: Boolean,
+)
+
 internal fun defaultProjectDestination(): ProjectDestination =
     ProjectDestination.Photos
+
+internal fun projectWorkspaceStateAfterBottomDestinationClick(
+    current: ProjectWorkspaceNavigationState,
+    destination: GlobalDestination,
+): ProjectWorkspaceNavigationState =
+    when (destination) {
+        GlobalDestination.Projects,
+        GlobalDestination.Accounts,
+        GlobalDestination.Settings -> current
+    }
+
+internal fun projectWorkspaceStateAfterOpenProjects(
+    current: ProjectWorkspaceNavigationState,
+): ProjectWorkspaceNavigationState =
+    current.copy(workspaceOpen = false)
+
+internal fun projectWorkspaceVisible(
+    workspaceOpen: Boolean,
+    activeProjectId: String?,
+): Boolean =
+    workspaceOpen && !activeProjectId.isNullOrBlank()
 
 internal fun ProjectDestination.assetScreenTitle(): String =
     "项目照片"
@@ -59,21 +84,6 @@ internal data class BurstPreviewTileUi(
     val modelSelected: Boolean,
     val auxiliaryBadges: List<String>,
 )
-
-internal data class ProjectIntelligenceSettingsUi(
-    val modelEvaluationEnabled: Boolean,
-    val autoEvaluateOnUpload: Boolean,
-    val autoBurstRecommendationEnabled: Boolean,
-    val projectRecommendationMode: String,
-    val sceneProfile: String,
-    val promptProfileId: String?,
-    val cvPolicy: String,
-    val allowRiskyModelSelects: Boolean,
-    val providerConfigured: Boolean,
-) {
-    val modelEvaluationToggleEnabled: Boolean
-        get() = providerConfigured
-}
 
 internal data class ManualProjectRecommendationActionUi(
     val enabled: Boolean,
@@ -153,22 +163,6 @@ internal fun ProjectState.groupMoveTargets(sourceProjectId: String?): List<Proje
     }
 }
 
-internal fun projectIntelligenceSettingsUi(
-    settings: ProjectEvaluationSettingsUi,
-    providerConfigured: Boolean,
-): ProjectIntelligenceSettingsUi =
-    ProjectIntelligenceSettingsUi(
-        modelEvaluationEnabled = settings.modelEvaluationEnabled && providerConfigured,
-        autoEvaluateOnUpload = settings.autoEvaluateOnUpload,
-        autoBurstRecommendationEnabled = settings.autoBurstRecommendationEnabled,
-        projectRecommendationMode = "manual",
-        sceneProfile = settings.sceneProfile.ifBlank { "general" },
-        promptProfileId = settings.promptProfileId,
-        cvPolicy = settings.cvPolicy.ifBlank { "standard" },
-        allowRiskyModelSelects = settings.allowRiskyModelSelects,
-        providerConfigured = providerConfigured,
-    )
-
 internal fun modelProviderReadyForProject(
     settings: ProjectEvaluationSettingsUi,
     providerOptions: List<ModelProviderSettingsUi>,
@@ -176,6 +170,12 @@ internal fun modelProviderReadyForProject(
     val selectedProviderId = settings.modelProviderSettingsId?.takeIf { it.isNotBlank() } ?: return false
     return providerOptions.firstOrNull { it.settingsId == selectedProviderId }?.isReadyForModelWork() == true
 }
+
+internal fun projectSettingsAfterModelProviderSelection(
+    settings: ProjectEvaluationSettingsUi,
+    providerSettingsId: String,
+): ProjectEvaluationSettingsUi =
+    settings.copy(modelProviderSettingsId = providerSettingsId)
 
 internal fun ModelProviderSettingsUi.isReadyForModelWork(): Boolean {
     if (!configured) {
@@ -209,6 +209,16 @@ internal fun promptProfileDisplayName(profile: PromptProfileUi): String {
         else -> name.ifBlank { "未命名提示词" }
     }
 }
+
+internal fun promptPackageFolder(profile: PromptProfileUi): String =
+    profile.distributionFolder.trim().ifBlank { "user" }
+
+internal fun promptPackageLabel(folder: String): String =
+    when (folder.trim().ifBlank { "user" }) {
+        "user" -> "我的提示词包"
+        "builtin" -> "内置提示词包"
+        else -> folder
+    }
 
 internal fun promptStyleTagLabel(value: String): String =
     when (value.trim().lowercase()) {
@@ -587,6 +597,19 @@ internal fun detailBurstMemberIndex(
         item.asset.assetSelectionId() == asset.assetSelectionId()
     }.takeIf { it >= 0 } ?: Int.MAX_VALUE
 
+internal fun photoDetailSelectionAfterDelete(
+    deletedAsset: ProjectAsset,
+    burstMembers: List<BurstMemberFilmstripItemUi>,
+): ProjectAsset? = null
+
+internal fun photoDetailSelectionAfterSplit(
+    splitAsset: ProjectAsset,
+    burstMembers: List<BurstMemberFilmstripItemUi>,
+): ProjectAsset? =
+    burstMembers
+        .map { it.asset }
+        .firstOrNull { it.assetSelectionId() != splitAsset.assetSelectionId() }
+
 internal fun adjacentProjectGridAsset(
     currentAsset: ProjectAsset,
     visibleAssets: List<ProjectAsset>,
@@ -752,7 +775,7 @@ private fun burstMemberBadgeText(asset: ProjectAsset, currentId: String): String
         asset.isBestRecommendedAsset() -> "\u6700\u4f73"
         asset.assetSelectionId() == currentId -> "\u5f53\u524d"
         (asset.modelScore ?: 100) < 40 -> "\u4f4e\u5206"
-        asset.technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "\u98ce\u9669"
+        asset.hasTechnicalRisk() -> "\u98ce\u9669"
         else -> "\u5907\u9009"
     }
 private fun burstMemberOrderComparator(): Comparator<ProjectAsset> =

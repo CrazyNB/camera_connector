@@ -88,7 +88,6 @@
   - `save_subject_assessment(assessment)`
   - `subject_assessments_for_asset_groups(project_id, group_ids)`
 - [ ] Default project settings must be:
-  - `model_evaluation_enabled = false`
   - `auto_evaluate_on_upload = false`
   - `auto_burst_recommendation_enabled = true`
   - `project_recommendation_mode = manual`
@@ -98,7 +97,7 @@
 - [ ] Tests in `core/tests/evaluation_config_tests.rs` must verify:
   - enum string round trips and unknown fallbacks.
   - built-in prompt profiles are seeded with active versions.
-  - default project settings are created for a new project and model evaluation is disabled.
+  - default project settings are created for a new project and concrete model actions are disabled.
   - prompt version save/query preserves prompt hash and prompt text.
   - evaluation run save/query preserves manual trigger and status.
   - subject assessment save/query round-trips a portrait face assessment.
@@ -133,14 +132,14 @@
   - update the profile's `active_version_id`.
 - [ ] `save_project_evaluation_settings` must:
   - force `project_recommendation_mode = manual`.
-  - reject missing prompt profile ids.
-  - allow `prompt_profile_id = null` only when model evaluation is disabled.
+  - allow missing prompt profile ids.
+  - reject invalid or unusable prompt profile ids when one is selected.
   - keep secrets out of SQLite.
 - [ ] Tests must verify:
   - editing a built-in prompt fails unless forked first.
   - forking creates a project-scoped editable prompt.
   - editing the project prompt creates a new version without deleting the old one.
-  - invalid prompt id is rejected when model evaluation is enabled.
+  - invalid prompt id is rejected when one is selected.
   - saved settings always preserve manual project recommendation mode.
 - [ ] Run: `cargo test -p camera_connector_core evaluation_config_tests service_tests`.
 
@@ -164,7 +163,6 @@
 - [ ] Update model evaluation persistence and tests to include those fields.
 - [ ] Add `provider_configured` input to the service/worker-facing evaluation drain path.
 - [ ] Upload-time model evaluation must be skipped when:
-  - project model evaluation is disabled.
   - auto evaluate on upload is disabled.
   - provider is not configured.
 - [ ] Universal technical assessment remains enabled regardless of provider state.
@@ -179,7 +177,7 @@
   - never run from upload-time drains.
 - [ ] Tests must verify:
   - no provider skips model evaluation but still writes technical assessment.
-  - project model evaluation disabled skips model evaluation jobs.
+  - upload-time evaluation disabled skips model evaluation jobs.
   - auto burst recommendation obeys project setting.
   - project recommendation is not produced by automatic drains.
   - manual project recommendation creates a run snapshot and project recommendation.
@@ -204,7 +202,6 @@
 - [ ] JSON shape must include no secret value fields.
 - [ ] Missing provider must be represented as `configured: false`.
 - [ ] Project settings JSON must include:
-  - `model_evaluation_enabled`
   - `auto_evaluate_on_upload`
   - `auto_burst_recommendation_enabled`
   - `project_recommendation_mode`

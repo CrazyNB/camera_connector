@@ -5,7 +5,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::config::{ModelProviderKind, ModelProviderSettings, PromptProfileContent};
+use super::config::{ModelProviderKind, ModelProviderSettings, PromptPackContent};
 use super::recommendation::{
     selection_recommendation_id, SelectionRecommendation, SelectionRecommendationScope,
     SelectionRecommendationStatus, SelectionSource,
@@ -50,7 +50,7 @@ pub struct ComposedModelEvaluationPrompt {
 }
 
 pub fn compose_model_evaluation_prompt(
-    content: &PromptProfileContent,
+    content: &PromptPackContent,
 ) -> ComposedModelEvaluationPrompt {
     let user_prompt = format!(
         "Shared photographic preference:\n{}\n\nEvaluation task instruction:\n{}",
@@ -185,8 +185,8 @@ pub struct ModelEvaluation {
     pub strengths: Vec<String>,
     pub weaknesses: Vec<String>,
     pub technical_warnings: Vec<String>,
-    pub prompt_profile_id: Option<String>,
-    pub prompt_version_id: Option<String>,
+    pub prompt_pack_id: Option<String>,
+    pub prompt_pack_version: Option<String>,
     pub prompt_hash: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
@@ -251,8 +251,8 @@ pub fn evaluate_asset_group_with_stub(
             .iter()
             .map(|flag| flag.reason.clone())
             .collect(),
-        prompt_profile_id: None,
-        prompt_version_id: None,
+        prompt_pack_id: None,
+        prompt_pack_version: None,
         prompt_hash: None,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
@@ -320,7 +320,7 @@ pub fn evaluate_asset_group_with_model_provider(
     now_ms: i64,
     provider: &ModelProviderSettings,
     api_key: &str,
-    prompt_content: &PromptProfileContent,
+    prompt_content: &PromptPackContent,
 ) -> Result<ModelEvaluation> {
     if !matches!(
         provider.provider_kind,
@@ -443,8 +443,8 @@ pub fn evaluate_asset_group_with_model_provider(
         strengths: output.strengths,
         weaknesses: output.weaknesses,
         technical_warnings: output.technical_warnings,
-        prompt_profile_id: None,
-        prompt_version_id: None,
+        prompt_pack_id: None,
+        prompt_pack_version: None,
         prompt_hash: None,
         created_at_ms: now_ms,
         updated_at_ms: now_ms,
@@ -461,7 +461,7 @@ pub fn recommend_selection_with_model_provider(
     now_ms: i64,
     provider: &ModelProviderSettings,
     api_key: &str,
-    prompt_content: &PromptProfileContent,
+    prompt_content: &PromptPackContent,
 ) -> Result<SelectionRecommendation> {
     if !matches!(
         provider.provider_kind,
@@ -804,7 +804,7 @@ fn valid_unique_ids(
 
 fn compose_selection_recommendation_prompt(
     task: SelectionPromptTask,
-    content: &PromptProfileContent,
+    content: &PromptPackContent,
 ) -> ComposedModelEvaluationPrompt {
     let (heading, instruction) = match task {
         SelectionPromptTask::Burst => (
@@ -832,7 +832,7 @@ fn compose_selection_recommendation_prompt(
     }
 }
 
-fn shared_preference(content: &PromptProfileContent) -> &str {
+fn shared_preference(content: &PromptPackContent) -> &str {
     let value = content.shared_preference.trim();
     if value.is_empty() {
         DEFAULT_SHARED_PHOTOGRAPHIC_PREFERENCE
