@@ -608,6 +608,16 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun jpegOnlyAssetShowsFormatBadge() {
+        val asset = projectAsset(id = "jpeg-only").copy(
+            hasJpeg = true,
+            hasRaw = false,
+        )
+
+        assertEquals(listOf("JPG"), asset.tileAuxiliaryBadges())
+    }
+
+    @Test
     fun burstPreviewTileUiShowsPositionScoreAndHumanSignals() {
         val burst = ProjectAssetBurst(
             burstGroupId = "burst-1",

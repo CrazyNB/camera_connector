@@ -1833,7 +1833,7 @@ private fun auxiliaryBadgeColor(text: String): Color =
         "收藏" -> ElementSuccess
         "标记" -> ElementBlue
         "风险", "不支持预览" -> ElementDanger
-        "RAW", "JPG+RAW" -> ElementPurple
+        "RAW", "JPG", "JPG+RAW" -> ElementPurple
         "视频" -> ElementInfo
         else -> ElementInfo
     }

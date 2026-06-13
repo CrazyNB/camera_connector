@@ -142,6 +142,7 @@ internal fun ProjectAsset.recommendationBadgeText(): String? =
 internal fun ProjectAsset.compactFormatBadge(): String? =
     when {
         hasJpeg && hasRaw -> "JPG+RAW"
+        hasJpeg -> "JPG"
         hasRaw -> "RAW"
         hasVideo -> "视频"
         else -> null
