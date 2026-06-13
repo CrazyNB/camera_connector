@@ -18,6 +18,22 @@ interface CoreGateway {
         favorite: Boolean? = null,
         marked: Boolean? = null,
     ): ProjectAssetUserMarks
+    suspend fun createLanShareSession(
+        projectId: String,
+        query: ProjectAssetQuery,
+        title: String?,
+    ): LanShareSessionUi
+    suspend fun stopLanShareSession(shareId: String): LanShareSessionUi?
+    suspend fun loadLanShareAssets(
+        token: String,
+        offset: Int = 0,
+        limit: Int = 2_000,
+    ): List<ProjectAsset>
+    suspend fun setLanShareGuestMark(
+        token: String,
+        groupId: String,
+        guestMark: GuestMark?,
+    ): GuestMark?
     suspend fun createProject(name: String): ProjectSummary
     suspend fun setActiveProject(projectId: String)
     suspend fun renameProject(projectId: String, name: String)
@@ -198,6 +214,21 @@ data class ProjectAsset(
     val modelSummary: String? = null,
     val isModelSelect: Boolean = false,
     val userMarks: ProjectAssetUserMarks = ProjectAssetUserMarks(),
+    val guestMark: GuestMark? = null,
+)
+
+enum class GuestMark(val wireName: String) {
+    Favorite("favorite"),
+    Marked("marked"),
+    Reject("reject"),
+}
+
+data class LanShareSessionUi(
+    val shareId: String,
+    val projectId: String,
+    val token: String,
+    val title: String? = null,
+    val active: Boolean,
 )
 
 data class ProjectAssetUserMarks(
@@ -425,6 +456,41 @@ class PreviewCoreGateway : CoreGateway {
             },
         )
         return nextMarks
+    }
+
+    override suspend fun createLanShareSession(
+        projectId: String,
+        query: ProjectAssetQuery,
+        title: String?,
+    ): LanShareSessionUi =
+        LanShareSessionUi(
+            shareId = "preview-share",
+            projectId = projectId,
+            token = "preview-token",
+            title = title,
+            active = true,
+        )
+
+    override suspend fun stopLanShareSession(shareId: String): LanShareSessionUi? = null
+
+    override suspend fun loadLanShareAssets(
+        token: String,
+        offset: Int,
+        limit: Int,
+    ): List<ProjectAsset> =
+        loadProjectAssets(ProjectAssetQuery(), offset, limit)
+
+    override suspend fun setLanShareGuestMark(
+        token: String,
+        groupId: String,
+        guestMark: GuestMark?,
+    ): GuestMark? {
+        dashboard.value = dashboard.value.copy(
+            assets = dashboard.value.assets.map { asset ->
+                if (asset.id == groupId) asset.copy(guestMark = guestMark) else asset
+            },
+        )
+        return guestMark
     }
 
     override suspend fun deleteProjectGroup(projectId: String, groupId: String) {

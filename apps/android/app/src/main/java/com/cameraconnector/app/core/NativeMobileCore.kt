@@ -19,6 +19,18 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     ): JSONObject =
         call { projectAssetGroupPageJson(handle, projectId, assetGroupQueryJson(query).toString(), offset, limit) }
 
+    fun createLanShareSession(projectId: String, query: ProjectAssetQuery, title: String?): JSONObject =
+        call { createLanShareSessionJson(handle, projectId, assetGroupQueryJson(query).toString(), title.orEmpty()) }
+
+    fun stopLanShareSession(shareId: String): JSONObject =
+        call { stopLanShareSessionJson(handle, shareId) }
+
+    fun lanShareAssetGroupPageJson(token: String, offset: Int, limit: Int): JSONObject =
+        call { lanShareAssetGroupPageJson(handle, token, offset, limit) }
+
+    fun setLanShareGuestMark(token: String, groupId: String, guestMark: GuestMark?): JSONObject =
+        call { setLanShareGuestMarkJson(handle, token, groupId, guestMarkPatchJson(guestMark).toString()) }
+
     fun projectGroupAssetsJson(projectId: String, groupId: String): JSONArray =
         call { projectGroupAssetsJson(handle, projectId, groupId) }.optJSONArray("value")
             ?: JSONArray()
@@ -376,6 +388,25 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         offset: Int,
         limit: Int,
     ): String
+    private external fun createLanShareSessionJson(
+        handle: Long,
+        projectId: String,
+        queryJson: String,
+        title: String,
+    ): String
+    private external fun stopLanShareSessionJson(handle: Long, shareId: String): String
+    private external fun lanShareAssetGroupPageJson(
+        handle: Long,
+        token: String,
+        offset: Int,
+        limit: Int,
+    ): String
+    private external fun setLanShareGuestMarkJson(
+        handle: Long,
+        token: String,
+        groupId: String,
+        patchJson: String,
+    ): String
     private external fun projectGroupAssetsJson(handle: Long, projectId: String, groupId: String): String
     private external fun deleteProjectGroupJson(handle: Long, projectId: String, groupId: String): String
     private external fun setAssetGroupUserMarksJson(
@@ -547,6 +578,9 @@ internal fun userMarksPatchJson(favorite: Boolean?, marked: Boolean?): JSONObjec
         favorite?.let { put("favorite", it) }
         marked?.let { put("marked", it) }
     }
+
+internal fun guestMarkPatchJson(guestMark: GuestMark?): JSONObject =
+    JSONObject().put("guest_mark", guestMark?.wireName ?: JSONObject.NULL)
 
 object NativeEnvelope {
     fun unwrap(raw: String): JSONObject {

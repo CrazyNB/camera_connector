@@ -133,6 +133,45 @@ class NativeCoreGateway(
         return marks
     }
 
+    override suspend fun createLanShareSession(
+        projectId: String,
+        query: ProjectAssetQuery,
+        title: String?,
+    ): LanShareSessionUi =
+        withContext(Dispatchers.IO) {
+            mapLanShareSession(nativeCore.createLanShareSession(projectId, query, title))
+        }
+
+    override suspend fun stopLanShareSession(shareId: String): LanShareSessionUi? =
+        withContext(Dispatchers.IO) {
+            mapLanShareSessionOrNull(nativeCore.stopLanShareSession(shareId))
+        }
+
+    override suspend fun loadLanShareAssets(
+        token: String,
+        offset: Int,
+        limit: Int,
+    ): List<ProjectAsset> =
+        withContext(Dispatchers.IO) {
+            mapProjectAssets(nativeCore.lanShareAssetGroupPageJson(token, offset, limit))
+        }
+
+    override suspend fun setLanShareGuestMark(
+        token: String,
+        groupId: String,
+        guestMark: GuestMark?,
+    ): GuestMark? {
+        val nextMark = withContext(Dispatchers.IO) {
+            mapGuestMarkFromPatchResult(nativeCore.setLanShareGuestMark(token, groupId, guestMark))
+        }
+        dashboard.value = dashboard.value.copy(
+            assets = dashboard.value.assets.map { asset ->
+                if (asset.id == groupId) asset.copy(guestMark = nextMark) else asset
+            },
+        )
+        return nextMark
+    }
+
     override suspend fun startReceiver() {
         receiverServiceController.startReceiver()
         refreshAfterServiceCommand()
@@ -770,11 +809,43 @@ internal fun mapProjectAssets(assets: JSONObject?): List<ProjectAsset> {
                         favoriteOverride = group.optBooleanOrNull("is_favorite"),
                         markedOverride = group.optBooleanOrNull("is_flagged"),
                     ),
+                    guestMark = mapGuestMark(group.optStringOrNull("guest_mark")),
                 ),
             )
         }
     }
 }
+
+internal fun mapLanShareSession(value: JSONObject): LanShareSessionUi =
+    LanShareSessionUi(
+        shareId = value.optString("share_id"),
+        projectId = value.optString("project_id"),
+        token = value.optString("token"),
+        title = value.optStringOrNull("title"),
+        active = value.optBoolean("active", false),
+    )
+
+internal fun mapLanShareSessionOrNull(value: JSONObject): LanShareSessionUi? =
+    if (value.has("value") && value.isNull("value")) {
+        null
+    } else {
+        mapLanShareSession(value)
+    }
+
+internal fun mapGuestMarkFromPatchResult(value: JSONObject): GuestMark? =
+    if (value.has("value") && value.isNull("value")) {
+        null
+    } else {
+        mapGuestMark(value.optStringOrNull("guest_mark"))
+    }
+
+internal fun mapGuestMark(value: String?): GuestMark? =
+    when (value?.trim()?.lowercase()) {
+        GuestMark.Favorite.wireName -> GuestMark.Favorite
+        GuestMark.Marked.wireName -> GuestMark.Marked
+        GuestMark.Reject.wireName -> GuestMark.Reject
+        else -> null
+    }
 
 internal fun mapProjectAssetUserMarks(
     value: JSONObject?,

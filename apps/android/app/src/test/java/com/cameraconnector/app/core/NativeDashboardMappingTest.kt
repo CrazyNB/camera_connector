@@ -129,6 +129,33 @@ class NativeDashboardMappingTest {
     }
 
     @Test
+    fun projectAssetsMapGuestMarkFromNativeDashboard() {
+        val assets = mapProjectAssets(
+            JSONObject()
+                .put(
+                    "groups",
+                    org.json.JSONArray()
+                        .put(
+                            JSONObject()
+                                .put("group_id", "group-1")
+                                .put("group_key", "IMG_1001")
+                                .put("guest_mark", "reject")
+                                .put(
+                                    "primary",
+                                    JSONObject()
+                                        .put("id", "asset-jpg")
+                                        .put("filename", "IMG_1001.JPG")
+                                        .put("format", "Jpeg")
+                                        .put("received_time_ms", 10),
+                                ),
+                        ),
+                ),
+        )
+
+        assertEquals(GuestMark.Reject, assets.single().guestMark)
+    }
+
+    @Test
     fun projectAssetsMapModelEvaluationAndTechnicalGateFromNativeDashboard() {
         val assets = mapProjectAssets(
             JSONObject()
