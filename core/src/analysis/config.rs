@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::technical::TechnicalAssessmentPolicy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelProviderKind {
     None,
@@ -46,28 +48,6 @@ impl ModelSendMode {
         match value {
             "detail_image" => Self::DetailImage,
             _ => Self::PreviewOnly,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PromptScope {
-    Global,
-    Project,
-}
-
-impl PromptScope {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Global => "global",
-            Self::Project => "project",
-        }
-    }
-
-    pub fn from_str(value: &str) -> Self {
-        match value {
-            "project" => Self::Project,
-            _ => Self::Global,
         }
     }
 }
@@ -244,29 +224,37 @@ pub struct ModelProviderSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PromptProfile {
-    pub prompt_profile_id: String,
-    pub scope: PromptScope,
-    pub project_id: Option<String>,
+pub struct PromptPack {
+    pub prompt_pack_id: String,
+    #[serde(default = "default_prompt_pack_distribution_folder")]
+    pub distribution_folder: String,
     pub name: String,
+    pub version: String,
+    pub author: String,
     pub style_tags: Vec<String>,
     pub scene_profile: SceneProfile,
-    pub active_version_id: Option<String>,
+    pub schema: String,
+    pub capabilities: Vec<String>,
     pub built_in: bool,
     pub enabled: bool,
-    pub created_at_ms: i64,
+    pub prompt_text: String,
+    pub prompt_hash: String,
     pub updated_at_ms: i64,
 }
 
+pub fn default_prompt_pack_distribution_folder() -> String {
+    "user".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PromptProfileContent {
+pub struct PromptPackContent {
     pub shared_preference: String,
     pub evaluation_instruction: Option<String>,
     pub burst_selection_instruction: Option<String>,
     pub project_selection_instruction: Option<String>,
 }
 
-impl PromptProfileContent {
+impl PromptPackContent {
     pub fn new(shared_preference: impl Into<String>) -> Self {
         Self {
             shared_preference: shared_preference.into(),
@@ -277,33 +265,23 @@ impl PromptProfileContent {
     }
 }
 
-impl Default for PromptProfileContent {
+impl Default for PromptPackContent {
     fn default() -> Self {
         Self::new("")
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PromptProfileVersion {
-    pub prompt_version_id: String,
-    pub prompt_profile_id: String,
-    pub prompt_text: String,
-    pub output_schema_version: String,
-    pub prompt_hash: String,
-    pub created_at_ms: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectEvaluationSettings {
     pub project_id: String,
-    pub model_evaluation_enabled: bool,
     pub auto_evaluate_on_upload: bool,
     pub auto_burst_recommendation_enabled: bool,
     pub project_recommendation_mode: ProjectRecommendationMode,
-    pub prompt_profile_id: Option<String>,
+    pub prompt_pack_id: Option<String>,
     pub model_provider_settings_id: Option<String>,
     pub scene_profile: SceneProfile,
     pub cv_policy: CvPolicy,
+    pub cv_policy_overrides: Option<TechnicalAssessmentPolicy>,
     pub allow_risky_model_selects: bool,
     pub max_image_side: Option<i64>,
     pub batch_size: Option<i64>,
@@ -314,14 +292,14 @@ impl ProjectEvaluationSettings {
     pub fn default_for_project(project_id: impl Into<String>, updated_at_ms: i64) -> Self {
         Self {
             project_id: project_id.into(),
-            model_evaluation_enabled: false,
             auto_evaluate_on_upload: false,
             auto_burst_recommendation_enabled: true,
             project_recommendation_mode: ProjectRecommendationMode::Manual,
-            prompt_profile_id: None,
+            prompt_pack_id: None,
             model_provider_settings_id: None,
             scene_profile: SceneProfile::General,
             cv_policy: CvPolicy::Standard,
+            cv_policy_overrides: None,
             allow_risky_model_selects: false,
             max_image_side: None,
             batch_size: None,
@@ -339,8 +317,8 @@ pub struct EvaluationRun {
     pub status: EvaluationRunStatus,
     pub provider_kind: ModelProviderKind,
     pub provider_model: String,
-    pub prompt_profile_id: Option<String>,
-    pub prompt_version_id: Option<String>,
+    pub prompt_pack_id: Option<String>,
+    pub prompt_pack_version: Option<String>,
     pub prompt_hash: Option<String>,
     pub settings_snapshot_json: String,
     pub error_message: Option<String>,

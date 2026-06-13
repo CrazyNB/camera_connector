@@ -51,8 +51,8 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
@@ -62,6 +62,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -93,8 +95,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -105,7 +107,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -123,7 +124,6 @@ import com.cameraconnector.app.core.ProjectAssetQuery
 import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.PhotoSortMode
 import com.cameraconnector.app.core.ProjectState
-import com.cameraconnector.app.core.ProjectSummary
 import com.cameraconnector.app.core.PublishQueueState
 import com.cameraconnector.app.core.ReceiverSettings
 import com.cameraconnector.app.core.ReceiverState
@@ -162,10 +162,12 @@ internal fun ProjectAssetsScreen(
     onStartReceiver: (ReceiverSettings, String) -> Unit,
     onStopReceiver: () -> Unit,
     cameraConnectHost: String,
+    receiverPanelExpanded: Boolean,
+    onReceiverPanelExpandedChange: (Boolean) -> Unit,
     onRetryFailedPublishes: () -> Unit,
-    onMoveProjectGroup: (String, String, String) -> Unit,
     onSplitBurstMember: (String, String) -> Unit,
-    onMergeBurstMember: (String, String) -> Unit,
+    onSplitBurstMembers: (List<ManualBurstSplitTarget>) -> Unit,
+    onCreateManualBurstGroup: (String, List<String>) -> Unit,
     onSetAssetGroupUserMarks: (String, String, Boolean?, Boolean?) -> Unit,
     gridColumnCount: Int,
     modifier: Modifier = Modifier,
@@ -175,9 +177,11 @@ internal fun ProjectAssetsScreen(
     var selectedPhotoCollection by rememberSaveable { mutableStateOf(ProjectPhotoCollection.All) }
     var selectedPhoto by remember { mutableStateOf<ProjectAsset?>(null) }
     var selectedBurstPreview by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
-    var detailNavigationDirection by remember { mutableStateOf<DetailNavigationDirection?>(null) }
+    var deleteCandidate by remember { mutableStateOf<ProjectAsset?>(null) }
+    var deleteInFlight by remember { mutableStateOf(false) }
+    var deleteSelectionCandidates by remember { mutableStateOf<List<ProjectAsset>>(emptyList()) }
+    var deleteSelectionInFlight by remember { mutableStateOf(false) }
     var selectedAssetIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    var movePickerOpen by remember { mutableStateOf(false) }
     var filterExpanded by remember { mutableStateOf(false) }
     var projectFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var projectFeedbackToken by remember { mutableStateOf(0) }
@@ -215,21 +219,20 @@ internal fun ProjectAssetsScreen(
     val selectedEvaluationTargets = remember(selectedGridItems) {
         projectPhotoEvaluationTargets(selectedGridItems)
     }
-    val selectedAssets = remember(selectedGridItems) {
+    val selectedDeleteAssets = remember(selectedGridItems) {
         selectedGridItems
-            .filterNot { it.isBurstGroup }
-            .map { it.coverAsset }
+            .flatMap { it.members }
+            .distinctBy { it.assetSelectionId() }
     }
-    val selectedBurstMergeTarget = remember(selectedAssets) {
-        manualBurstMergeTarget(selectedAssets)
+    val selectedBurstMergeTarget = remember(selectedGridItems) {
+        manualBurstMergeTarget(selectedGridItems)
+    }
+    val selectedBurstSplitTargets = remember(selectedGridItems) {
+        manualBurstSplitTargets(selectedGridItems)
     }
     val sourceProjectId = projectState.activeProjectId
-    val moveTargets = remember(projectState.projects, sourceProjectId) {
-        projectState.groupMoveTargets(sourceProjectId)
-    }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var receiverPanelExpanded by remember { mutableStateOf(!dashboard.receiver.running) }
     val receiverConnectHost = normalizeCameraConnectHost(cameraConnectHost)
     LaunchedEffect(projectFeedbackToken) {
         if (projectFeedbackMessage != null) {
@@ -243,87 +246,67 @@ internal fun ProjectAssetsScreen(
     }
 
     LaunchedEffect(dashboard.receiver.running) {
-        receiverPanelExpanded = !dashboard.receiver.running
+        if (dashboard.receiver.running && receiverPanelExpanded) {
+            onReceiverPanelExpandedChange(false)
+        }
     }
 
     LaunchedEffect(projectState.activeProjectId, assetQuery, selectedPhotoCollection) {
         selectedAssetIds = emptyList()
         selectedBurstPreview = null
-        movePickerOpen = false
-        detailNavigationDirection = null
     }
     LaunchedEffect(filteredAssets, selectedPhoto?.assetSelectionId()) {
         val currentPhoto = selectedPhoto
         val refreshedPhoto = refreshedSelectedPhoto(currentPhoto, filteredAssets)
         if (refreshedPhoto != currentPhoto) {
-            detailNavigationDirection = null
             selectedPhoto = refreshedPhoto
         }
     }
 
     selectedPhoto?.let { photo ->
         val detailBurstMembers = burstMemberFilmstrip(photo, dashboard.assets)
+        val previousGroupAsset = adjacentProjectGridAsset(
+            currentAsset = photo,
+            visibleAssets = filteredAssets,
+            direction = DetailNavigationDirection.Previous,
+        )
+        val nextGroupAsset = adjacentProjectGridAsset(
+            currentAsset = photo,
+            visibleAssets = filteredAssets,
+            direction = DetailNavigationDirection.Next,
+        )
         BackHandler {
-            detailNavigationDirection = null
             selectedPhoto = null
         }
         Box(modifier = modifier.fillMaxSize()) {
             PhotoDetailScreen(
                 asset = photo,
                 onBack = {
-                    detailNavigationDirection = null
                     selectedPhoto = null
                 },
-                actionsEnabled = actionsEnabled,
+                actionsEnabled = actionsEnabled && !deleteInFlight,
                 onSplitBurstMember = { burstGroupId, memberGroupId ->
-                    val nextMember = detailBurstMembers
-                        .map { it.asset }
-                        .firstOrNull { it.assetSelectionId() != photo.assetSelectionId() }
+                    val nextMember = photoDetailSelectionAfterSplit(photo, detailBurstMembers)
                     onSplitBurstMember(burstGroupId, memberGroupId)
                     if (nextMember != null) {
-                        detailNavigationDirection = if (
-                            detailBurstMemberIndex(nextMember, detailBurstMembers) <
-                            detailBurstMemberIndex(photo, detailBurstMembers)
-                        ) {
-                            DetailNavigationDirection.Previous
-                        } else {
-                            DetailNavigationDirection.Next
-                        }
                         selectedPhoto = nextMember
                     } else {
-                        detailNavigationDirection = null
                         selectedPhoto = null
                     }
                 },
                 burstMembers = detailBurstMembers,
                 onOpenBurstMember = { asset ->
-                    detailNavigationDirection = if (
-                        detailBurstMemberIndex(asset, detailBurstMembers) <
-                        detailBurstMemberIndex(photo, detailBurstMembers)
-                    ) {
-                        DetailNavigationDirection.Previous
-                    } else {
-                        DetailNavigationDirection.Next
-                    }
                     selectedPhoto = asset
                 },
+                previousGroupAsset = previousGroupAsset,
+                nextGroupAsset = nextGroupAsset,
                 onNavigatePreviousGroup = {
-                    adjacentProjectGridAsset(
-                        currentAsset = photo,
-                        visibleAssets = filteredAssets,
-                        direction = DetailNavigationDirection.Previous,
-                    )?.let {
-                        detailNavigationDirection = DetailNavigationDirection.Previous
+                    previousGroupAsset?.let {
                         selectedPhoto = it
                     }
                 },
                 onNavigateNextGroup = {
-                    adjacentProjectGridAsset(
-                        currentAsset = photo,
-                        visibleAssets = filteredAssets,
-                        direction = DetailNavigationDirection.Next,
-                    )?.let {
-                        detailNavigationDirection = DetailNavigationDirection.Next
+                    nextGroupAsset?.let {
                         selectedPhoto = it
                     }
                 },
@@ -376,8 +359,67 @@ internal fun ProjectAssetsScreen(
                         }
                     }
                 },
+                onDeleteAsset = {
+                    deleteCandidate = photo
+                },
                 modifier = Modifier.fillMaxSize(),
             )
+            deleteCandidate?.let { candidate ->
+                AlertDialog(
+                    onDismissRequest = {
+                        if (!deleteInFlight) {
+                            deleteCandidate = null
+                        }
+                    },
+                    title = { Text("\u5220\u9664\u7167\u7247\uff1f") },
+                    text = {
+                        Text(
+                            "\u5c06\u5220\u9664\u8be5\u7167\u7247\u7684\u6240\u6709\u683c\u5f0f\u6587\u4ef6\u3001\u8bc4\u4ef7\u3001\u63a8\u8350\u548c\u5206\u7ec4\u4fe1\u606f\u3002",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = actionsEnabled && !deleteInFlight,
+                            onClick = {
+                                val projectId = projectState.activeProjectId ?: return@TextButton
+                                if (deleteInFlight) {
+                                    return@TextButton
+                                }
+                                val deletedSelectionId = candidate.assetSelectionId()
+                                deleteCandidate = null
+                                deleteInFlight = true
+                                showProjectFeedback("\u6b63\u5728\u5220\u9664")
+                                coroutineScope.launch {
+                                    runCatching {
+                                        coreGateway.deleteProjectGroup(projectId, deletedSelectionId)
+                                        withContext(Dispatchers.IO) {
+                                            coreGateway.loadProjectAssets(assetQuery)
+                                        }
+                                        photoDetailSelectionAfterDelete(candidate, detailBurstMembers)
+                                    }.onSuccess {
+                                        selectedPhoto = null
+                                        showProjectFeedback("\u5df2\u5220\u9664")
+                                    }.onFailure {
+                                        showProjectFeedback("\u5220\u9664\u5931\u8d25")
+                                    }
+                                    deleteInFlight = false
+                                }
+                            },
+                        ) {
+                            Text("\u5220\u9664", color = ElementDanger)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            enabled = !deleteInFlight,
+                            onClick = { deleteCandidate = null },
+                        ) {
+                            Text("\u53d6\u6d88")
+                        }
+                    },
+                )
+            }
             projectFeedbackMessage?.let { message ->
                 ProjectFeedbackToast(
                     message = message,
@@ -391,25 +433,63 @@ internal fun ProjectAssetsScreen(
     }
     BackHandler(enabled = selectionMode) {
         selectedAssetIds = emptyList()
-        movePickerOpen = false
     }
-    if (movePickerOpen) {
-        MoveSelectedGroupsDialog(
-            selectedCount = selectedAssets.size,
-            targets = moveTargets,
-            actionsEnabled = actionsEnabled && sourceProjectId != null,
-            onDismiss = { movePickerOpen = false },
-            onMoveToProject = { targetProjectId ->
-                val currentProjectId = sourceProjectId
-                if (currentProjectId != null) {
-                    selectedAssets
-                        .mapNotNull { it.groupMoveId() }
-                        .distinct()
-                        .forEach { groupId ->
-                            onMoveProjectGroup(currentProjectId, groupId, targetProjectId)
+    if (deleteSelectionCandidates.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!deleteSelectionInFlight) {
+                    deleteSelectionCandidates = emptyList()
+                }
+            },
+            title = { Text("删除选中照片？") },
+            text = {
+                Text(
+                    "将彻底删除选中的 ${deleteSelectionCandidates.size} 张照片及其本地文件、评价、推荐和分组信息。此操作不可撤销。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = actionsEnabled && !deleteSelectionInFlight,
+                    onClick = {
+                        val projectId = sourceProjectId ?: return@TextButton
+                        val deleteTargets = deleteSelectionCandidates
+                            .mapNotNull { it.assetGroupId() }
+                            .distinct()
+                        if (deleteTargets.isEmpty() || deleteSelectionInFlight) {
+                            return@TextButton
                         }
-                    selectedAssetIds = emptyList()
-                    movePickerOpen = false
+                        deleteSelectionInFlight = true
+                        showProjectFeedback("正在删除")
+                        coroutineScope.launch {
+                            runCatching {
+                                deleteTargets.forEach { groupId ->
+                                    coreGateway.deleteProjectGroup(projectId, groupId)
+                                }
+                                withContext(Dispatchers.IO) {
+                                    coreGateway.loadProjectAssets(assetQuery)
+                                }
+                                deleteTargets.size
+                            }.onSuccess { deletedCount ->
+                                selectedAssetIds = emptyList()
+                                deleteSelectionCandidates = emptyList()
+                                showProjectFeedback("已删除 $deletedCount 张照片")
+                            }.onFailure {
+                                showProjectFeedback("删除失败")
+                            }
+                            deleteSelectionInFlight = false
+                        }
+                    },
+                ) {
+                    Text("删除", color = ElementDanger)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !deleteSelectionInFlight,
+                    onClick = { deleteSelectionCandidates = emptyList() },
+                ) {
+                    Text("取消")
                 }
             },
         )
@@ -432,7 +512,8 @@ internal fun ProjectAssetsScreen(
             ProjectReceiverStatusStrip(
                 dashboard = dashboard,
                 projectState = projectState,
-                onExpand = { receiverPanelExpanded = true },
+                onOpenProjects = onOpenProjects,
+                onExpand = { onReceiverPanelExpandedChange(true) },
                 onOpenProjectIntelligence = onOpenProjectIntelligence,
                 connectHost = receiverConnectHost,
                 modifier = Modifier.fillMaxWidth(),
@@ -487,7 +568,6 @@ internal fun ProjectAssetsScreen(
                         onDismiss = { selectedBurstPreview = null },
                         onOpenAsset = { memberAsset ->
                             selectedBurstPreview = null
-                            detailNavigationDirection = null
                             selectedPhoto = memberAsset
                         },
                     )
@@ -517,7 +597,6 @@ internal fun ProjectAssetsScreen(
                                     } else if (item.isBurstGroup) {
                                         selectedBurstPreview = item
                                     } else {
-                                        detailNavigationDirection = null
                                         selectedPhoto = asset
                                     }
                                 },
@@ -538,18 +617,19 @@ internal fun ProjectAssetsScreen(
                                     selectedEvaluationTargets.assetGroups.isNotEmpty() ||
                                         selectedEvaluationTargets.burstGroups.isNotEmpty()
                                 ),
-                            canMove = actionsEnabled &&
-                                sourceProjectId != null &&
-                                selectedAssets.any { it.groupMoveId() != null } &&
-                                moveTargets.isNotEmpty(),
+                            canSplitOut = actionsEnabled &&
+                                selectedBurstSplitTargets.isNotEmpty(),
                             canMerge = actionsEnabled && selectedBurstMergeTarget != null,
+                            canDelete = actionsEnabled &&
+                                sourceProjectId != null &&
+                                selectedDeleteAssets.isNotEmpty() &&
+                                !deleteSelectionInFlight,
                             onOpen = {
                                 selectedGridItems.firstOrNull()?.let { item ->
                                     selectedAssetIds = emptyList()
                                     if (item.isBurstGroup) {
                                         selectedBurstPreview = item
                                     } else {
-                                        detailNavigationDirection = null
                                         selectedPhoto = item.coverAsset
                                     }
                                 }
@@ -618,10 +698,21 @@ internal fun ProjectAssetsScreen(
                                     }
                                 }
                             },
-                            onMove = { movePickerOpen = true },
+                            onSplitOut = {
+                                if (selectedBurstSplitTargets.isNotEmpty()) {
+                                    onSplitBurstMembers(selectedBurstSplitTargets)
+                                    selectedAssetIds = emptyList()
+                                }
+                            },
+                            onDelete = {
+                                deleteSelectionCandidates = selectedDeleteAssets
+                            },
                             onMerge = {
+                                val projectId = sourceProjectId
                                 selectedBurstMergeTarget?.let { target ->
-                                    onMergeBurstMember(target.targetBurstGroupId, target.memberGroupId)
+                                    if (projectId != null) {
+                                        onCreateManualBurstGroup(projectId, target.memberGroupIds)
+                                    }
                                     selectedAssetIds = emptyList()
                                 }
                             },
@@ -655,12 +746,13 @@ internal fun ProjectAssetsScreen(
                     notificationPermissionGranted = notificationPermissionGranted,
                     actionsEnabled = actionsEnabled,
                     onOpenProjects = onOpenProjects,
+                    onOpenProjectIntelligence = onOpenProjectIntelligence,
                     onConfigureAccount = onConfigureAccount,
                     onRequestNotificationPermission = onRequestNotificationPermission,
                     onStartReceiver = onStartReceiver,
                     onStopReceiver = onStopReceiver,
                     onRetryFailedPublishes = onRetryFailedPublishes,
-                    onCollapse = { receiverPanelExpanded = false },
+                    onCollapse = { onReceiverPanelExpandedChange(false) },
                     connectHost = receiverConnectHost,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -881,6 +973,7 @@ private fun BurstGroupPreviewTile(
 internal fun ProjectReceiverStatusStrip(
     dashboard: DashboardState,
     projectState: ProjectState,
+    onOpenProjects: () -> Unit,
     onExpand: () -> Unit,
     onOpenProjectIntelligence: () -> Unit,
     connectHost: String?,
@@ -888,7 +981,7 @@ internal fun ProjectReceiverStatusStrip(
 ) {
     val project = projectState.activeProjectSummary()
     Surface(
-        modifier = modifier,
+        modifier = modifier.clickable(onClick = onExpand),
         color = ElementControlSurface.copy(alpha = 0.86f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(14.dp),
@@ -901,6 +994,12 @@ internal fun ProjectReceiverStatusStrip(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            ReceiverHeaderIconButton(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                contentDescription = "\u8fd4\u56de\u9879\u76ee\u7ba1\u7406",
+                onClick = onOpenProjects,
+            )
+            Spacer(Modifier.width(2.dp))
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
@@ -933,28 +1032,92 @@ internal fun ProjectReceiverStatusStrip(
                 }
             }
             Spacer(Modifier.width(4.dp))
-            IconButton(
+            ReceiverHeaderIconButton(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = "\u9879\u76ee\u667a\u80fd",
                 onClick = onOpenProjectIntelligence,
                 enabled = project != null,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.AutoAwesome,
-                    contentDescription = "项目智能",
-                    tint = if (project != null) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            IconButton(
-                onClick = onExpand,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.KeyboardArrowDown,
-                    contentDescription = "展开接收抽屉",
-                    tint = ElementBlue,
-                )
-            }
+            )
+            ProjectReceiverOverflowMenu()
+        }
+    }
+}
+
+@Composable
+private fun ReceiverHeaderIconButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = ElementBlue,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(32.dp),
+    ) {
+        Icon(
+            imageVector = imageVector,
+            contentDescription = contentDescription,
+            tint = if (enabled) tint else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(17.dp),
+        )
+    }
+}
+
+@Composable
+private fun ReceiverCollapseButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "receiver-collapse")
+    val offsetY by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = -3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "receiver-collapse-y",
+    )
+    ReceiverHeaderIconButton(
+        imageVector = Icons.Outlined.KeyboardArrowUp,
+        contentDescription = "\u6536\u8d77\u542f\u52a8\u9875",
+        onClick = onClick,
+        modifier = modifier.graphicsLayer {
+            translationY = offsetY
+            alpha = 0.94f
+        },
+    )
+}
+
+@Composable
+private fun ProjectReceiverOverflowMenu(
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        ReceiverHeaderIconButton(
+            imageVector = Icons.Outlined.MoreVert,
+            contentDescription = "\u66f4\u591a",
+            onClick = { expanded = true },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = ElementSurface,
+        ) {
+            DropdownMenuItem(
+                text = { Text("\u5206\u4eab") },
+                enabled = false,
+                onClick = {},
+            )
+            DropdownMenuItem(
+                text = { Text("\u591a\u4eba\u9009\u7247") },
+                enabled = false,
+                onClick = {},
+            )
         }
     }
 }
@@ -964,31 +1127,29 @@ internal fun ProjectLaunchHeader(
     projectState: ProjectState,
     actionsEnabled: Boolean,
     onOpenProjects: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val project = projectState.activeProjectSummary()
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp),
     ) {
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth(0.58f),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
+            ReceiverHeaderIconButton(
+                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                contentDescription = "\u8fd4\u56de\u9879\u76ee\u7ba1\u7406",
                 onClick = onOpenProjects,
                 enabled = actionsEnabled,
-                modifier = Modifier.size(34.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                    contentDescription = "返回项目管理",
-                    tint = ElementBlue,
-                )
-            }
-            Spacer(Modifier.width(6.dp))
+            )
+            Spacer(Modifier.width(4.dp))
             Text(
                 project?.name ?: "项目",
                 style = MaterialTheme.typography.bodyMedium,
@@ -997,15 +1158,22 @@ internal fun ProjectLaunchHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(
+        ReceiverCollapseButton(
             onClick = onCollapse,
-            modifier = Modifier.size(34.dp),
+            modifier = Modifier
+                .align(Alignment.Center)
+        )
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Outlined.KeyboardArrowUp,
-                contentDescription = "\u6536\u8d77\u542f\u52a8\u9875",
-                tint = ElementBlue,
+            ReceiverHeaderIconButton(
+                imageVector = Icons.Outlined.AutoAwesome,
+                contentDescription = "\u9879\u76ee\u667a\u80fd",
+                onClick = onOpenProjectIntelligence,
+                enabled = project != null,
             )
+            ProjectReceiverOverflowMenu()
         }
     }
 }
@@ -1017,6 +1185,7 @@ internal fun ProjectReceiverLaunchPanel(
     notificationPermissionGranted: Boolean,
     actionsEnabled: Boolean,
     onOpenProjects: () -> Unit,
+    onOpenProjectIntelligence: () -> Unit,
     onConfigureAccount: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartReceiver: (ReceiverSettings, String) -> Unit,
@@ -1026,9 +1195,7 @@ internal fun ProjectReceiverLaunchPanel(
     connectHost: String?,
     modifier: Modifier = Modifier,
 ) {
-    var protocol by remember(dashboard.receiver.protocol) {
-        mutableStateOf(dashboard.receiver.protocol.ifBlank { "FTP" })
-    }
+    var protocol by remember { mutableStateOf("FTP") }
     var portInput by remember(dashboard.receiver.port) {
         mutableStateOf(dashboard.receiver.port.takeIf { it in 1..65_535 }?.toString() ?: "2121")
     }
@@ -1077,19 +1244,10 @@ internal fun ProjectReceiverLaunchPanel(
                 projectState = projectState,
                 actionsEnabled = actionsEnabled,
                 onOpenProjects = onOpenProjects,
+                onOpenProjectIntelligence = onOpenProjectIntelligence,
                 onCollapse = onCollapse,
             )
             Spacer(Modifier.height(10.dp))
-            val collapseArrowOffset = rememberInfiniteTransition(label = "collapseArrow")
-                .animateFloat(
-                    initialValue = 0f,
-                    targetValue = -7f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(durationMillis = 680),
-                        repeatMode = RepeatMode.Reverse,
-                    ),
-                    label = "collapseArrowOffset",
-                )
             ReceiverHeroControl(
                 running = dashboard.receiver.running,
                 phase = dashboard.receiver.phase,
@@ -1125,10 +1283,10 @@ internal fun ProjectReceiverLaunchPanel(
                     modifier = Modifier.weight(1f),
                 )
                 ProtocolSegment(
-                    label = "SFTP",
-                    selected = protocol == "SFTP",
-                    enabled = actionsEnabled && !dashboard.receiver.running && !receiverBusy,
-                    onClick = { protocol = "SFTP" },
+                    label = "STC 开发中",
+                    selected = false,
+                    enabled = false,
+                    onClick = {},
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1139,7 +1297,7 @@ internal fun ProjectReceiverLaunchPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("相机连接 IP") },
                 singleLine = true,
-                enabled = actionsEnabled && !receiverBusy,
+                enabled = actionsEnabled && !dashboard.receiver.running && !receiverBusy,
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -1158,29 +1316,6 @@ internal fun ProjectReceiverLaunchPanel(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (dashboard.receiver.running || receiverBusy) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "\u4fee\u6539\u914d\u7f6e\u524d\u9700\u8981\u5148\u505c\u6b62\u63a5\u6536\u3002\u6536\u8d77\u540e\u7167\u7247\u5217\u8868\u4f1a\u5360\u6ee1\u4e3b\u8981\u7a7a\u95f4\u3002",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(
-                onClick = onCollapse,
-                modifier = Modifier.fillMaxWidth(),
-                shape = elementShape,
-                border = BorderStroke(1.dp, ElementBorder),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.KeyboardArrowUp,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .graphicsLayer { translationY = collapseArrowOffset.value },
-                )
-            }
         }
     }
 }
@@ -1210,16 +1345,18 @@ private suspend fun burstRecommendationCandidateVisuals(
             }
     }
 
-private fun projectEvaluationFeedback(
+internal fun projectEvaluationFeedback(
     evaluatedCount: Int,
     recommendedBurstCount: Int,
 ): String =
     when {
         evaluatedCount > 0 && recommendedBurstCount > 0 ->
-            "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount \u00b7 \u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
+            "\u5df2\u5b8c\u6210\u5355\u5f20\u8bc4\u4ef7 $evaluatedCount \u00b7 \u8fde\u62cd\u8bc4\u4ef7 $recommendedBurstCount"
         recommendedBurstCount > 0 ->
-            "\u5df2\u5b8c\u6210\u8fde\u62cd\u4f18\u9009 $recommendedBurstCount"
-        else -> "\u5df2\u5b8c\u6210\u8bc4\u4ef7 $evaluatedCount"
+            "\u5df2\u5b8c\u6210\u8fde\u62cd\u8bc4\u4ef7 $recommendedBurstCount"
+        evaluatedCount > 0 ->
+            "\u5df2\u5b8c\u6210\u5355\u5f20\u8bc4\u4ef7 $evaluatedCount"
+        else -> "\u6ca1\u6709\u53ef\u8bc4\u4ef7\u9879"
     }
 
 @Composable
@@ -1285,73 +1422,89 @@ internal fun SelectedAssetsActionBar(
     totalCount: Int,
     canOpen: Boolean,
     canEvaluate: Boolean,
-    canMove: Boolean,
+    canSplitOut: Boolean,
     canMerge: Boolean,
+    canDelete: Boolean,
     onOpen: () -> Unit,
     onEvaluate: () -> Unit,
-    onMove: () -> Unit,
+    onSplitOut: () -> Unit,
+    onDelete: () -> Unit,
     onMerge: () -> Unit,
     onSelectAll: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier,
+        modifier = modifier.animateContentSize(),
         color = ElementPanel.copy(alpha = 0.96f),
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.35f)),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "\u5df2\u9009 $selectedCount/$totalCount",
+                    "\u5df2\u9009 $selectedCount \u9879",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(
-                    onClick = onSelectAll,
-                    enabled = selectedCount < totalCount,
+                    onClick = if (selectedCount < totalCount) onSelectAll else onCancel,
+                    enabled = totalCount > 0,
                 ) {
-                    Text("\u5168\u9009")
+                    Text(if (selectedCount < totalCount) "\u5168\u9009" else "\u6e05\u7a7a")
+                }
+                TextButton(
+                    onClick = onDelete,
+                    enabled = canDelete,
+                ) {
+                    Text("删除", color = if (canDelete) ElementDanger else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick = onCancel) {
-                    Text("\u53d6\u6d88")
+                    Text("\u5b8c\u6210")
                 }
             }
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 SelectionActionButton(
+                    icon = Icons.Outlined.PhotoLibrary,
                     text = "\u6253\u5f00",
                     enabled = canOpen,
                     primary = true,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     onClick = onOpen,
                 )
                 SelectionActionButton(
+                    icon = Icons.Outlined.AutoAwesome,
                     text = "\u8bc4\u4ef7",
                     enabled = canEvaluate,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     accent = ElementBlue,
                     onClick = onEvaluate,
                 )
                 SelectionActionButton(
-                    text = "\u79fb\u52a8",
-                    enabled = canMove,
-                    width = 84.dp,
-                    onClick = onMove,
+                    icon = Icons.Outlined.SyncAlt,
+                    text = "\u79fb\u51fa",
+                    enabled = canSplitOut,
+                    modifier = Modifier.weight(1f),
+                    onClick = onSplitOut,
                 )
                 SelectionActionButton(
+                    icon = Icons.Outlined.PhotoLibrary,
                     text = "\u5408\u5e76",
                     enabled = canMerge,
-                    width = 84.dp,
+                    modifier = Modifier.weight(1f),
                     accent = ElementPurple,
                     onClick = onMerge,
                 )
@@ -1362,103 +1515,69 @@ internal fun SelectedAssetsActionBar(
 
 @Composable
 private fun SelectionActionButton(
+    icon: ImageVector,
     text: String,
     enabled: Boolean,
-    width: Dp,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     primary: Boolean = false,
     accent: Color = MaterialTheme.colorScheme.onSurface,
 ) {
+    val buttonModifier = modifier.height(44.dp)
     if (primary) {
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.width(width),
+            modifier = buttonModifier,
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElementBlue,
                 contentColor = ElementOnAccent,
             ),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         ) {
-            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SelectionActionButtonContent(icon = icon, text = text)
         }
     } else {
         OutlinedButton(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.width(width),
+            modifier = buttonModifier,
             shape = RoundedCornerShape(10.dp),
             border = BorderStroke(1.dp, if (enabled) accent.copy(alpha = 0.45f) else ElementBorder),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = ElementControlSurface,
                 contentColor = accent,
             ),
-            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         ) {
-            Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SelectionActionButtonContent(icon = icon, text = text)
         }
     }
 }
 
 @Composable
-internal fun MoveSelectedGroupsDialog(
-    selectedCount: Int,
-    targets: List<ProjectSummary>,
-    actionsEnabled: Boolean,
-    onDismiss: () -> Unit,
-    onMoveToProject: (String) -> Unit,
+private fun SelectionActionButtonContent(
+    icon: ImageVector,
+    text: String,
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        ElementCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    "\u79fb\u52a8 $selectedCount \u4e2a\u5206\u7ec4",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (targets.isEmpty()) {
-                    Text(
-                        "\u5f53\u524d\u6ca1\u6709\u53ef\u79fb\u52a8\u5230\u7684\u9879\u76ee",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    targets.forEach { target ->
-                        Button(
-                            onClick = { onMoveToProject(target.id) },
-                            enabled = actionsEnabled,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ElementBlue,
-                                contentColor = ElementOnAccent,
-                            ),
-                        ) {
-                            Text(
-                                target.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, ElementBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = ElementControlSurface,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                ) {
-                    Text("取消")
-                }
-            }
-        }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+        )
+        Text(
+            text,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
@@ -1568,15 +1687,16 @@ internal fun CompactPhotoTile(
     val primaryBadge = asset.tilePrimaryBadgeText()
     val recommendationBadge = asset.recommendationBadgeText()
     val auxiliaryBadges = asset.tileAuxiliaryBadges()
+    val tileShape = RoundedCornerShape(10.dp)
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(tileShape)
             .background(ElementSurface)
             .border(
                 width = 1.dp,
                 color = if (selected) ElementBlue else ElementCardBorder,
-                shape = RoundedCornerShape(16.dp),
+                shape = tileShape,
             )
             .semantics {
                 contentDescription = listOf(
@@ -1595,17 +1715,18 @@ internal fun CompactPhotoTile(
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .padding(8.dp),
+            .padding(1.5.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1.22f),
+                .aspectRatio(1.2f),
         ) {
             PhotoPreview(
                 asset = asset,
                 compactFallback = true,
                 backgroundColor = asset.previewAccentColor().copy(alpha = 0.16f),
+                trimLetterbox = true,
                 modifier = Modifier.matchParentSize(),
             )
             burstBadge?.let {
@@ -1637,18 +1758,12 @@ internal fun CompactPhotoTile(
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            asset.filename(),
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
         if (auxiliaryBadges.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 2.dp, top = 5.dp, end = 2.dp, bottom = 1.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

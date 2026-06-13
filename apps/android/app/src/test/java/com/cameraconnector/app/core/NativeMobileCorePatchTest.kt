@@ -3,6 +3,7 @@ package com.cameraconnector.app.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
+import java.lang.reflect.Modifier
 
 class NativeMobileCorePatchTest {
     @Test
@@ -47,5 +48,17 @@ class NativeMobileCorePatchTest {
     fun projectAssetStableIdPrefersGroupIdentity() {
         assertEquals("group-123", projectAssetStableId("group-123", "asset-1"))
         assertEquals("asset-1", projectAssetStableId("", "asset-1"))
+    }
+
+    @Test
+    fun nativeCoreCallsDoNotSerializeReadsThroughSingleSynchronizedGate() {
+        val callMethod = NativeMobileCore::class.java
+            .declaredMethods
+            .first { it.name == "call" }
+
+        assertFalse(
+            "Read/write concurrency belongs in the core storage layer, not a global JNI gate",
+            Modifier.isSynchronized(callMethod.modifiers),
+        )
     }
 }

@@ -1,12 +1,16 @@
 # Storage Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Status: completed and superseded by the current storage/model docs as the
+> active contract. Keep this checklist as implementation history, not an active
+> backlog.
+>
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. The checklist below is closed history.
 
 **Goal:** Build the storage foundation described in `docs/superpowers/specs/2026-05-26-storage-model-optimization-design.md` while keeping smart selection out of scope.
 
-**Architecture:** Add a SQLite-backed storage module in `core` that owns projects, transfers, assets, asset groups, and publish queue state. Keep FTP/SFTP receiver behavior stable by first dual-writing completed transfers into SQLite, then introduce staging and local publishing behind small abstractions.
+**Architecture:** Add a SQLite-backed storage module in `core` that owns projects, transfers, assets, asset groups, and write-queue state. Keep push receiver behavior stable by first dual-writing completed transfers into SQLite, then introduce staging and local object writing behind small abstractions.
 
-**Tech Stack:** Rust 2021, `rusqlite`, existing `serde` models, existing FTP/SFTP tests, `cargo test`.
+**Tech Stack:** Rust 2021, `rusqlite`, existing `serde` models, existing push receiver tests, `cargo test`.
 
 ---
 
@@ -20,8 +24,8 @@
 - Test: `core/tests/storage_store_tests.rs`
 
 - [x] Add `rusqlite` as a workspace dependency with the bundled SQLite feature.
-- [x] Write failing tests for schema creation, required project identity, project-scoped asset grouping, duplicate preservation, and publish queue retry state.
-- [x] Implement `SqliteStore` with schema initialization and models for `Project`, `StoredTransfer`, `StoredAsset`, `StoredAssetGroup`, and `PublishQueueItem`.
+- [x] Write failing tests for schema creation, required project identity, project-scoped asset grouping, duplicate preservation, and write-queue retry state.
+- [x] Implement `SqliteStore` with schema initialization and models for `Project`, `StoredTransfer`, `StoredAsset`, `StoredAssetGroup`, and write-queue items.
 - [x] Run `cargo test -p camera_connector_core storage_store_tests`.
 - [x] Commit with message `Add SQLite storage foundation`.
 
@@ -47,7 +51,7 @@
 - Test: `core/tests/ftp_push_tests.rs`
 - Test: `core/tests/sftp_push_tests.rs`
 
-- [x] Write failing tests proving FTP/SFTP uploads create SQLite transfer, asset, and group rows under the active project.
+- [x] Write failing tests proving push uploads create SQLite transfer, asset, and group rows under the active project.
 - [x] Add `active_project_id` to receiver config and require it for storage-indexed receiver writes, with tests using explicit user-created projects.
 - [x] After a completed transfer is appended to `transfer-log.jsonl`, also record it in `SqliteStore`.
 - [x] Run `cargo test -p camera_connector_core ftp_push_tests sftp_push_tests storage_store_tests`.
@@ -64,7 +68,7 @@
 
 - [x] Write failing tests for local staging temp writes, publish queue enqueue, local object publish, retry after publish failure, and stale staging cleanup.
 - [x] Implement `LocalStagingStore`, `LocalFolderObjectStore`, and `StoragePipeline` for local publish.
-- [x] Update FTP/SFTP to write staged files and publish through the pipeline while preserving final local-folder behavior.
+- [x] Update push receivers to write staged files and publish through the pipeline while preserving final local-folder behavior.
 - [x] Run `cargo test -p camera_connector_core storage_pipeline_tests receive_sink_tests ftp_push_tests sftp_push_tests`.
 - [x] Commit with message `Add staging and local publish pipeline`.
 

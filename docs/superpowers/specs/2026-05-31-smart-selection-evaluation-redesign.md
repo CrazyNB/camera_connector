@@ -9,7 +9,7 @@ This document supersedes the smart-selection product semantics in
 between technical gates, model evaluations, model recommendations, and user
 marks.
 
-Configuration, prompt versioning, API-key/no-key behavior, manual project
+Configuration, prompt pack management, API-key/no-key behavior, manual project
 recommendation triggers, and portrait-specific subject assessment are defined in
 `2026-05-31-model-evaluation-configuration-design.md`.
 
@@ -36,9 +36,10 @@ LLM/VLM = objective photographic evaluation and recommendation
 User actions = independent human curation state
 ```
 
-Every photo work unit should pass through model evaluation, including non-burst
-single photos, when model evaluation is enabled for the project and a provider is
-configured. Burst groups receive an additional within-group recommendation.
+Every photo work unit can pass through model evaluation, including non-burst
+single photos, when automatic upload-time evaluation is enabled or the user
+manually triggers evaluation and a provider is configured. Burst groups receive
+an additional within-group recommendation.
 Project-level recommendations are manual-only and are never produced by upload
 or background drains.
 
@@ -91,7 +92,7 @@ Publish complete
   -> detect or refine burst groups
   -> generate persistent preview thumbnail
   -> run local technical assessment
-  -> if project model evaluation is enabled and provider is configured:
+  -> if project auto-evaluate-on-upload is enabled and provider is configured:
        run model evaluation for each asset group
   -> if project auto burst recommendation is enabled:
        run burst-group recommendation for groups with 2+ members
@@ -106,7 +107,8 @@ When no API key/provider capability exists, upload, thumbnails, grouping, and
 local technical assessment still run. Model evaluation and project-level
 recommendation are skipped or disabled, and no fake model result is written. If a
 development local stub is explicitly enabled, its result source must be stored
-and displayed as `local_stub`.
+as `local_stub`; user-facing UI should label it as local analysis rather than
+showing the raw enum.
 
 ## Local Technical Assessment
 
@@ -175,15 +177,16 @@ The UI can show this as "技术风险", not as a final score.
 
 ## Model Evaluation
 
-Every asset group should receive a model evaluation when LLM/VLM evaluation is
-enabled for the project or profile. This includes non-burst single photos.
+Every asset group can receive a model evaluation when upload-time automation is
+enabled or the user manually evaluates selected groups. This includes non-burst
+single photos.
 
 The model receives:
 
 - A display-safe preview image or contact sheet crop.
 - Technical assessment flags.
 - Basic EXIF and capture metadata when available.
-- User-selected evaluation profile.
+- User-selected project intelligence settings and prompt pack.
 - Optional user preference text.
 
 The model outputs structured data:
@@ -411,18 +414,17 @@ First useful controls:
 
 - Global provider capability and model defaults. Capability is app-wide, and
   global defaults only prefill newly created projects.
-- Enable model evaluation for this project.
 - Auto-evaluate on upload for this project.
 - Auto burst recommendation for this project.
 - Scene profile: general / portrait / action / landscape / custom.
-- Prompt profile with editable style-tagged versions.
+- Prompt pack with editable style-tagged preference text.
 - Allow risk photos to participate in model selection.
 - Project recommendation mode: manual only.
 - Maximum images per model batch.
 - Privacy option: send preview only / allow larger detail image.
 
 CV thresholds can remain advanced settings. They are less important than the
-model evaluation profile in the target product.
+selected prompt pack and model-provider setup in the target product.
 
 Changing global provider/model defaults must not silently enable, disable, or
 otherwise rewrite model evaluation settings for existing projects. Existing

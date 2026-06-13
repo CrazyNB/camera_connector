@@ -53,7 +53,7 @@ class ReceiverForegroundService : Service() {
             }
 
             ACTION_RETRY_PUBLISH -> {
-                startForeground(NOTIFICATION_ID, notification("正在重试发布"))
+                startForeground(NOTIFICATION_ID, notification("\u6b63\u5728\u91cd\u8bd5\u5199\u5165"))
                 val configPath = intent.getStringExtra(EXTRA_CONFIG_PATH)
                 Log.i(LOG_TAG, "publish retry requested configPath=$configPath")
                 serviceScope.launch {

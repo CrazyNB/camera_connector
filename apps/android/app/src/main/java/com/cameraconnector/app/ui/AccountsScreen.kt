@@ -141,17 +141,14 @@ internal fun AccountsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("账号管理", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(4.dp))
-            Text("\u76f8\u673a\u8d26\u53f7\u548c\u8fde\u63a5\u72b6\u6001", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CompactPageHeader(
+                title = "账号管理",
+                subtitle = "\u76f8\u673a\u8d26\u53f7\u548c\u8fde\u63a5\u72b6\u6001",
+            )
         }
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         if (dashboard.accounts.isEmpty()) {
@@ -220,10 +217,6 @@ internal fun AccountDetailScreen(
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         account?.let {

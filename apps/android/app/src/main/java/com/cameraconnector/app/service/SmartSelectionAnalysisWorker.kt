@@ -46,7 +46,27 @@ interface SmartSelectionCore {
         inputs: JSONArray,
     ): JSONObject
     fun generateProjectRecommendation(projectId: String): JSONObject
+    fun shouldScheduleSubjectAssessment(projectId: String): Boolean
+    fun subjectAssessmentsForAssetGroups(projectId: String, groupIds: JSONArray): JSONArray
+    fun saveSubjectAssessment(assessment: JSONObject): JSONObject
 }
+
+interface SubjectAssessmentDetector {
+    fun assess(
+        context: Context?,
+        projectId: String,
+        asset: ProjectAsset,
+        policy: SubjectAssessmentPolicy,
+    ): JSONObject?
+}
+
+data class SubjectAssessmentPolicy(
+    val shadowClipThreshold: Int,
+    val highlightClipThreshold: Int,
+    val eyeOpenWarnThreshold: Double,
+    val faceExposureWarnRatio: Double,
+    val faceColorCastWarnThreshold: Double,
+)
 
 class NativeSmartSelectionCore(
     private val core: NativeMobileCore,
@@ -100,6 +120,15 @@ class NativeSmartSelectionCore(
 
     override fun generateProjectRecommendation(projectId: String): JSONObject =
         core.generateProjectRecommendation(projectId)
+
+    override fun shouldScheduleSubjectAssessment(projectId: String): Boolean =
+        core.shouldScheduleSubjectAssessment(projectId)
+
+    override fun subjectAssessmentsForAssetGroups(projectId: String, groupIds: JSONArray): JSONArray =
+        core.subjectAssessmentsForAssetGroups(projectId, groupIds.toString())
+
+    override fun saveSubjectAssessment(assessment: JSONObject): JSONObject =
+        core.saveSubjectAssessment(assessment.toString())
 }
 
 class SmartSelectionAnalysisWorker(
@@ -108,6 +137,7 @@ class SmartSelectionAnalysisWorker(
     private val previewSampleLoader: (Context?, String?) -> String = { loadContext, previewLocation ->
         loadPreviewSampleJson(requireNotNull(loadContext), previewLocation)
     },
+    private val subjectAssessmentDetector: SubjectAssessmentDetector = MlKitFaceSubjectAssessmentDetector(),
 ) {
     constructor(
         context: Context,
@@ -128,6 +158,13 @@ class SmartSelectionAnalysisWorker(
             shouldRunVisualBurstRecommendation(projectSettings, providerConfigured)
         val uploadAutoEvaluationEnabled =
             shouldRunUploadAutoEvaluation(projectSettings, providerConfigured)
+        val subjectAssessmentPolicy = subjectAssessmentPolicyFromProjectSettings(projectSettings)
+        val subjectAssessmentEnabled = runCatching {
+            core.shouldScheduleSubjectAssessment(projectId)
+        }.getOrElse { error ->
+            Log.w(LOG_TAG, "subject assessment scheduling check failed project=$projectId", error)
+            false
+        }
         val assets = mapProjectAssets(
             core.projectAssetGroupPageJson(
                 projectId = projectId,
@@ -136,6 +173,11 @@ class SmartSelectionAnalysisWorker(
                 limit = QUERY_LIMIT,
             ),
         )
+        val subjectAssessedGroupIds = if (subjectAssessmentEnabled) {
+            existingSubjectAssessmentGroupIds(core, projectId, assets)
+        } else {
+            mutableSetOf()
+        }
         var assessedCount = 0
         var failedCount = 0
         val sampleJsonByGroupId = mutableMapOf<String, String>()
@@ -160,6 +202,22 @@ class SmartSelectionAnalysisWorker(
                     sampleJson = sampleJson,
                     providerConfigured = providerConfigured && !deferBurstModelEvaluation,
                 )
+                if (subjectAssessmentEnabled && asset.id !in subjectAssessedGroupIds) {
+                    runCatching {
+                        subjectAssessmentDetector.assess(
+                            context = context,
+                            projectId = projectId,
+                            asset = asset,
+                            policy = subjectAssessmentPolicy,
+                        )?.let { assessment ->
+                            core.saveSubjectAssessment(assessment)
+                            subjectAssessedGroupIds += asset.id
+                        }
+                    }.onFailure { error ->
+                        failedCount += 1
+                        Log.w(LOG_TAG, "subject assessment failed group=${asset.id}", error)
+                    }
+                }
                 assessedGroupIds += asset.id
                 asset.burst?.burstGroupId?.takeIf { it.isNotBlank() }?.let(touchedBurstIds::add)
                 assessedCount += 1
@@ -252,12 +310,73 @@ class SmartSelectionAnalysisWorker(
     }
 }
 
+internal fun subjectAssessmentPolicyFromProjectSettings(projectSettings: JSONObject): SubjectAssessmentPolicy {
+    val policyJson = projectSettings.optJSONObject("cv_policy_overrides")
+        ?: presetTechnicalPolicy(projectSettings.optString("cv_policy").ifBlank { "standard" })
+    return SubjectAssessmentPolicy(
+        shadowClipThreshold = policyJson.optInt("shadow_clip_threshold", 5),
+        highlightClipThreshold = policyJson.optInt("highlight_clip_threshold", 245),
+        eyeOpenWarnThreshold = policyJson.optDouble("face_eye_open_warn_threshold", 0.35),
+        faceExposureWarnRatio = policyJson.optDouble("face_exposure_warn_ratio", 0.25),
+        faceColorCastWarnThreshold = policyJson.optDouble("face_color_cast_warn_threshold", 0.42),
+    )
+}
+
+private fun presetTechnicalPolicy(cvPolicy: String): JSONObject =
+    when (cvPolicy.trim().lowercase()) {
+        "loose" -> JSONObject()
+            .put("shadow_clip_threshold", 2)
+            .put("highlight_clip_threshold", 250)
+            .put("face_eye_open_warn_threshold", 0.25)
+            .put("face_exposure_warn_ratio", 0.35)
+            .put("face_color_cast_warn_threshold", 0.55)
+        "strict" -> JSONObject()
+            .put("shadow_clip_threshold", 8)
+            .put("highlight_clip_threshold", 242)
+            .put("face_eye_open_warn_threshold", 0.45)
+            .put("face_exposure_warn_ratio", 0.16)
+            .put("face_color_cast_warn_threshold", 0.32)
+        else -> JSONObject()
+            .put("shadow_clip_threshold", 5)
+            .put("highlight_clip_threshold", 245)
+            .put("face_eye_open_warn_threshold", 0.35)
+            .put("face_exposure_warn_ratio", 0.25)
+            .put("face_color_cast_warn_threshold", 0.42)
+    }
+
+private fun existingSubjectAssessmentGroupIds(
+    core: SmartSelectionCore,
+    projectId: String,
+    assets: List<ProjectAsset>,
+): MutableSet<String> {
+    val groupIds = JSONArray()
+    assets.map { it.id }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .forEach { groupIds.put(it) }
+    if (groupIds.length() == 0) {
+        return mutableSetOf()
+    }
+    return runCatching {
+        val assessments = core.subjectAssessmentsForAssetGroups(projectId, groupIds)
+        buildSet {
+            for (index in 0 until assessments.length()) {
+                val assessment = assessments.optJSONObject(index) ?: continue
+                if (assessment.optString("subject_type").equals("face", ignoreCase = true)) {
+                    assessment.optString("asset_group_id")
+                        .takeIf { it.isNotBlank() }
+                        ?.let(::add)
+                }
+            }
+        }.toMutableSet()
+    }.getOrElse { mutableSetOf() }
+}
+
 private fun shouldRunVisualBurstRecommendation(
     projectSettings: JSONObject,
     providerConfigured: Boolean,
 ): Boolean =
     providerConfigured &&
-        projectSettings.optBoolean("model_evaluation_enabled", false) &&
         projectSettings.optBoolean("auto_burst_recommendation_enabled", true)
 
 private fun shouldRunUploadAutoEvaluation(
@@ -265,7 +384,6 @@ private fun shouldRunUploadAutoEvaluation(
     providerConfigured: Boolean,
 ): Boolean =
     providerConfigured &&
-        projectSettings.optBoolean("model_evaluation_enabled", false) &&
         projectSettings.optBoolean("auto_evaluate_on_upload", false)
 
 private fun burstCandidateVisuals(
@@ -363,8 +481,8 @@ private fun JSONObject.isReadyModelProvider(): Boolean {
 }
 
 private fun ProjectAsset.needsLocalAssessment(): Boolean {
-    val currentModelStatus = this.modelStatus?.lowercase()
-    val technicalStatus = this.technicalGateStatus?.lowercase()
+    val currentModelStatus = this.modelStatus?.trim()?.lowercase()
+    val technicalStatus = this.technicalGateStatus?.trim()?.lowercase()
     if (currentModelStatus == "ready" || currentModelStatus == "skipped") {
         return false
     }

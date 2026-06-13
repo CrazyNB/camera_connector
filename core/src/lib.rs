@@ -10,7 +10,7 @@ pub mod service;
 pub mod storage;
 
 pub use analysis::{
-    assess_preview_sample, compose_model_evaluation_prompt,
+    assess_preview_sample, assess_preview_sample_with_policy, compose_model_evaluation_prompt,
     evaluate_asset_group_with_model_provider, evaluate_asset_group_with_stub,
     recommend_burst_group_from_model_evaluations, recommend_project_model_selections,
     recommend_selection_with_model_provider, AnalysisEntityType, AnalysisJob, AnalysisJobStatus,
@@ -18,10 +18,10 @@ pub use analysis::{
     EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ModelEvaluation,
     ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind,
     ModelProviderSettings, ModelSendMode, NewAnalysisJob, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptProfile, PromptProfileContent, PromptProfileVersion,
-    PromptScope, SceneProfile, SelectionCandidateVisualInput, SelectionRecommendation,
-    SelectionRecommendationScope, SelectionRecommendationStatus, SelectionSource,
-    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentStatus, TechnicalDefectFlag,
+    ProjectRecommendationMode, PromptPack, PromptPackContent, SceneProfile,
+    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
+    SelectionRecommendationStatus, SelectionSource, SubjectAssessment, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
     TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
 };
 pub use desktop_scan::{
@@ -61,8 +61,8 @@ pub use service::{
     ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
-    LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectCapabilities,
-    ProjectKind, ProjectStatus, ProjectView, PublishQueueItem, PublishQueueSummary, PublishState,
-    PublishTransferMetadata, SqliteStore, StagedObject, StoredAsset, StoredAssetGroup,
-    StoredReceiverAccount,
+    GlobalAssetSummary, LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project,
+    ProjectCapabilities, ProjectKind, ProjectStatus, ProjectView, PublishQueueItem,
+    PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore, StagedObject,
+    StoredAsset, StoredAssetGroup, StoredReceiverAccount,
 };

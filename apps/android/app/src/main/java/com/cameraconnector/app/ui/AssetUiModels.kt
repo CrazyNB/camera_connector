@@ -32,7 +32,7 @@ internal fun ProjectAsset.filename(): String =
 internal fun ProjectAsset.groupTitle(): String =
     groupKey.ifBlank { filename().substringBeforeLast('.', filename()) }
 
-internal fun ProjectAsset.groupMoveId(): String? =
+internal fun ProjectAsset.assetGroupId(): String? =
     id.takeIf { it.isNotBlank() }
 
 internal fun ProjectAsset.sourceLabel(): String =
@@ -85,7 +85,7 @@ internal fun ProjectAsset.tilePrimaryBadgeText(): String? {
             modelStatus.equals("error", ignoreCase = true) -> "失败"
         modelStatus.equals("pending", ignoreCase = true) ||
             modelStatus.equals("queued", ignoreCase = true) -> "待评"
-        technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "风险"
+        hasTechnicalRisk() -> "风险"
         modelStatus.equals("skipped", ignoreCase = true) -> "未评"
         else -> null
     }
@@ -102,7 +102,7 @@ internal fun ProjectAsset.tilePrimaryBadgeColor(): Color =
 
 internal fun ProjectAsset.tileAnalysisBadgeText(): String? =
     when {
-        technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> "风险"
+        hasTechnicalRisk() -> "风险"
         modelStatus.equals("running", ignoreCase = true) -> "\u5206\u6790\u4e2d"
         modelStatus.equals("pending", ignoreCase = true) -> "\u5f85\u5206\u6790"
         modelStatus.equals("failed", ignoreCase = true) -> "分析失败"
@@ -156,8 +156,8 @@ internal fun ProjectAsset.tileAuxiliaryBadges(): List<String> =
     }.distinct().take(2)
 
 private fun ProjectAsset.tileRiskAuxiliaryBadge(): String? {
-    val risk = technicalGateStatus?.lowercase() ?: return null
-    if (risk !in setOf("warn", "reject", "inconclusive", "unsupported")) {
+    val risk = technicalRiskStatus() ?: return null
+    if (risk !in TECHNICAL_RISK_STATUSES) {
         return null
     }
     return when {
@@ -180,8 +180,7 @@ private fun ProjectAsset.tileAnalysisReasonText(): String? {
     if (modelSummaryText != null) {
         return modelSummaryText
     }
-    val hasRisk = technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported")
-    return if (hasRisk) {
+    return if (hasTechnicalRisk()) {
         technicalRiskSummary()
     } else {
         null
@@ -199,7 +198,7 @@ private fun ProjectAsset.technicalRiskSummary(): String? =
         .firstOrNull { it.reason?.isNotBlank() == true }
         ?.reason
         ?.let(::smartReasonText)
-        ?: when (technicalGateStatus?.lowercase()) {
+        ?: when (technicalRiskStatus()) {
             "warn" -> "\u5b58\u5728\u6280\u672f\u98ce\u9669"
             "reject" -> "\u4e25\u91cd\u6280\u672f\u98ce\u9669"
             "inconclusive" -> "无法判断"
@@ -283,7 +282,10 @@ internal fun ProjectAsset.isBestRecommendedAsset(): Boolean {
         return true
     }
     val bestId = burst?.bestAssetGroupId?.takeIf { it.isNotBlank() } ?: return false
-    return bestId == id || bestId == groupKey
+    return bestId == id ||
+        bestId == assetGroupId() ||
+        bestId == assetSelectionId() ||
+        bestId == groupKey
 }
 
 internal fun recommendationStatusLabel(value: String?): String =
@@ -301,13 +303,21 @@ internal fun recommendationStatusLabel(value: String?): String =
 
 internal fun smartBadgeColor(asset: ProjectAsset): Color = when {
     asset.isModelSelect -> ElementSuccess
-    asset.technicalGateStatus in setOf("warn", "reject", "inconclusive", "unsupported") -> ElementDanger
+    asset.hasTechnicalRisk() -> ElementDanger
     asset.modelStatus?.equals("failed", ignoreCase = true) == true -> ElementDanger
     asset.modelStatus?.equals("running", ignoreCase = true) == true -> ElementBlue
     asset.modelScoreText() != null -> ElementWarning
     asset.burst != null -> ElementPurple
     else -> ElementInfo
 }
+
+private val TECHNICAL_RISK_STATUSES = setOf("warn", "reject", "inconclusive", "unsupported")
+
+internal fun ProjectAsset.hasTechnicalRisk(): Boolean =
+    technicalRiskStatus() in TECHNICAL_RISK_STATUSES
+
+internal fun ProjectAsset.technicalRiskStatus(): String? =
+    technicalGateStatus?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
 
 private fun normalizedScoreText(value: Double?): String? {
     val raw = value?.takeIf { it.isFinite() } ?: return null

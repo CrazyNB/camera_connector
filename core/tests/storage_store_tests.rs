@@ -100,56 +100,6 @@ fn sqlite_store_schema_uses_selection_recommendations_for_model_results_only() {
 }
 
 #[test]
-fn sqlite_store_resets_legacy_selection_recommendations_table() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should create");
-    let db_path = temp_dir.path().join("state.sqlite");
-    let connection = Connection::open(&db_path).expect("legacy connection should open");
-    connection
-        .execute_batch(
-            "
-            CREATE TABLE selection_recommendations (
-                recommendation_id TEXT PRIMARY KEY,
-                subject_id TEXT NOT NULL,
-                selected_group_id TEXT,
-                status TEXT NOT NULL,
-                reason TEXT NOT NULL,
-                created_at_ms INTEGER NOT NULL
-            );
-            INSERT INTO selection_recommendations (
-                recommendation_id, subject_id, selected_group_id, status, reason, created_at_ms
-            ) VALUES (
-                'legacy-recommendation', 'legacy-burst', 'legacy-group', 'ready', 'old shape', 1
-            );
-            ",
-        )
-        .expect("legacy selection table should create");
-    drop(connection);
-
-    let _store =
-        SqliteStore::open(&db_path).expect("store should reset legacy recommendation table");
-    let connection = Connection::open(&db_path).expect("connection should reopen");
-    let count: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM selection_recommendations",
-            [],
-            |row| row.get(0),
-        )
-        .expect("recommendation count should query");
-
-    assert!(table_has_column(
-        &connection,
-        "selection_recommendations",
-        "project_id"
-    ));
-    assert!(table_has_column(
-        &connection,
-        "selection_recommendations",
-        "selected_asset_group_ids_json"
-    ));
-    assert_eq!(count, 0);
-}
-
-#[test]
 fn sqlite_store_waits_for_short_concurrent_write_locks() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let db_path = temp_dir.path().join("state.sqlite");
@@ -218,6 +168,62 @@ fn sqlite_store_archives_and_restores_projects() {
 
     assert_eq!(restored.status, ProjectStatus::Active);
     assert!(restored.archived_at_ms.is_none());
+}
+
+#[test]
+fn sqlite_store_deletes_project_and_all_owned_storage_rows() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Delete Whole Project")
+        .expect("project should create");
+    let other_project = store
+        .create_project("Keep Project")
+        .expect("other project should create");
+
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:delete-jpg", "DCIM/100/IMG_7001.JPG", 1000),
+        )
+        .expect("project transfer should record");
+    store
+        .record_transfer(
+            &other_project.project_id,
+            completed_transfer("ftp:keep-jpg", "DCIM/100/IMG_8001.JPG", 1001),
+        )
+        .expect("other project transfer should record");
+
+    let deleted_assets = store
+        .delete_project(&project.project_id)
+        .expect("project should delete")
+        .expect("project should exist");
+
+    assert_eq!(deleted_assets.len(), 1);
+    assert!(store
+        .list_projects()
+        .expect("projects should reload")
+        .iter()
+        .all(|item| item.project_id != project.project_id));
+    assert!(store
+        .stored_asset_groups(&project.project_id)
+        .expect_err("deleted project should not be queryable")
+        .to_string()
+        .contains("project not found"));
+    assert_eq!(
+        store
+            .global_asset_summary()
+            .expect("global asset summary should reload")
+            .photo_count,
+        1
+    );
+    assert_eq!(
+        store
+            .stored_asset_groups(&other_project.project_id)
+            .expect("other project groups should remain")
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -563,6 +569,45 @@ fn sqlite_store_indexes_assets_and_groups_by_project() {
 }
 
 #[test]
+fn sqlite_store_summarizes_global_project_assets() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project_a = store
+        .create_project("Wedding")
+        .expect("project should create");
+    let project_b = store
+        .create_project("Street")
+        .expect("project should create");
+
+    store
+        .record_transfer(
+            &project_a.project_id,
+            completed_transfer("ftp:jpg", "DCIM/100/IMG_2222.JPG", 20),
+        )
+        .expect("jpg transfer should record");
+    store
+        .record_transfer(
+            &project_a.project_id,
+            completed_transfer("ftp:raw", "DCIM/100/IMG_2222.NEF", 21),
+        )
+        .expect("raw transfer should record");
+    store
+        .record_transfer(
+            &project_b.project_id,
+            completed_transfer("ftp:other", "DCIM/100/IMG_3333.JPG", 22),
+        )
+        .expect("other project transfer should record");
+
+    let summary = store
+        .global_asset_summary()
+        .expect("global summary should query");
+
+    assert_eq!(summary.photo_count, 2);
+    assert_eq!(summary.file_count, 3);
+    assert_eq!(summary.storage_bytes, 300);
+}
+
+#[test]
 fn sqlite_store_persists_user_marks_and_filters_asset_groups() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
@@ -651,115 +696,47 @@ fn sqlite_store_persists_user_marks_and_filters_asset_groups() {
 }
 
 #[test]
-fn sqlite_store_moves_asset_group_between_projects() {
+fn sqlite_store_deletes_asset_group_without_leaving_database_locked() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
-    let source_project = store
-        .create_project("Wrong Project")
-        .expect("source project should create");
-    let target_project = store
-        .create_project("Correct Project")
-        .expect("target project should create");
+    let project = store
+        .create_project("Delete Project")
+        .expect("project should create");
 
     store
         .record_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:jpg", "DCIM/100/IMG_3333.JPG", 20),
+            &project.project_id,
+            completed_transfer("ftp:delete-jpg", "DCIM/100/IMG_7001.JPG", 1000),
         )
         .expect("jpg transfer should record");
     store
         .record_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:raw", "DCIM/100/IMG_3333.NEF", 21),
+            &project.project_id,
+            completed_transfer("ftp:delete-raw", "DCIM/100/IMG_7001.NEF", 1001),
         )
         .expect("raw transfer should record");
-    let queue_item = store
-        .enqueue_publish(
-            &source_project.project_id,
-            "ftp:jpg",
-            "staged/ftp-jpg.tmp",
-            "IMG_3333.JPG",
-            100,
-        )
-        .expect("publish item should enqueue");
-    store
-        .mark_publish_completed(&queue_item.queue_id)
-        .expect("publish item should complete");
+    let group_id = store
+        .stored_asset_groups(&project.project_id)
+        .expect("groups should load")
+        .into_iter()
+        .find(|group| group.display_key == "IMG_7001")
+        .expect("group should exist")
+        .group_id;
 
-    let source_page = store
-        .asset_group_page(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("source groups should query");
-    let source_group_id = source_page.groups[0]
-        .group_id
-        .as_deref()
-        .expect("source group should expose id");
+    let deleted = store
+        .delete_asset_group(&project.project_id, &group_id)
+        .expect("delete should not leave sqlite locked")
+        .expect("delete should find group");
 
-    let moved_group = store
-        .move_asset_group(
-            &source_project.project_id,
-            source_group_id,
-            &target_project.project_id,
-        )
-        .expect("group move should run")
-        .expect("group should move");
-
-    let old_source_page = store
-        .asset_group_page(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("source groups should query after move");
-    let target_page = store
-        .asset_group_page(
-            &target_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("target groups should query after move");
-    let target_assets = store
-        .assets_for_group(&target_project.project_id, &moved_group.group_id)
-        .expect("target group assets should query");
-    let source_transfers = store
-        .transfer_records(&source_project.project_id)
-        .expect("source transfers should query");
-    let target_transfers = store
-        .transfer_records(&target_project.project_id)
-        .expect("target transfers should query");
-    let source_queue = store
-        .publish_queue_summary(&source_project.project_id)
-        .expect("source queue summary should query");
-    let target_queue = store
-        .publish_queue_summary(&target_project.project_id)
-        .expect("target queue summary should query");
-
-    assert_eq!(old_source_page.total_groups, 0);
-    assert_eq!(target_page.total_groups, 1);
-    assert_eq!(target_page.summary.asset_count, 2);
-    assert_eq!(moved_group.project_id, target_project.project_id);
-    assert_eq!(target_assets.len(), 2);
-    assert!(target_assets
-        .iter()
-        .all(|asset| asset.project_id == target_project.project_id));
-    assert!(target_assets
-        .iter()
-        .any(|asset| asset.final_filename == "IMG_3333.JPG"
-            && asset
-                .final_location
-                .as_ref()
-                .and_then(StoredObjectLocation::as_local_path)
-                .is_some()));
-    assert!(source_transfers.is_empty());
-    assert_eq!(target_transfers.len(), 2);
-    assert_eq!(source_queue.completed_count, 0);
-    assert_eq!(target_queue.completed_count, 1);
+    assert_eq!(deleted.len(), 2);
+    assert!(store
+        .stored_asset_groups(&project.project_id)
+        .expect("groups should reload")
+        .is_empty());
+    assert!(store
+        .transfer_records(&project.project_id)
+        .expect("transfers should reload")
+        .is_empty());
 }
 
 #[test]

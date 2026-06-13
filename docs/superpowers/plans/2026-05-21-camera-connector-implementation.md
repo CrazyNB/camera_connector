@@ -1,5 +1,9 @@
 ﻿# Camera Connector Implementation Plan
 
+> Status: completed as the original push-receiver foundation. Keep this file as
+> implementation history only; use current specs and product docs for active
+> product direction.
+
 ## Phase 1: Cleanup
 
 - Remove PTP/IP packets, sessions, datasets, scanner, direct client, and mock camera.

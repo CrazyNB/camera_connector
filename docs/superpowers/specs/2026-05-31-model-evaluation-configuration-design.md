@@ -16,7 +16,7 @@ The app now has the right high-level intelligence direction, but the control
 surface is still underspecified:
 
 - Model evaluation and model recommendation must be configurable.
-- Evaluation prompts must be editable, versioned, and named by style tags.
+- Evaluation prompt preferences must be editable, shareable as prompt packs, and named by style tags.
 - Group-level recommendation and project-level recommendation have different
   trigger semantics.
 - API-key absence must be explicit and must not silently pretend a local stub is
@@ -35,7 +35,8 @@ Global app settings
   -> provider capability, credentials, default model, default prompt library
 
 Project evaluation settings
-  -> whether this project uses model evaluation and which prompt/profile to use
+  -> which provider/prompt pack/scene/risk policy this project uses, plus
+     automatic workflow switches
 
 Run snapshot
   -> immutable record of the prompt/model/settings used for one evaluation or
@@ -46,7 +47,7 @@ The main product decision is:
 
 ```text
 Model capability = global
-Model evaluation enablement = project-level
+Upload-time model evaluation automation = project-level
 Burst recommendation enablement = project-level
 Project recommendation = manual run
 ```
@@ -56,16 +57,15 @@ defaults are copied into the project settings at creation time. After a project
 exists, changing a global default must not silently flip that project's model
 evaluation behavior.
 
-New projects should default to model evaluation disabled unless the user
-explicitly chooses a different project template/default. If global provider
-settings are configured, the create/edit project flow can expose an explicit
-"enable model evaluation" switch.
+New projects should default upload-time model evaluation automation to disabled
+unless the user explicitly chooses a different project template/default.
 
-The project setting is the source of truth for whether automatic model
-evaluation runs. The global provider state only answers whether model work can
-run at all. In other words, provider/model capability is global, but model
-evaluation enablement is project-level. Global defaults affect new projects only
-and must not silently mutate existing project settings.
+The project setting is the source of truth for whether automatic upload-time
+model evaluation runs. Manual evaluation does not need a separate enable switch:
+if the project has a usable provider and prompt pack, a user action can enqueue
+evaluation for selected asset groups. The global provider state only answers
+whether model work can run at all. Global defaults affect new projects only and
+must not silently mutate existing project settings.
 
 ### Recommendation Triggers
 
@@ -130,61 +130,53 @@ config in app-private files via the core config path and exposes only
 `api_key_configured` back to UI. Projects do not inherit a provider implicitly;
 project evaluation settings must select a `model_provider_settings_id`.
 
-### Prompt Profiles
+### Prompt Packs
 
-Prompt profiles are named, tagged, and versioned.
+Prompt packs are global photographic preference resources, not SQLite models.
+They live under app-private state as shareable folders:
 
 ```text
-prompt_profiles
-  prompt_profile_id TEXT PRIMARY KEY
-  scope TEXT NOT NULL                -- global | project
-  project_id TEXT NULL
-  name TEXT NOT NULL                 -- e.g. Portrait Conservative
-  style_tags_json TEXT NOT NULL      -- ["portrait", "conservative"]
-  scene_profile TEXT NOT NULL        -- general | portrait | action | landscape | custom
-  active_version_id TEXT NULL
-  built_in INTEGER NOT NULL
-  enabled INTEGER NOT NULL
-  created_at_ms INTEGER NOT NULL
-  updated_at_ms INTEGER NOT NULL
-
-prompt_profile_versions
-  prompt_version_id TEXT PRIMARY KEY
-  prompt_profile_id TEXT NOT NULL
-  prompt_text TEXT NOT NULL
-  output_schema_version TEXT NOT NULL
-  prompt_hash TEXT NOT NULL
-  created_at_ms INTEGER NOT NULL
+prompt-packs/
+  user/
+    <prompt-pack-folder>/
+      manifest.json
+      Prompt.md
 ```
 
-Editing a built-in prompt creates a project-scoped copy. Editing any prompt
-creates a new version. Existing evaluations keep their old prompt version and
-prompt hash.
+Built-in prompt packs are shipped by the app and are read-only. Editing a
+built-in pack creates a user-owned copy in `prompt-packs/<package>/...`.
+Projects only store the selected prompt pack id. There is no project-scoped
+prompt fork and no prompt-version table in the current product shape.
 
-Every model evaluation and recommendation run records the active prompt profile
-id, prompt version id, and prompt hash in its run snapshot. Built-in prompts are
-read-only; editing one means forking it into an editable project-scoped profile
-first, then creating a new immutable version.
+`Prompt.md` is Markdown and contains the user-editable photographic preference:
+style, taste, tolerance, and judging priorities. `manifest.json` contains product
+metadata such as id, name, style tags, scene profile, built-in flag, package
+folder, and update timestamp.
 
-The output schema remains app-controlled. Users edit the evaluation language and
-rubric, not the JSON contract.
+The output schema remains app-controlled. Users edit the preference text and
+labels, not the JSON contract. Core composes the final prompts by combining:
 
-Prompt names and style tags are product-facing organization tools. A profile can
-be named by intent, such as `Portrait Conservative` or `Documentary Street`, and
-tagged with short style labels such as `portrait`, `conservative`, `film`,
+- system-owned model role and safety constraints;
+- task-specific locked instruction for single/group evaluation, burst
+  selection, or project selection;
+- app-owned input/output schema and parsing rules;
+- user-owned Markdown preference from the selected prompt pack.
+
+Prompt pack names and style tags are product-facing organization tools. A pack
+can be named by intent, such as `Portrait Conservative` or `Documentary Street`,
+and tagged with short style labels such as `portrait`, `conservative`, `film`,
 `landscape`, or `low-saturation`. Tags do not change behavior by themselves; the
-selected prompt version and project scene profile determine behavior.
+selected prompt pack and project scene profile determine behavior.
 
 ### Project Evaluation Settings
 
 ```text
 project_evaluation_settings
   project_id TEXT PRIMARY KEY
-  model_evaluation_enabled INTEGER NOT NULL
   auto_evaluate_on_upload INTEGER NOT NULL
   auto_burst_recommendation_enabled INTEGER NOT NULL
   project_recommendation_mode TEXT NOT NULL  -- manual
-  prompt_profile_id TEXT NULL
+  prompt_pack_id TEXT NULL
   scene_profile TEXT NOT NULL                -- general | portrait | action | landscape | custom
   cv_policy TEXT NOT NULL                    -- loose | standard | strict
   allow_risky_model_selects INTEGER NOT NULL
@@ -209,9 +201,9 @@ evaluation_runs
   status TEXT NOT NULL                -- pending | running | ready | failed | skipped
   provider_kind TEXT NOT NULL
   provider_model TEXT NOT NULL
-  prompt_profile_id TEXT NULL
-  prompt_version_id TEXT NULL
-  prompt_hash TEXT NULL
+  prompt_pack_id TEXT NULL
+  prompt_pack_version TEXT NULL
+  prompt_hash TEXT NULL              -- hash of composed prompt inputs when available
   settings_snapshot_json TEXT NOT NULL
   error_message TEXT NULL
   started_at_ms INTEGER NULL
@@ -241,16 +233,17 @@ model_evaluations
   strengths_json TEXT NOT NULL
   weaknesses_json TEXT NOT NULL
   technical_warnings_json TEXT NOT NULL
-  prompt_profile_id TEXT NULL
-  prompt_version_id TEXT NULL
-  prompt_hash TEXT NULL
+  prompt_pack_id TEXT NULL
+  prompt_pack_version TEXT NULL
+  prompt_hash TEXT NULL              -- hash of composed prompt inputs when available
   created_at_ms INTEGER NOT NULL
   updated_at_ms INTEGER NOT NULL
 ```
 
 The local stub remains a development/provider fallback only. The UI must not
 label stub results as real model evaluation. Any row produced by this path must
-store `evaluator_kind = local_stub` and expose that source to UI/API callers.
+store `evaluator_kind = local_stub` and expose that source to API callers; user
+UI labels it as local analysis instead of rendering the raw enum.
 
 ### Portrait Subject Assessments
 
@@ -300,8 +293,7 @@ publish completed
   -> enqueue universal technical assessment
   -> if project.scene_profile == portrait:
        enqueue portrait subject assessment
-  -> if project.model_evaluation_enabled
-       and project.auto_evaluate_on_upload
+  -> if project.auto_evaluate_on_upload
        and provider is configured:
        enqueue asset model evaluation
   -> if provider missing:
@@ -330,11 +322,12 @@ analysis drains, or burst-stable events.
 ### Prompt Edits
 
 ```text
-user edits prompt profile
-  -> create new prompt_profile_version
-  -> set active_version_id
-  -> mark project model evaluations stale by prompt hash mismatch
-  -> do not delete old evaluations
+user edits prompt pack
+  -> if built-in, create user-owned copy under prompt-packs/<package>/
+  -> save Prompt.md and manifest metadata
+  -> keep output schema and task protocol system-owned
+  -> future evaluations use the updated pack
+  -> do not mutate old evaluation/recommendation rows
 ```
 
 ## UI Design
@@ -353,14 +346,20 @@ Global settings show:
 
 Project settings show:
 
-- Model evaluation switch.
+- Project scene selector as a first-level setting.
+- Project intelligence secondary settings for model provider, automatic
+  workflow, prompt pack selection, and technical risk thresholds.
 - Auto evaluate on upload switch.
 - Auto group recommendation switch.
-- Scene profile selector.
-- Prompt profile selector and edit action.
-- CV policy selector.
+- Prompt pack selector and edit action.
+- Technical risk preset selector and optional custom thresholds.
 - Risk-photo participation switch.
 - Manual project recommendation status and last run metadata.
+
+Portrait-specific local risk controls appear only when project scene is
+`portrait`. The old standalone "portrait capability" status row is not part of
+the product UI because the active scene and threshold controls already express
+that state.
 
 ### Project Photos
 
@@ -390,7 +389,8 @@ When API key/provider is missing:
 - UI shows "model provider not configured" rather than "waiting forever".
 - Existing imported evaluations remain readable.
 - Development local stub can be used only when explicitly enabled as a dev
-  evaluator; it must show source `local_stub`.
+  evaluator; API data must show source `local_stub`, while user UI labels it
+  as local analysis.
 - Project-level "Generate Project Recommendation" remains disabled until provider
   capability exists.
 
@@ -400,25 +400,29 @@ When API key/provider is missing:
 
 - Global provider settings can represent configured and unconfigured states
   without storing an API key in SQLite.
-- Project settings can independently enable/disable model evaluation.
-- A project can select scene profile, prompt profile, CV policy, batch size, and
+- Project settings can independently enable/disable automatic upload-time model
+  evaluation.
+- A project can select scene profile, prompt pack, CV policy, batch size, and
   image send mode overrides.
-- New projects default to model evaluation disabled.
+- New projects default to upload-time model evaluation automation disabled.
 
-### Prompt Profiles
+### Prompt Packs
 
-- Built-in prompt profiles can be listed with style tags.
-- Editing a built-in prompt creates a project-scoped editable copy.
-- Editing any prompt creates a new immutable version.
-- Model evaluations store prompt profile id, prompt version id, and prompt hash.
+- Built-in and user prompt packs can be listed by package group with style tags.
+- A user can create, edit, delete, and share user-owned prompt pack folders.
+- Editing a built-in prompt creates a user-owned copy; it does not create a
+  project-scoped prompt.
+- Prompt preference text is Markdown in `Prompt.md`.
+- Model evaluations store the selected prompt pack id and the composed prompt
+  hash when available.
 - A prompt edit does not rewrite old model evaluation rows.
 
 ### Pipeline
 
-- Universal technical assessment runs even when model evaluation is disabled.
+- Universal technical assessment always runs independently of model provider state.
 - Portrait subject assessment runs only for portrait projects.
-- Auto model evaluation runs only when project setting is enabled and provider
-  is configured.
+- Auto model evaluation runs only when upload-time evaluation is enabled and
+  provider is configured; manual model evaluation remains user-triggered.
 - Auto burst recommendation is project-configurable.
 - Project recommendation is manual-only.
 - Missing provider state is explicit and testable.

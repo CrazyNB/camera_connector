@@ -113,6 +113,44 @@ fn service_archives_active_project_and_restores_selection() {
 }
 
 #[test]
+fn service_deletes_project_files_and_clears_active_selection() {
+    let config_path = unique_temp_path("storage-service-delete-project");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service
+        .create_project("Delete Me")
+        .expect("project should create");
+    service
+        .set_active_project(&project.project_id)
+        .expect("active project should save");
+    let image_path = config_path
+        .parent()
+        .expect("config dir should exist")
+        .join("IMG_DELETE.JPG");
+    std::fs::write(&image_path, b"fake image").expect("image file should create");
+    let mut transfer = completed_transfer("ftp:delete-project", "DCIM/100/IMG_DELETE.JPG", 100);
+    transfer.final_location = Some(StoredObjectLocation::local_path(&image_path));
+    service
+        .record_project_transfer(&project.project_id, transfer)
+        .expect("project transfer should record");
+
+    assert!(service
+        .delete_project(&project.project_id)
+        .expect("project should delete"));
+
+    assert!(!image_path.exists());
+    assert!(service
+        .active_project()
+        .expect("active project should load")
+        .is_none());
+    assert!(service
+        .list_projects()
+        .expect("projects should list")
+        .is_empty());
+
+    let _ = std::fs::remove_file(config_path);
+}
+
+#[test]
 fn service_renames_project_and_keeps_active_selection() {
     let config_path = unique_temp_path("storage-service-rename-project");
     let service = CameraConnectorService::new(Some(config_path.clone()));
@@ -427,75 +465,6 @@ fn service_queries_project_group_members_by_stable_group_id() {
     assert_eq!(second_assets.len(), 1);
     assert_ne!(first_assets[0].group_id, second_assets[0].group_id);
     assert!(ambiguous_assets.is_empty());
-
-    let _ = std::fs::remove_file(config_path);
-}
-
-#[test]
-fn service_moves_project_group_between_projects() {
-    let config_path = unique_temp_path("storage-service-project-group-move");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let source_project = service
-        .create_project("Wrong Project")
-        .expect("source project should create");
-    let target_project = service
-        .create_project("Correct Project")
-        .expect("target project should create");
-
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:jpg", "DCIM/100/IMG_5001.JPG", 20),
-        )
-        .expect("jpg should record");
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:raw", "DCIM/100/IMG_5001.NEF", 21),
-        )
-        .expect("raw should record");
-    let source_page = service
-        .project_asset_group_page_with_query(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("source groups should query");
-    let source_group_id = source_page.groups[0]
-        .group_id
-        .as_deref()
-        .expect("source group should expose id");
-
-    let moved_group = service
-        .move_project_asset_group(
-            &source_project.project_id,
-            source_group_id,
-            &target_project.project_id,
-        )
-        .expect("group move should run")
-        .expect("group should move");
-    let source_after = service
-        .project_asset_group_page_with_query(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("source groups should query after move");
-    let target_after = service
-        .project_asset_group_page_with_query(
-            &target_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .expect("target groups should query after move");
-
-    assert_eq!(moved_group.project_id, target_project.project_id);
-    assert_eq!(source_after.total_groups, 0);
-    assert_eq!(target_after.total_groups, 1);
-    assert_eq!(target_after.summary.asset_count, 2);
 
     let _ = std::fs::remove_file(config_path);
 }

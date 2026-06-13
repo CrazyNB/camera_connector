@@ -597,13 +597,13 @@ function Create-And-EnterVerificationProject {
 
 function Enter-ProjectWorkspaceIfNeeded {
     param([string]$Xml)
-    $projectManagementText = U @(0x9879,0x76EE,0x7BA1,0x7406)
     $enterText = U @(0x8FDB,0x5165)
     $selectText = U @(0x9009,0x62E9)
+    $newProjectText = U @(0x65B0,0x5EFA,0x9879,0x76EE)
     if (Test-ProjectWorkspaceXml $Xml) {
         return $Xml
     }
-    if (-not $Xml.Contains($projectManagementText)) {
+    if (-not (Test-UiNodeByText $Xml $enterText) -and -not (Test-UiNodeByText $Xml $selectText) -and -not $Xml.Contains($newProjectText)) {
         return $Xml
     }
     if (Test-UiNodeByText $Xml $enterText) {
@@ -902,7 +902,6 @@ $xml = Collapse-ReceiverLauncherIfExpanded (Enter-ProjectWorkspaceIfNeeded (Get-
 $photoSwipeAttempts = if ($RealImagesOnly) { [Math]::Max(12, $uploadCases.Count + 8) } else { 6 }
 if ($RealImagesOnly) {
     $assetGridUi = Swipe-UntilUiContains "DSC_" "uploaded image group in project photos" $photoSwipeAttempts
-    Assert-UiContains $assetGridUi (U @(0x8BC4,0x5206)) "model score in project photos"
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "collect_android_diagnostics.ps1") -Serial $Serial -OutputDir (Join-Path $root "target\android-diagnostics\emulator-ftp-upload-latest")
     if ($LASTEXITCODE -ne 0) {
         throw "Android diagnostics collection failed after FTP upload verification."

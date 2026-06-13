@@ -21,8 +21,8 @@ internal fun formatEpochMillisTextForDisplay(value: String): String =
     value.toLongOrNull()?.let { formatEpochMillisForDisplay(it) } ?: value
 
 internal fun publishQueueAttentionLabel(state: PublishQueueState): String? = when {
-    state.failedCount > 0 -> "发布失败 ${state.failedCount}"
-    state.pendingCount > 0 -> "待发布 ${state.pendingCount}"
+    state.failedCount > 0 -> "\u5199\u5165\u5931\u8d25 ${state.failedCount}"
+    state.pendingCount > 0 -> "\u5f85\u5199\u5165 ${state.pendingCount}"
     else -> null
 }
 

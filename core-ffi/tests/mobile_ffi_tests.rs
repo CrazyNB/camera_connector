@@ -11,34 +11,33 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_archive_project_json,
     camera_connector_mobile_core_claim_next_publish_item_json,
     camera_connector_mobile_core_complete_publish_json, camera_connector_mobile_core_create,
-    camera_connector_mobile_core_create_global_prompt_profile_json,
+    camera_connector_mobile_core_create_global_prompt_pack_json,
     camera_connector_mobile_core_create_project_json,
+    camera_connector_mobile_core_delete_global_prompt_pack_json,
     camera_connector_mobile_core_delete_model_provider_settings_json,
-    camera_connector_mobile_core_destroy, camera_connector_mobile_core_fork_prompt_profile_json,
+    camera_connector_mobile_core_destroy, camera_connector_mobile_core_fork_prompt_pack_json,
     camera_connector_mobile_core_free_string,
     camera_connector_mobile_core_generate_project_recommendation_json,
-    camera_connector_mobile_core_global_prompt_profiles_json,
+    camera_connector_mobile_core_global_prompt_packs_json,
     camera_connector_mobile_core_latest_project_recommendation_run_status_json,
     camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
-    camera_connector_mobile_core_merge_burst_member_json,
     camera_connector_mobile_core_model_provider_settings_json,
     camera_connector_mobile_core_model_provider_settings_list_json,
-    camera_connector_mobile_core_move_project_group_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_evaluation_settings_json,
     camera_connector_mobile_core_project_group_assets_json,
-    camera_connector_mobile_core_prompt_profiles_for_project_json,
+    camera_connector_mobile_core_prompt_packs_for_project_json,
     camera_connector_mobile_core_release_failed_publish_retries_json,
     camera_connector_mobile_core_remove_device_account_json,
     camera_connector_mobile_core_rename_project_json,
     camera_connector_mobile_core_restore_project_json,
     camera_connector_mobile_core_save_device_account_json,
-    camera_connector_mobile_core_save_global_prompt_version_json,
+    camera_connector_mobile_core_save_global_prompt_pack_json,
     camera_connector_mobile_core_save_model_provider_settings_json,
     camera_connector_mobile_core_save_project_evaluation_settings_json,
-    camera_connector_mobile_core_save_prompt_version_json,
+    camera_connector_mobile_core_save_prompt_pack_json,
     camera_connector_mobile_core_save_receiver_settings_json,
     camera_connector_mobile_core_set_active_project_json,
     camera_connector_mobile_core_split_burst_member_json,
@@ -204,7 +203,7 @@ fn ffi_model_provider_settings_json_round_trips_without_secrets() {
 }
 
 #[test]
-fn ffi_project_settings_and_prompt_profiles_json_are_available() {
+fn ffi_project_settings_and_prompt_packs_json_are_available() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
     let service = CameraConnectorService::new(Some(config_path.clone()));
@@ -213,11 +212,10 @@ fn ffi_project_settings_and_prompt_profiles_json_are_available() {
     let project_id = CString::new(project.project_id.clone()).unwrap();
     let patch = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "auto_evaluate_on_upload":true,
             "auto_burst_recommendation_enabled":false,
             "project_recommendation_mode":"manual",
-            "prompt_profile_id":null,
+            "prompt_pack_id":null,
             "scene_profile":"landscape",
             "cv_policy":"loose",
             "allow_risky_model_selects":true,
@@ -239,7 +237,7 @@ fn ffi_project_settings_and_prompt_profiles_json_are_available() {
         camera_connector_mobile_core_project_evaluation_settings_json(core, project_id.as_ptr())
     });
     let profiles = take_ffi_string(unsafe {
-        camera_connector_mobile_core_prompt_profiles_for_project_json(core, project_id.as_ptr())
+        camera_connector_mobile_core_prompt_packs_for_project_json(core, project_id.as_ptr())
     });
     unsafe { camera_connector_mobile_core_destroy(core) };
 
@@ -253,7 +251,7 @@ fn ffi_project_settings_and_prompt_profiles_json_are_available() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|profile| profile["prompt_profile_id"] == "general-default"
+        .any(|profile| profile["prompt_pack_id"] == "general-default"
             && profile["built_in"] == true
             && profile["style_tags"].is_array()));
 }
@@ -269,7 +267,6 @@ fn ffi_rejects_invalid_settings_enum_json_envelopes() {
     let invalid_provider = CString::new(r#"{"provider_kind":"OpenAI"}"#).unwrap();
     let invalid_scene = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "project_recommendation_mode":"manual",
             "scene_profile":"Portrait",
             "cv_policy":"standard"
@@ -278,7 +275,6 @@ fn ffi_rejects_invalid_settings_enum_json_envelopes() {
     .unwrap();
     let invalid_mode = CString::new(
         r#"{
-            "model_evaluation_enabled":false,
             "project_recommendation_mode":"automatic",
             "scene_profile":"general",
             "cv_policy":"standard"
@@ -349,6 +345,7 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
     .unwrap();
     let source_profile_id = CString::new("general-default").unwrap();
     let fork_name = CString::new("FFI Editable").unwrap();
+    let distribution_folder = CString::new("ffi-pack").unwrap();
     let prompt_text = CString::new("Return concise project recommendations.").unwrap();
 
     let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
@@ -362,31 +359,31 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
     });
 
     let forked = take_ffi_string(unsafe {
-        camera_connector_mobile_core_fork_prompt_profile_json(
+        camera_connector_mobile_core_fork_prompt_pack_json(
             core,
             project_id.as_ptr(),
             source_profile_id.as_ptr(),
             fork_name.as_ptr(),
+            distribution_folder.as_ptr(),
         )
     });
     let forked: Value = serde_json::from_str(&forked).unwrap();
     assert_eq!(forked["ok"], true);
-    assert_eq!(forked["value"]["scope"], "project");
-    let prompt_profile_id =
-        CString::new(forked["value"]["prompt_profile_id"].as_str().unwrap()).unwrap();
+    assert_eq!(forked["value"]["built_in"], false);
+    assert_eq!(forked["value"]["author"], "user");
+    let prompt_pack_id = CString::new(forked["value"]["prompt_pack_id"].as_str().unwrap()).unwrap();
     let project_settings = CString::new(format!(
         r#"{{
-            "model_evaluation_enabled":false,
             "auto_evaluate_on_upload":false,
             "auto_burst_recommendation_enabled":true,
             "project_recommendation_mode":"manual",
-            "prompt_profile_id":{},
+            "prompt_pack_id":{},
             "model_provider_settings_id":"global",
             "scene_profile":"general",
             "cv_policy":"standard",
             "allow_risky_model_selects":false
         }}"#,
-        serde_json::to_string(prompt_profile_id.to_str().unwrap()).unwrap()
+        serde_json::to_string(prompt_pack_id.to_str().unwrap()).unwrap()
     ))
     .unwrap();
     take_ffi_string(unsafe {
@@ -398,10 +395,16 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
     });
 
     let version = take_ffi_string(unsafe {
-        camera_connector_mobile_core_save_prompt_version_json(
+        let prompt_name = CString::new("Edited Project Preference").unwrap();
+        let style_tags = CString::new(r#"["project","edited"]"#).unwrap();
+        let scene_profile = CString::new("general").unwrap();
+        camera_connector_mobile_core_save_prompt_pack_json(
             core,
             project_id.as_ptr(),
-            prompt_profile_id.as_ptr(),
+            prompt_pack_id.as_ptr(),
+            prompt_name.as_ptr(),
+            style_tags.as_ptr(),
+            scene_profile.as_ptr(),
             prompt_text.as_ptr(),
         )
     });
@@ -421,8 +424,8 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
     let run: Value = serde_json::from_str(&run).unwrap();
     assert_eq!(version["ok"], true);
     assert_eq!(
-        version["value"]["prompt_profile_id"],
-        prompt_profile_id.to_str().unwrap()
+        version["value"]["prompt_pack_id"],
+        prompt_pack_id.to_str().unwrap()
     );
     assert_eq!(recommendation["ok"], true);
     assert!(recommendation["value"]["run_id"].as_str().is_some());
@@ -432,74 +435,99 @@ fn ffi_prompt_edit_and_manual_project_recommendation_endpoints_have_envelopes() 
 }
 
 #[test]
-fn ffi_creates_global_prompt_profile_with_structured_preference_envelope() {
+fn ffi_creates_global_prompt_pack_with_structured_preference_envelope() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
         .expect("config path should not contain nul");
     let name = CString::new("Documentary Preference").unwrap();
     let style_tags = CString::new(r#"["documentary","portrait"]"#).unwrap();
     let scene_profile = CString::new("portrait").unwrap();
+    let distribution_folder = CString::new("documentary-pack").unwrap();
     let prompt_text =
         CString::new("Prefer honest documentary moments, natural skin tone, and clear subjects.")
             .unwrap();
 
     let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
     let created = take_ffi_string(unsafe {
-        camera_connector_mobile_core_create_global_prompt_profile_json(
+        camera_connector_mobile_core_create_global_prompt_pack_json(
             core,
             name.as_ptr(),
             style_tags.as_ptr(),
             scene_profile.as_ptr(),
+            distribution_folder.as_ptr(),
             prompt_text.as_ptr(),
         )
     });
     let listed =
-        take_ffi_string(unsafe { camera_connector_mobile_core_global_prompt_profiles_json(core) });
-    let prompt_profile_id = {
+        take_ffi_string(unsafe { camera_connector_mobile_core_global_prompt_packs_json(core) });
+    let prompt_pack_id = {
         let created: Value = serde_json::from_str(&created).unwrap();
-        CString::new(created["value"]["prompt_profile_id"].as_str().unwrap()).unwrap()
+        CString::new(created["value"]["prompt_pack_id"].as_str().unwrap()).unwrap()
     };
+    let updated_name = CString::new("Documentary Preference Edited").unwrap();
+    let updated_style_tags = CString::new(r#"["documentary","edited"]"#).unwrap();
+    let updated_scene_profile = CString::new("landscape").unwrap();
     let updated_text = CString::new("Prefer color restraint and quiet subject emotion.").unwrap();
     let updated = take_ffi_string(unsafe {
-        camera_connector_mobile_core_save_global_prompt_version_json(
+        camera_connector_mobile_core_save_global_prompt_pack_json(
             core,
-            prompt_profile_id.as_ptr(),
+            prompt_pack_id.as_ptr(),
+            updated_name.as_ptr(),
+            updated_style_tags.as_ptr(),
+            updated_scene_profile.as_ptr(),
             updated_text.as_ptr(),
         )
     });
+    let deleted = take_ffi_string(unsafe {
+        camera_connector_mobile_core_delete_global_prompt_pack_json(core, prompt_pack_id.as_ptr())
+    });
+    let after_delete =
+        take_ffi_string(unsafe { camera_connector_mobile_core_global_prompt_packs_json(core) });
     unsafe { camera_connector_mobile_core_destroy(core) };
 
     let created: Value = serde_json::from_str(&created).unwrap();
     let listed: Value = serde_json::from_str(&listed).unwrap();
     let updated: Value = serde_json::from_str(&updated).unwrap();
+    let deleted: Value = serde_json::from_str(&deleted).unwrap();
+    let after_delete: Value = serde_json::from_str(&after_delete).unwrap();
     assert_eq!(created["ok"], true);
-    assert_eq!(created["value"]["scope"], "global");
+    assert_eq!(created["value"]["built_in"], false);
+    assert_eq!(created["value"]["author"], "user");
     assert_eq!(created["value"]["name"], "Documentary Preference");
     assert_eq!(created["value"]["scene_profile"], "portrait");
     assert_eq!(created["value"]["style_tags"][0], "documentary");
     assert_eq!(created["value"]["style_tags"][1], "portrait");
     assert_eq!(created["value"]["built_in"], false);
-    assert!(created["value"]["active_version_id"].as_str().is_some());
-    assert!(created["value"]["active_prompt_text"]
-        .as_str()
-        .unwrap()
-        .contains("shared_preference"));
+    assert!(created["value"]["version"].as_str().is_some());
+    let created_prompt_text = created["value"]["prompt_text"].as_str().unwrap();
+    assert!(created_prompt_text.contains("honest documentary moments"));
+    assert!(!created_prompt_text.contains("shared_preference"));
     assert!(listed["value"].as_array().unwrap().iter().any(|profile| {
-        profile["prompt_profile_id"] == created["value"]["prompt_profile_id"]
-            && profile["active_prompt_text"]
+        profile["prompt_pack_id"] == created["value"]["prompt_pack_id"]
+            && profile["prompt_text"]
                 .as_str()
                 .unwrap()
                 .contains("honest documentary moments")
     }));
     assert_eq!(updated["ok"], true);
     assert_eq!(
-        updated["value"]["prompt_profile_id"],
-        created["value"]["prompt_profile_id"]
+        updated["value"]["prompt_pack_id"],
+        created["value"]["prompt_pack_id"]
     );
-    assert!(updated["value"]["active_prompt_text"]
+    assert_eq!(updated["value"]["name"], "Documentary Preference Edited");
+    assert_eq!(updated["value"]["scene_profile"], "landscape");
+    assert_eq!(updated["value"]["style_tags"][1], "edited");
+    assert!(updated["value"]["prompt_text"]
         .as_str()
         .unwrap()
         .contains("color restraint"));
+    assert_eq!(deleted["ok"], true);
+    assert_eq!(deleted["value"]["deleted"], true);
+    assert!(!after_delete["value"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|profile| { profile["prompt_pack_id"] == created["value"]["prompt_pack_id"] }));
 }
 
 #[test]
@@ -688,68 +716,6 @@ fn ffi_returns_project_group_assets_json_envelope() {
 }
 
 #[test]
-fn ffi_moves_project_group_json_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let source_project = service.create_project("FFI Wrong Project").unwrap();
-    let target_project = service.create_project("FFI Correct Project").unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:ffi-move-jpg", "DCIM/100/IMG_6102.JPG", 20),
-        )
-        .unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:ffi-move-raw", "DCIM/100/IMG_6102.NEF", 21),
-        )
-        .unwrap();
-    let source_page = service
-        .project_asset_group_page_with_query(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .unwrap();
-    let group_id = source_page.groups[0].group_id.clone().unwrap();
-
-    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
-        .expect("config path should not contain nul");
-    let source_project_id = CString::new(source_project.project_id.clone()).unwrap();
-    let target_project_id = CString::new(target_project.project_id.clone()).unwrap();
-    let group_id = CString::new(group_id).unwrap();
-
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-    let response = take_ffi_string(unsafe {
-        camera_connector_mobile_core_move_project_group_json(
-            core,
-            source_project_id.as_ptr(),
-            group_id.as_ptr(),
-            target_project_id.as_ptr(),
-        )
-    });
-    let source_dashboard = take_ffi_string(unsafe {
-        camera_connector_mobile_core_project_dashboard_json(core, source_project_id.as_ptr(), 0, 25)
-    });
-    let target_dashboard = take_ffi_string(unsafe {
-        camera_connector_mobile_core_project_dashboard_json(core, target_project_id.as_ptr(), 0, 25)
-    });
-    unsafe { camera_connector_mobile_core_destroy(core) };
-
-    let value: Value = serde_json::from_str(&response).unwrap();
-    let source_dashboard: Value = serde_json::from_str(&source_dashboard).unwrap();
-    let target_dashboard: Value = serde_json::from_str(&target_dashboard).unwrap();
-    assert_eq!(value["ok"], true);
-    assert_eq!(value["value"]["project_id"], target_project.project_id);
-    assert_eq!(value["value"]["member_count"], 2);
-    assert_eq!(source_dashboard["value"]["assets"]["total_groups"], 0);
-    assert_eq!(target_dashboard["value"]["assets"]["total_groups"], 1);
-}
-
-#[test]
 fn ffi_splits_burst_member_json_envelope() {
     let fixture = three_member_burst_fixture("FFI Split Decision");
     let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
@@ -767,75 +733,6 @@ fn ffi_splits_burst_member_json_envelope() {
     assert_eq!(updated["ok"], true);
     assert_eq!(updated["value"]["member_count"], 2);
     assert_eq!(updated["value"]["recommendation_status"], "pending");
-}
-
-#[test]
-fn ffi_merges_burst_member_json_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let project = service.create_project("FFI Merge Decision").unwrap();
-    for (transfer_id, path, completed_at_ms) in [
-        ("ftp:ffi-merge-a-1", "DCIM/250/IMG_8251.JPG", 1000),
-        ("ftp:ffi-merge-a-2", "DCIM/250/IMG_8252.JPG", 1100),
-        ("ftp:ffi-merge-b-1", "DCIM/251/IMG_9251.JPG", 5000),
-        ("ftp:ffi-merge-b-2", "DCIM/251/IMG_9252.JPG", 5100),
-    ] {
-        service
-            .record_project_transfer(
-                &project.project_id,
-                completed_transfer(transfer_id, path, completed_at_ms),
-            )
-            .unwrap();
-    }
-    service.drain_analysis_jobs(10).unwrap();
-    let page = service
-        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
-        .unwrap();
-    let target = page
-        .groups
-        .iter()
-        .find(|group| {
-            group
-                .primary
-                .original_path
-                .as_deref()
-                .map(|path| path.ends_with("IMG_8251.JPG"))
-                .unwrap_or(false)
-        })
-        .unwrap();
-    let source = page
-        .groups
-        .iter()
-        .find(|group| {
-            group
-                .primary
-                .original_path
-                .as_deref()
-                .map(|path| path.ends_with("IMG_9251.JPG"))
-                .unwrap_or(false)
-        })
-        .unwrap();
-    let target_burst_id =
-        CString::new(target.burst.as_ref().unwrap().burst_group_id.as_str()).unwrap();
-    let source_group_id = CString::new(source.group_id.as_ref().unwrap().as_str()).unwrap();
-    let config_path = CString::new(config_path.to_string_lossy().as_bytes()).unwrap();
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-
-    let merged = take_ffi_string(unsafe {
-        camera_connector_mobile_core_merge_burst_member_json(
-            core,
-            target_burst_id.as_ptr(),
-            source_group_id.as_ptr(),
-        )
-    });
-    unsafe { camera_connector_mobile_core_destroy(core) };
-
-    let merged: Value = serde_json::from_str(&merged).unwrap();
-    assert_eq!(merged["ok"], true);
-    assert_eq!(merged["value"]["member_count"], 4);
-    assert_eq!(merged["value"]["recommendation_status"], "pending");
-    assert_eq!(merged["value"]["manual_grouping_state"], "merge");
 }
 
 #[test]
