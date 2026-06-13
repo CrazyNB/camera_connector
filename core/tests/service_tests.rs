@@ -1,8 +1,8 @@
-﻿use camera_connector_core::{
+use camera_connector_core::{
     append_transfer_record, record_device_authenticated, record_device_connected,
     write_receiver_runtime_status, AssetGroupQuery, CameraConnectorConfig, CameraConnectorService,
-    CvPolicy, ImportSource, ModelProviderKind, ModelProviderSettings, ModelSendMode, ObjectFormat,
-    GuestMark, PreviewSample, ProjectRecommendationMode, PushProtocol, ReceiverAuthMode,
+    CvPolicy, GuestMark, ImportSource, ModelProviderKind, ModelProviderSettings, ModelSendMode,
+    ObjectFormat, PreviewSample, ProjectRecommendationMode, PushProtocol, ReceiverAuthMode,
     ReceiverConfigRequest, ReceiverRuntimePhase, ReceiverRuntimeStatus, ReceiverSettingsUpdate,
     SceneProfile, StoredObjectLocation, TechnicalAssessmentPolicy, TechnicalDefectType,
     TechnicalGateStatus, TransferQuery, TransferRecord, TransferStatus,
@@ -10,7 +10,10 @@
 
 #[test]
 fn guest_mark_accepts_only_share_selection_values() {
-    assert_eq!(GuestMark::from_wire("favorite").unwrap(), GuestMark::Favorite);
+    assert_eq!(
+        GuestMark::from_wire("favorite").unwrap(),
+        GuestMark::Favorite
+    );
     assert_eq!(GuestMark::from_wire("marked").unwrap(), GuestMark::Marked);
     assert_eq!(GuestMark::from_wire("reject").unwrap(), GuestMark::Reject);
     assert!(GuestMark::from_wire("delete").is_none());

@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::lan_share::GuestMark;
+
 use super::{ObjectFormat, ReceivedAsset};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,6 +41,8 @@ pub struct ReceivedAssetGroup {
     pub is_flagged: bool,
     #[serde(default)]
     pub user_marks: AssetUserMarks,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_mark: Option<GuestMark>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +122,7 @@ pub fn group_received_assets(assets: Vec<ReceivedAsset>) -> Vec<ReceivedAssetGro
                 is_favorite: false,
                 is_flagged: false,
                 user_marks: AssetUserMarks::default(),
+                guest_mark: None,
             }
         })
         .collect();

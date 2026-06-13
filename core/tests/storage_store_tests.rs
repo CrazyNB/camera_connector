@@ -1,7 +1,8 @@
 use camera_connector_core::{
-    AssetGroupQuery, AssetUserMarks, ObjectFormat, ProjectCapabilities, ProjectKind, ProjectStatus,
-    PushProtocol, ReceiverAccountConfig, ReceiverAuthMode, ReceiverRuntimePhase,
-    ReceiverRuntimeStatus, SqliteStore, StoredObjectLocation, TransferRecord, TransferStatus,
+    AssetGroupQuery, AssetGroupSort, AssetUserMarks, GuestMark, ObjectFormat, ProjectCapabilities,
+    ProjectKind, ProjectStatus, PushProtocol, ReceiverAccountConfig, ReceiverAuthMode,
+    ReceiverRuntimePhase, ReceiverRuntimeStatus, SqliteStore, StoredObjectLocation, TransferRecord,
+    TransferStatus,
 };
 use rusqlite::Connection;
 use std::{thread, time::Duration};
@@ -693,6 +694,86 @@ fn sqlite_store_persists_user_marks_and_filters_asset_groups() {
     );
     assert!(!marked.groups[0].user_marks.favorite);
     assert!(marked.groups[0].user_marks.marked);
+}
+
+#[test]
+fn sqlite_store_creates_lan_share_session_with_query() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("LAN Share")
+        .expect("project should create");
+
+    let session = store
+        .create_lan_share_session(
+            &project.project_id,
+            AssetGroupQuery {
+                collection: Some("favorites".to_string()),
+                sort: AssetGroupSort::ModelScore,
+                ..AssetGroupQuery::default()
+            },
+            Some("Client selects".to_string()),
+            1_000,
+        )
+        .expect("share session should create");
+
+    assert_eq!(session.project_id, project.project_id);
+    assert_eq!(session.query.collection.as_deref(), Some("favorites"));
+    assert_eq!(session.query.sort, AssetGroupSort::ModelScore);
+    assert!(session.active);
+    assert_eq!(session.title.as_deref(), Some("Client selects"));
+    assert_eq!(session.token.len(), 32);
+}
+
+#[test]
+fn sqlite_store_sets_and_clears_lan_share_guest_mark_without_user_marks() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Guest Marks")
+        .expect("project should create");
+    store
+        .record_transfer(
+            &project.project_id,
+            completed_transfer("ftp:guest-mark", "DCIM/100/IMG_9001.JPG", 20),
+        )
+        .expect("transfer should record");
+    let page = store
+        .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("groups should query");
+    let group_id = page.groups[0].group_id.clone().expect("group id");
+    let session = store
+        .create_lan_share_session(&project.project_id, AssetGroupQuery::default(), None, 1_000)
+        .expect("share session should create");
+
+    let mark = store
+        .set_lan_share_guest_mark(
+            &session.share_id,
+            &project.project_id,
+            &group_id,
+            Some(GuestMark::Reject),
+            2_000,
+        )
+        .expect("guest mark should save");
+    assert_eq!(mark.unwrap().guest_mark, GuestMark::Reject);
+
+    let page = store
+        .asset_group_page(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("groups should query");
+    assert_eq!(page.groups[0].guest_mark, Some(GuestMark::Reject));
+    assert!(!page.groups[0].user_marks.favorite);
+    assert!(!page.groups[0].user_marks.marked);
+
+    let cleared = store
+        .set_lan_share_guest_mark(
+            &session.share_id,
+            &project.project_id,
+            &group_id,
+            None,
+            3_000,
+        )
+        .expect("guest mark should clear");
+    assert!(cleared.is_none());
 }
 
 #[test]
