@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use camera_connector_core::{
     AssetFormatRole, AssetGroupModelEvaluationInput, AssetGroupPage, AssetGroupQuery,
     AssetGroupSort, AssetUserMarks, CameraConnectorDashboard, CameraConnectorRuntime,
-    CameraConnectorService, CvPolicy, EvaluationRun, ImporterError, ModelProviderKind,
+    CameraConnectorService, CvPolicy, EvaluationRun, GuestMark, ImporterError, ModelProviderKind,
     ModelProviderSettings, ModelSendMode, ObjectFormat, PreviewSample, Project,
     ProjectEvaluationSettings, ProjectRecommendationMode, PromptPack, PushProtocol,
     ReceiverConfigRequest, ReceiverSettingsConfig, ReceiverSettingsUpdate, SceneProfile,
@@ -37,6 +37,8 @@ pub enum MobileCoreError {
     InvalidAssetFormat(String),
     #[error("invalid asset role: {0}")]
     InvalidAssetRole(String),
+    #[error("invalid guest mark: {0}")]
+    InvalidGuestMark(String),
     #[error("mobile core pointer is null")]
     NullCore,
     #[error("input pointer is null: {0}")]
@@ -92,6 +94,11 @@ pub struct MobileAssetGroupQuery {
 pub struct MobileUserMarksPatch {
     pub favorite: Option<bool>,
     pub marked: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MobileGuestMarkPatch {
+    pub guest_mark: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,6 +350,62 @@ impl MobileCore {
             limit as usize,
         )?;
         Ok(serde_json::to_string(&page)?)
+    }
+
+    pub fn create_lan_share_session_json(
+        &self,
+        project_id: String,
+        query_json: String,
+        title: String,
+    ) -> MobileCoreResult<String> {
+        let query = asset_group_query_from_json(&query_json)?;
+        let session =
+            self.service
+                .create_lan_share_session(&project_id, query, non_blank(title))?;
+        Ok(serde_json::to_string(&session)?)
+    }
+
+    pub fn stop_lan_share_session_json(&self, share_id: String) -> MobileCoreResult<String> {
+        let session = self.service.stop_lan_share_session(&share_id)?;
+        Ok(serde_json::to_string(&session)?)
+    }
+
+    pub fn lan_share_asset_group_page_json(
+        &self,
+        token: String,
+        offset: u32,
+        limit: u32,
+    ) -> MobileCoreResult<String> {
+        let page =
+            self.service
+                .lan_share_asset_group_page(&token, offset as usize, limit as usize)?;
+        Ok(serde_json::to_string(&page)?)
+    }
+
+    pub fn set_lan_share_guest_mark_json(
+        &self,
+        token: String,
+        asset_group_id: String,
+        patch_json: String,
+    ) -> MobileCoreResult<String> {
+        let patch: MobileGuestMarkPatch = if patch_json.trim().is_empty() {
+            MobileGuestMarkPatch::default()
+        } else {
+            serde_json::from_str(&patch_json)?
+        };
+        let guest_mark = guest_mark_from_patch(patch.guest_mark)?;
+        let mark = self
+            .service
+            .set_lan_share_guest_mark(&token, &asset_group_id, guest_mark)?;
+        Ok(serde_json::to_string(&mark.map(|mark| {
+            json!({
+                "share_id": mark.share_id,
+                "project_id": mark.project_id,
+                "asset_group_id": mark.asset_group_id,
+                "guest_mark": mark.guest_mark,
+                "updated_at_ms": mark.updated_at_ms,
+            })
+        }))?)
     }
 
     pub fn project_group_assets_json(
@@ -1375,6 +1438,82 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_asset_group_page_j
 /// # Safety
 ///
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id`, `query_json`, and `title` must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_create_lan_share_session_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+    query_json: *const c_char,
+    title: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let query_json = required_c_string(query_json, "query_json")?;
+        let title = required_c_string(title, "title")?;
+        let session =
+            core_ref(core)?.create_lan_share_session_json(project_id, query_json, title)?;
+        parse_json_value(&session)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `share_id` must be a valid, null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_stop_lan_share_session_json(
+    core: *const MobileCore,
+    share_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let share_id = required_c_string(share_id, "share_id")?;
+        let session = core_ref(core)?.stop_lan_share_session_json(share_id)?;
+        parse_json_value(&session)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `token` must be a valid, null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_lan_share_asset_group_page_json(
+    core: *const MobileCore,
+    token: *const c_char,
+    offset: u32,
+    limit: u32,
+) -> *mut c_char {
+    ffi_response(|| {
+        let token = required_c_string(token, "token")?;
+        let page = core_ref(core)?.lan_share_asset_group_page_json(token, offset, limit)?;
+        parse_json_value(&page)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `token`, `asset_group_id`, and `patch_json` must be valid, null-terminated UTF-8 strings.
+#[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_set_lan_share_guest_mark_json(
+    core: *const MobileCore,
+    token: *const c_char,
+    asset_group_id: *const c_char,
+    patch_json: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let token = required_c_string(token, "token")?;
+        let asset_group_id = required_c_string(asset_group_id, "asset_group_id")?;
+        let patch_json = required_c_string(patch_json, "patch_json")?;
+        let mark =
+            core_ref(core)?.set_lan_share_guest_mark_json(token, asset_group_id, patch_json)?;
+        parse_json_value(&mark)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// `project_id` and `group_id` must be valid, null-terminated UTF-8 strings.
 #[no_mangle]
 pub unsafe extern "C" fn camera_connector_mobile_core_project_group_assets_json(
@@ -2308,6 +2447,13 @@ fn asset_group_query_from_json(query_json: &str) -> MobileCoreResult<AssetGroupQ
     })
 }
 
+fn guest_mark_from_patch(value: Option<String>) -> MobileCoreResult<Option<GuestMark>> {
+    value
+        .and_then(non_blank)
+        .map(|value| GuestMark::from_wire(&value).ok_or(MobileCoreError::InvalidGuestMark(value)))
+        .transpose()
+}
+
 fn non_blank(value: String) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -2586,6 +2732,97 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
                 limit.max(0) as u32,
             )?;
             parse_json_value(&page)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_createLanShareSessionJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+    query_json: JString,
+    title: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        let query_json = required_java_string(env, query_json, "query_json");
+        let title = required_java_string(env, title, "title");
+        java_response(env, || {
+            let session = mobile_core_from_handle(handle)?.create_lan_share_session_json(
+                project_id?,
+                query_json?,
+                title?,
+            )?;
+            parse_json_value(&session)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_stopLanShareSessionJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    share_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let share_id = required_java_string(env, share_id, "share_id");
+        java_response(env, || {
+            let session =
+                mobile_core_from_handle(handle)?.stop_lan_share_session_json(share_id?)?;
+            parse_json_value(&session)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_lanShareAssetGroupPageJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    token: JString,
+    offset: jint,
+    limit: jint,
+) -> jstring {
+    env.with_env(|env| {
+        let token = required_java_string(env, token, "token");
+        java_response(env, || {
+            let page = mobile_core_from_handle(handle)?.lan_share_asset_group_page_json(
+                token?,
+                offset.max(0) as u32,
+                limit.max(0) as u32,
+            )?;
+            parse_json_value(&page)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_setLanShareGuestMarkJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    token: JString,
+    asset_group_id: JString,
+    patch_json: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let token = required_java_string(env, token, "token");
+        let asset_group_id = required_java_string(env, asset_group_id, "asset_group_id");
+        let patch_json = required_java_string(env, patch_json, "patch_json");
+        java_response(env, || {
+            let mark = mobile_core_from_handle(handle)?.set_lan_share_guest_mark_json(
+                token?,
+                asset_group_id?,
+                patch_json?,
+            )?;
+            parse_json_value(&mark)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()

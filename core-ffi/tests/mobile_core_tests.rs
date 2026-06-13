@@ -86,6 +86,55 @@ fn mobile_core_persists_user_marks_and_filters_asset_groups_json() {
 }
 
 #[test]
+fn mobile_core_creates_lan_share_and_sets_guest_mark_json() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.json");
+    let service = CameraConnectorService::new(Some(config_path.clone()));
+    let project = service.create_project("Mobile LAN").unwrap();
+    service
+        .record_project_transfer(
+            &project.project_id,
+            completed_transfer("ftp:lan", "DCIM/100/IMG_7001.JPG", 10),
+        )
+        .unwrap();
+    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
+
+    let session: Value = serde_json::from_str(
+        &core
+            .create_lan_share_session_json(
+                project.project_id.clone(),
+                r#"{"collection":"all","sort":"latest_received"}"#.to_string(),
+                "Client link".to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(session["project_id"], project.project_id);
+    assert_eq!(session["title"], "Client link");
+    let token = session["token"].as_str().unwrap();
+
+    let page: Value = serde_json::from_str(
+        &core
+            .lan_share_asset_group_page_json(token.to_string(), 0, 25)
+            .unwrap(),
+    )
+    .unwrap();
+    let group_id = page["groups"][0]["group_id"].as_str().unwrap();
+
+    let mark: Value = serde_json::from_str(
+        &core
+            .set_lan_share_guest_mark_json(
+                token.to_string(),
+                group_id.to_string(),
+                r#"{"guest_mark":"reject"}"#.to_string(),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mark["guest_mark"], "reject");
+}
+
+#[test]
 fn mobile_core_asset_group_json_exposes_model_evaluator_kind() {
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.json");
