@@ -69,7 +69,7 @@ pub struct TransferQuery {
     pub remote_addr: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetGroupQuery {
     pub username: Option<String>,
     pub source_name: Option<String>,
