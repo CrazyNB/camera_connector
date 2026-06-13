@@ -21,6 +21,68 @@ fn guest_mark_accepts_only_share_selection_values() {
 }
 
 #[test]
+fn service_lan_share_asset_page_uses_saved_query() {
+    let (service, config_path, state_dir) = service_with_state_dir("service-lan-share-query");
+    let project = service
+        .create_project("LAN Query")
+        .expect("project should create");
+    let keep = record_service_jpeg_group(&service, &project.project_id, "KEEP_0001.JPG", 10);
+    let skip = record_service_jpeg_group(&service, &project.project_id, "SKIP_0001.JPG", 20);
+    service
+        .set_asset_group_user_marks(&project.project_id, &keep, Some(true), None)
+        .expect("favorite should save");
+
+    let session = service
+        .create_lan_share_session(
+            &project.project_id,
+            AssetGroupQuery {
+                favorite: Some(true),
+                ..AssetGroupQuery::default()
+            },
+            Some("Favorites".to_string()),
+        )
+        .expect("share session should create");
+
+    let page = service
+        .lan_share_asset_group_page(&session.token, 0, 25)
+        .expect("share page should load");
+
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.groups[0].group_id.as_deref(), Some(keep.as_str()));
+    assert_ne!(page.groups[0].group_id.as_deref(), Some(skip.as_str()));
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
+fn service_guest_reject_mark_does_not_delete_or_mutate_user_marks() {
+    let (service, config_path, state_dir) = service_with_state_dir("service-lan-share-reject");
+    let project = service
+        .create_project("LAN Reject")
+        .expect("project should create");
+    let group_id = record_service_jpeg_group(&service, &project.project_id, "IMG_4040.JPG", 10);
+    let session = service
+        .create_lan_share_session(&project.project_id, AssetGroupQuery::default(), None)
+        .expect("share session should create");
+
+    service
+        .set_lan_share_guest_mark(&session.token, &group_id, Some(GuestMark::Reject))
+        .expect("guest mark should save");
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("page should load");
+    assert_eq!(page.total_groups, 1);
+    assert_eq!(page.groups[0].guest_mark, Some(GuestMark::Reject));
+    assert!(!page.groups[0].user_marks.favorite);
+    assert!(!page.groups[0].user_marks.marked);
+
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_dir_all(state_dir);
+}
+
+#[test]
 fn service_builds_receiver_config_from_saved_accounts() {
     let config_path = unique_temp_path("service-config");
     let output_dir = unique_temp_dir("service-output");
@@ -1123,6 +1185,32 @@ fn completed_transfer(
         completed_at_ms: Some(completed_at_ms),
         error: None,
     }
+}
+
+fn record_service_jpeg_group(
+    service: &CameraConnectorService,
+    project_id: &str,
+    filename: &str,
+    completed_at_ms: i64,
+) -> String {
+    service
+        .record_project_transfer(
+            project_id,
+            completed_transfer(
+                &format!("ftp:{filename}"),
+                &format!("DCIM/100/{filename}"),
+                completed_at_ms,
+            ),
+        )
+        .expect("transfer should record");
+    service
+        .project_asset_group_page_with_query(project_id, AssetGroupQuery::default(), 0, 100)
+        .expect("page should load")
+        .groups
+        .into_iter()
+        .find(|group| group.primary.filename == filename)
+        .and_then(|group| group.group_id)
+        .expect("group should exist")
 }
 
 fn unique_suffix() -> u128 {

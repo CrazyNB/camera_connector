@@ -12,16 +12,16 @@ use crate::{
     recommend_selection_with_model_provider, scan_received_asset_groups, AnalysisEntityType,
     AnalysisJob, AnalysisJobType, AssetFormatRole, AssetUserMarks, BurstGroup,
     BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice, CvPolicy, EvaluationRun,
-    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, ImportSource,
-    ModelProviderKind, ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode,
-    NewAnalysisJob, ObjectFormat, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, ProjectStatus, PromptPack, PromptPackContent, PublishQueueItem,
-    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
-    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
-    SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
-    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TransferRecord,
-    TransferStatus,
+    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, GuestMark,
+    ImportSource, LanShareGuestMark, LanShareSession, ModelProviderKind, ModelProviderSettings,
+    ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob, ObjectFormat, PreviewSample,
+    ProjectEvaluationSettings, ProjectRecommendationMode, ProjectStatus, PromptPack,
+    PromptPackContent, PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig,
+    ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus,
+    ReceiverSettingsConfig, Result, SceneProfile, SelectionCandidateVisualInput,
+    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SqliteStore, StoredAsset, StoredObjectLocation, SubjectAssessment, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TransferRecord, TransferStatus,
 };
 
 const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
@@ -1460,6 +1460,50 @@ impl CameraConnectorService {
             .asset_group_page(project_id, query, offset, limit)
     }
 
+    pub fn create_lan_share_session(
+        &self,
+        project_id: &str,
+        query: AssetGroupQuery,
+        title: Option<String>,
+    ) -> Result<LanShareSession> {
+        let store = self.storage_store()?;
+        ensure_service_project_is_active(&store, project_id)?;
+        store.create_lan_share_session(project_id, query, title, current_time_ms())
+    }
+
+    pub fn stop_lan_share_session(&self, share_id: &str) -> Result<Option<LanShareSession>> {
+        self.storage_store()?
+            .stop_lan_share_session(share_id, current_time_ms())
+    }
+
+    pub fn lan_share_asset_group_page(
+        &self,
+        token: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        let store = self.storage_store()?;
+        let session = active_lan_share_session(&store, token)?;
+        store.asset_group_page(&session.project_id, session.query, offset, limit)
+    }
+
+    pub fn set_lan_share_guest_mark(
+        &self,
+        token: &str,
+        asset_group_id: &str,
+        guest_mark: Option<GuestMark>,
+    ) -> Result<Option<LanShareGuestMark>> {
+        let store = self.storage_store()?;
+        let session = active_lan_share_session(&store, token)?;
+        store.set_lan_share_guest_mark(
+            &session.share_id,
+            &session.project_id,
+            asset_group_id,
+            guest_mark,
+            current_time_ms(),
+        )
+    }
+
     pub fn project_group_assets(
         &self,
         project_id: &str,
@@ -2691,6 +2735,16 @@ fn ensure_service_project_is_active(store: &SqliteStore, project_id: &str) -> Re
         return Err(crate::ImporterError::internal("project archived"));
     }
     Ok(())
+}
+
+fn active_lan_share_session(store: &SqliteStore, token: &str) -> Result<LanShareSession> {
+    let session = store
+        .lan_share_session_by_token(token)?
+        .ok_or_else(|| crate::ImporterError::internal("lan share session not found"))?;
+    if !session.active {
+        return Err(crate::ImporterError::internal("lan share session stopped"));
+    }
+    Ok(session)
 }
 
 fn should_schedule_subject_assessment_for_settings(settings: &ProjectEvaluationSettings) -> bool {
