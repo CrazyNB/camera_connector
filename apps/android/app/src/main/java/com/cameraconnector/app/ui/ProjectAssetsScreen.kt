@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -118,6 +120,7 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DEFAULT_LISTEN_HOST
 import com.cameraconnector.app.core.DeviceAccount
+import com.cameraconnector.app.core.LanShareSessionUi
 import com.cameraconnector.app.core.ModelEvaluationPreviewInput
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetQuery
@@ -137,7 +140,11 @@ import com.cameraconnector.app.media.isDecodablePreviewLocation
 import com.cameraconnector.app.media.loadPhotoMetadata
 import com.cameraconnector.app.media.loadPreviewBitmap
 import com.cameraconnector.app.media.loadPreviewSampleJson
+import com.cameraconnector.app.share.CoreLanShareGateway
+import com.cameraconnector.app.share.LanShareHttpServer
+import com.cameraconnector.app.share.LanShareRouter
 import com.cameraconnector.app.storage.AndroidStorageGateway
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -185,6 +192,11 @@ internal fun ProjectAssetsScreen(
     var filterExpanded by remember { mutableStateOf(false) }
     var projectFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var projectFeedbackToken by remember { mutableStateOf(0) }
+    var lanShareSession by remember { mutableStateOf<LanShareSessionUi?>(null) }
+    var lanSharePort by remember { mutableStateOf<Int?>(null) }
+    var lanShareServer by remember { mutableStateOf<LanShareHttpServer?>(null) }
+    var lanShareStarting by remember { mutableStateOf(false) }
+    var lanShareError by remember { mutableStateOf<String?>(null) }
     val assetQuery = remember(
         selectedPhotoCollection,
         selectedFilter,
@@ -234,6 +246,15 @@ internal fun ProjectAssetsScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val receiverConnectHost = normalizeCameraConnectHost(cameraConnectHost)
+    val lanShareUrl = remember(lanShareSession, lanSharePort, receiverConnectHost) {
+        val session = lanShareSession
+        val port = lanSharePort
+        if (session != null && port != null) {
+            "http://$receiverConnectHost:$port/s/${session.token}"
+        } else {
+            null
+        }
+    }
     LaunchedEffect(projectFeedbackToken) {
         if (projectFeedbackMessage != null) {
             delay(1_400)
@@ -242,7 +263,84 @@ internal fun ProjectAssetsScreen(
     }
     fun showProjectFeedback(message: String) {
         projectFeedbackMessage = message
-        projectFeedbackToken += 1
+            projectFeedbackToken += 1
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            lanShareServer?.close()
+        }
+    }
+
+    fun stopLanShare(showFeedback: Boolean = true) {
+        val session = lanShareSession
+        val server = lanShareServer
+        lanShareSession = null
+        lanSharePort = null
+        lanShareServer = null
+        lanShareError = null
+        server?.close()
+        if (session != null) {
+            coroutineScope.launch {
+                runCatching { coreGateway.stopLanShareSession(session.shareId) }
+                if (showFeedback) {
+                    showProjectFeedback("已停止局域网选片")
+                }
+            }
+        } else if (showFeedback) {
+            showProjectFeedback("已停止局域网选片")
+        }
+    }
+
+    fun startLanShare() {
+        val projectId = sourceProjectId ?: return
+        if (lanShareStarting) {
+            return
+        }
+        lanShareStarting = true
+        lanShareError = null
+        coroutineScope.launch {
+            var createdSession: LanShareSessionUi? = null
+            var createdServer: LanShareHttpServer? = null
+            runCatching {
+                val session = coreGateway.createLanShareSession(
+                    projectId = projectId,
+                    query = assetQuery,
+                    title = "LAN photo selection",
+                )
+                createdSession = session
+                val router = LanShareRouter(
+                    gateway = CoreLanShareGateway(coreGateway),
+                    previewLoader = previewLoader@{ token, groupId ->
+                        val asset = coreGateway.loadLanShareAssets(token)
+                            .firstOrNull { candidate -> candidate.assetSelectionId() == groupId }
+                            ?: return@previewLoader null
+                        withContext(Dispatchers.IO) {
+                            loadPreviewBitmap(context, asset.previewLocation, PreviewQuality.Thumbnail)
+                                ?.toJpegBytes()
+                        }
+                    },
+                )
+                val server = LanShareHttpServer(router)
+                createdServer = server
+                val port = server.start(0)
+                Triple(session, server, port)
+            }.onSuccess { (session, server, port) ->
+                lanShareServer?.close()
+                lanShareSession = session
+                lanShareServer = server
+                lanSharePort = port
+                showProjectFeedback("局域网选片已开启")
+            }.onFailure { error ->
+                createdServer?.close()
+                createdSession?.let { session ->
+                    runCatching { coreGateway.stopLanShareSession(session.shareId) }
+                }
+                lanShareError = error.message ?: "局域网选片启动失败"
+                showProjectFeedback("局域网选片启动失败")
+            }
+            lanShareStarting = false
+        }
     }
 
     LaunchedEffect(dashboard.receiver.running) {
@@ -531,6 +629,18 @@ internal fun ProjectAssetsScreen(
                 selectedSort = selectedSort,
                 expanded = filterExpanded,
                 onToggle = { filterExpanded = !filterExpanded },
+            )
+            Spacer(Modifier.height(8.dp))
+            LanShareControlStrip(
+                action = lanShareActionUi(
+                    activeProjectId = sourceProjectId,
+                    assetCount = filteredAssets.size,
+                    running = lanShareStarting,
+                ),
+                activeUrl = lanShareUrl,
+                error = lanShareError,
+                onStart = ::startLanShare,
+                onStop = { stopLanShare() },
             )
             Spacer(Modifier.height(8.dp))
             if (filterExpanded) {
@@ -1578,6 +1688,79 @@ private fun SelectionActionButtonContent(
             lineHeight = 12.sp,
             fontWeight = FontWeight.SemiBold,
         )
+    }
+}
+
+private fun Bitmap.toJpegBytes(quality: Int = 82): ByteArray {
+    val output = ByteArrayOutputStream()
+    compress(Bitmap.CompressFormat.JPEG, quality, output)
+    return output.toByteArray()
+}
+
+@Composable
+private fun LanShareControlStrip(
+    action: LanShareActionUi,
+    activeUrl: String?,
+    error: String?,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "局域网选片",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = activeUrl ?: action.disabledReason ?: "共享当前筛选结果给同一局域网访客",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (activeUrl == null) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            ElementBlue
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                if (activeUrl == null) {
+                    Button(
+                        enabled = action.enabled,
+                        onClick = onStart,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.label)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onStop,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("停止")
+                    }
+                }
+            }
+            error?.takeIf { it.isNotBlank() }?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ElementDanger,
+                )
+            }
+        }
     }
 }
 

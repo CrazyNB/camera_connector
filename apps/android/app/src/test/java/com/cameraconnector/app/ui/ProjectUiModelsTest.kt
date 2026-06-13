@@ -350,6 +350,14 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun lanShareActionRequiresActiveProjectAndAssets() {
+        assertFalse(lanShareActionUi(activeProjectId = null, assetCount = 3, running = false).enabled)
+        assertFalse(lanShareActionUi(activeProjectId = "project-1", assetCount = 0, running = false).enabled)
+        assertFalse(lanShareActionUi(activeProjectId = "project-1", assetCount = 3, running = true).enabled)
+        assertTrue(lanShareActionUi(activeProjectId = "project-1", assetCount = 3, running = false).enabled)
+    }
+
+    @Test
     fun projectPhotoGridItemsCollapseBurstMembersToBestCover() {
         val burst = ProjectAssetBurst(
             burstGroupId = "burst-1",

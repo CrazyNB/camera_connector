@@ -93,6 +93,12 @@ internal data class ManualProjectRecommendationActionUi(
     val disabledReason: String?,
 )
 
+internal data class LanShareActionUi(
+    val enabled: Boolean,
+    val label: String,
+    val disabledReason: String?,
+)
+
 internal data class ProjectPhotoGridItemUi(
     val key: String,
     val coverAsset: ProjectAsset,
@@ -272,6 +278,34 @@ internal fun manualProjectRecommendationActionUi(
         disabledReason = if (actionInFlight) "\u9879\u76ee\u4f18\u9009\u751f\u6210\u4e2d" else null,
     )
 }
+
+internal fun lanShareActionUi(
+    activeProjectId: String?,
+    assetCount: Int,
+    running: Boolean,
+): LanShareActionUi =
+    when {
+        running -> LanShareActionUi(
+            enabled = false,
+            label = "启动中",
+            disabledReason = null,
+        )
+        activeProjectId.isNullOrBlank() -> LanShareActionUi(
+            enabled = false,
+            label = "局域网选片",
+            disabledReason = "请先进入项目",
+        )
+        assetCount <= 0 -> LanShareActionUi(
+            enabled = false,
+            label = "局域网选片",
+            disabledReason = "当前没有照片",
+        )
+        else -> LanShareActionUi(
+            enabled = true,
+            label = "局域网选片",
+            disabledReason = null,
+        )
+    }
 
 
 internal fun projectRecommendationRunFeedback(run: EvaluationRunUi): String =
