@@ -2,6 +2,7 @@ package com.cameraconnector.app.ui
 
 import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.EvaluationRunUi
+import com.cameraconnector.app.core.GuestMark
 import com.cameraconnector.app.core.PhotoSortMode
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetBurst
@@ -615,6 +616,22 @@ class ProjectUiModelsTest {
         )
 
         assertEquals(listOf("JPG"), asset.tileAuxiliaryBadges())
+    }
+
+    @Test
+    fun guestMarkBadgeIsHiddenWhenNoGuestMarkExists() {
+        assertNull(projectAsset(id = "guest-none").copy(guestMark = null).guestMarkBadgeText())
+    }
+
+    @Test
+    fun guestMarkBadgeShowsRejectAsGuestDeleteSuggestion() {
+        val asset = projectAsset(id = "guest-reject").copy(
+            guestMark = GuestMark.Reject,
+            hasJpeg = true,
+        )
+
+        assertEquals("访客 删除", asset.guestMarkBadgeText())
+        assertEquals(listOf("访客 删除", "JPG"), asset.tileAuxiliaryBadges())
     }
 
     @Test
