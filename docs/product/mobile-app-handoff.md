@@ -1,16 +1,97 @@
 # Mobile App Handoff
 
+## 0. Worktree Archive - 2026-06-13
+
+Current branch: `main`, based on `origin/main` at `995ca75` before the
+current local prototype/archive edits. This section is the handoff checkpoint
+for the current Android product shape and the HTML prototype prepared for
+intro-video recording.
+
+Current local deliverables:
+
+- `prototypes/camera-connector/index.html`: refreshed current-product HTML
+  prototype. This is now the primary prototype artifact for walkthrough and
+  video capture.
+- `docs/product/mobile-app-handoff.md`: this archive checkpoint.
+
+The HTML prototype covers these clickable routes:
+
+- Projects: project management, global stats, storage usage, project entry.
+- Accounts: camera account identity and connection state.
+- Receiver: project-scoped FTP start/stop drawer, collapsed state, disabled
+  future STC mode, camera-facing IP and port.
+- Photos: grouped photo grid, compact filters, bulk actions, delete,
+  evaluation, merge/remove semantics.
+- Burst overview and detail: grouped preview, carousel-style detail, model
+  recommendation, human favorite/mark, risk and EXIF/source sections.
+- Project intelligence: scene, model provider, workflow, technical thresholds,
+  prompt-pack selection, and project recommendation trigger.
+- Settings: grid preference, diagnostics, model provider list/edit, prompt-pack
+  list/edit, Markdown prompt preview/edit.
+
+Direct hash entry points are supported for capture, for example:
+
+```text
+prototypes/camera-connector/index.html#projects
+prototypes/camera-connector/index.html#photos
+prototypes/camera-connector/index.html#detail
+prototypes/camera-connector/index.html#project-ai
+prototypes/camera-connector/index.html#settings
+```
+
+Implemented product baseline already merged into `main`:
+
+- Project-first storage and viewing model. There is no default Inbox
+  compatibility path.
+- Global Accounts and Settings, with receiver/photos/intelligence scoped under
+  the active project.
+- Asset groups are the product display unit. RAW+JPG represents one visual
+  photo group; burst groups aggregate multiple captures.
+- Thumbnail persistence, thumbnail LRU, large-image cache, and improved detail
+  rendering behavior.
+- Manual photo actions: favorite, mark, delete, split/remove from group, merge
+  groups, and manual model evaluation.
+- Project intelligence: global provider profiles, prompt packs with Markdown
+  `Prompt.md`, project-scoped scene/workflow/threshold settings, local CV gate,
+  model evaluation, and model recommendation semantics.
+- Android UI cleanup: compact bottom navigation, project management statistics
+  and storage card, receiver drawer state memory, project intelligence
+  secondary pages, prompt/model settings, and risk-threshold advanced settings.
+- Spec cleanup: obsolete review queue / old compatibility concepts removed.
+  Selection recommendations now represent model recommendation output.
+
+Current validation state:
+
+- `git diff --check -- prototypes/camera-connector/index.html` reports only
+  the expected Windows line-ending warning.
+- The prototype is a static HTML artifact, so it can be opened directly in a
+  browser without a dev server.
+
+Recommended video walkthrough order:
+
+1. `#projects`: project-first entry, global stats, storage usage.
+2. `#receiver`: expand/collapse receiver, FTP setup, future STC placeholder.
+3. `#photos`: grouped project photos, filters, bulk actions.
+4. `#burst`: group overview before entering single-photo detail.
+5. `#detail`: large photo, recommendation card, human actions, metadata.
+6. `#project-ai`: project intelligence and secondary settings.
+7. `#settings`: global model provider and prompt-pack management.
+
+Before final public capture, consider replacing prototype remote/placeholder
+images with checked-in local demo assets so video recording remains stable
+offline.
+
 ## 1. Purpose
 
 This document defines the mobile implementation slice for Camera Connector after prototype review. The mobile app should be a thin product shell over the existing core concepts: projects, receiver settings, camera accounts, runtime status, connected devices, transfer log, publish queue, and grouped project assets.
 
-The early HTML prototype remains a historical reference:
+The current HTML prototype for video walkthrough and product-page review lives at:
 
 ```text
 prototypes/camera-connector/index.html
 ```
 
-The current UX and visual source of truth is the Figma interaction design:
+The Figma interaction design remains an upstream visual reference:
 
 ```text
 https://www.figma.com/design/mKSknurwc2LWS83UWe0ReA

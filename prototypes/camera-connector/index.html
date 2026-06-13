@@ -3,28 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Camera Connector Prototype</title>
+  <title>Camera Connector 当前产品原型</title>
   <style>
     :root {
-      --bg: #f5f7fa;
-      --surface: #ffffff;
-      --surface-2: #fafafa;
-      --ink: #303133;
-      --muted: #606266;
-      --line: #dcdfe6;
-      --strong-line: #c0c4cc;
-      --blue: #409eff;
-      --blue-soft: #ecf5ff;
-      --green: #67c23a;
-      --green-soft: #f0f9eb;
-      --amber: #e6a23c;
-      --amber-soft: #fdf6ec;
-      --red: #f56c6c;
-      --red-soft: #fef0f0;
-      --purple: #909399;
-      --purple-soft: #f4f4f5;
-      --shadow: 0 14px 38px rgba(48, 49, 51, 0.14);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: dark;
+      --page: #031714;
+      --page-2: #061f1b;
+      --phone: #001719;
+      --panel: #061f2b;
+      --panel-2: #0b2633;
+      --control: #122833;
+      --line: #244454;
+      --line-strong: #0fd2ef;
+      --ink: #edf7fb;
+      --muted: #93acb8;
+      --soft: #5e7b88;
+      --cyan: #08d4f6;
+      --cyan-2: #00a8c7;
+      --green: #25e0a3;
+      --yellow: #f6d400;
+      --red: #ff4777;
+      --purple: #9a65ff;
+      --orange: #ff9f3f;
+      --shadow: rgba(0, 0, 0, 0.34);
+      --radius: 14px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     }
 
     * {
@@ -35,1023 +38,1633 @@
       min-height: 100vh;
       margin: 0;
       background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 247, 250, 0.96)),
-        var(--bg);
+        radial-gradient(circle at 20% 12%, rgba(8, 212, 246, 0.14), transparent 32%),
+        radial-gradient(circle at 84% 78%, rgba(37, 224, 163, 0.10), transparent 30%),
+        linear-gradient(140deg, var(--page), var(--page-2));
       color: var(--ink);
       letter-spacing: 0;
       display: grid;
-      grid-template-columns: minmax(260px, 340px) minmax(380px, 430px);
-      gap: 32px;
+      grid-template-columns: minmax(300px, 380px) minmax(390px, 430px) minmax(280px, 360px);
+      gap: 26px;
       align-items: center;
       justify-content: center;
-      padding: 28px;
+      padding: 24px;
     }
 
     button,
     input,
-    select {
+    textarea {
       font: inherit;
     }
 
     button {
+      border: 0;
       cursor: pointer;
     }
 
-    .brief {
-      max-width: 330px;
+    .brief,
+    .shot-panel {
+      align-self: stretch;
+      max-height: calc(100vh - 48px);
+      overflow: auto;
+      padding: 20px;
+      border: 1px solid rgba(8, 212, 246, 0.18);
+      background: rgba(2, 18, 24, 0.72);
+      border-radius: 18px;
     }
 
     .brief h1 {
-      margin: 0 0 10px;
-      font-size: 34px;
-      line-height: 1.05;
-      letter-spacing: 0;
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.16;
+      font-weight: 850;
     }
 
-    .brief p {
-      margin: 0 0 18px;
+    .brief p,
+    .shot-panel p {
+      margin: 0;
       color: var(--muted);
-      font-size: 15px;
       line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .route-group {
+      margin-top: 18px;
+    }
+
+    .route-title {
+      margin-bottom: 8px;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 800;
     }
 
     .route-list {
       display: grid;
       gap: 8px;
-      margin-top: 20px;
     }
 
-    .route-section {
-      margin: 14px 0 2px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 850;
-      text-transform: uppercase;
-    }
-
-    .route-list button {
+    .route {
       display: grid;
-      grid-template-columns: 24px 1fr auto;
+      grid-template-columns: 30px 1fr;
       align-items: center;
+      gap: 10px;
+      width: 100%;
       min-height: 46px;
       padding: 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.78);
       color: var(--ink);
+      background: rgba(11, 38, 51, 0.65);
+      border: 1px solid rgba(36, 68, 84, 0.9);
+      border-radius: 12px;
       text-align: left;
-      font-weight: 750;
     }
 
-    .route-list button span:first-child {
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
+    .route.active {
+      border-color: rgba(8, 212, 246, 0.86);
+      background: rgba(8, 212, 246, 0.13);
+    }
+
+    .route-icon,
+    .mini-icon {
       display: grid;
       place-items: center;
-      color: var(--blue);
-      background: var(--blue-soft);
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1;
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      color: var(--cyan);
+      background: rgba(8, 212, 246, 0.12);
+      font-weight: 850;
     }
 
-    .route-list small {
-      color: var(--muted);
-      font-weight: 650;
-    }
-
-    .route-list button.active {
-      border-color: var(--blue);
-      background: var(--surface);
-      box-shadow: inset 0 0 0 1px var(--blue);
-    }
-
-    .route-list button.secondary-route {
-      background: rgba(248, 250, 252, 0.76);
-    }
-
-    .phone {
-      width: min(100%, 414px);
-      height: 844px;
-      border-radius: 32px;
-      padding: 12px;
-      background: #111827;
-      box-shadow: var(--shadow);
-    }
-
-    .screen {
-      position: relative;
-      height: 100%;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      border-radius: 22px;
-      background: var(--bg);
-    }
-
-    .view {
-      min-height: 0;
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    .topbar {
-      min-height: 70px;
-      padding: 14px 16px 12px;
-      background: rgba(255, 255, 255, 0.96);
-      border-bottom: 1px solid var(--line);
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .topbar.secondary-topbar {
-      grid-template-columns: auto 1fr auto;
-    }
-
-    .topbar h2 {
-      margin: 0;
-      font-size: 18px;
+    .route strong {
+      display: block;
+      font-size: 14px;
       line-height: 1.2;
     }
 
-    .topbar small {
+    .route small {
       display: block;
-      margin-top: 4px;
+      margin-top: 3px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 650;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    .content {
-      flex: 1;
+    .phone {
+      width: 393px;
+      height: 852px;
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+      background: var(--phone);
+      border: 1px solid rgba(8, 212, 246, 0.25);
+      box-shadow: 0 22px 58px var(--shadow);
+    }
+
+    .statusbar {
+      height: 42px;
+      padding: 14px 22px 0;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 760;
+      color: var(--ink);
+    }
+
+    .camera-hole {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      width: 26px;
+      height: 26px;
+      margin-left: -13px;
+      border-radius: 50%;
+      background: #000;
+      z-index: 5;
+    }
+
+    .app {
+      position: absolute;
+      inset: 42px 0 0;
+      padding-bottom: 78px;
+      overflow: hidden;
+    }
+
+    .screen {
+      height: 100%;
       overflow: auto;
+      padding: 16px 14px 22px;
+      scrollbar-width: none;
+    }
+
+    .screen::-webkit-scrollbar,
+    .brief::-webkit-scrollbar,
+    .shot-panel::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+
+    .bottom-nav {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 76px;
+      background: #041f2c;
+      border-top: 1px solid rgba(36, 68, 84, 0.9);
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      align-items: center;
+      padding: 0 34px 8px;
+      z-index: 20;
+    }
+
+    .bottom-nav::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: -20px;
+      width: 118px;
+      height: 40px;
+      margin-left: -59px;
+      background: var(--phone);
+      border-bottom-left-radius: 60px 36px;
+      border-bottom-right-radius: 60px 36px;
+      border: 1px solid rgba(36, 68, 84, 0.9);
+      border-top: 0;
+    }
+
+    .nav-btn {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      margin: 0 auto;
+      color: #8eabba;
+      background: transparent;
+      border-radius: 50%;
+    }
+
+    .nav-btn.active {
+      width: 58px;
+      height: 58px;
+      margin-top: -28px;
+      color: #001b22;
+      background: var(--cyan);
+    }
+
+    .nav-btn svg,
+    .back-btn svg,
+    .icon-btn svg,
+    .action-round svg {
+      width: 21px;
+      height: 21px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 54px;
+      margin-bottom: 10px;
+    }
+
+    .page-header.compact {
+      min-height: 44px;
+      margin-bottom: 4px;
+    }
+
+    .back-btn,
+    .icon-btn {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      color: var(--cyan);
+      background: transparent;
+    }
+
+    .title-stack h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+      font-weight: 820;
+    }
+
+    .title-stack p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: rgba(6, 31, 43, 0.88);
+      border-radius: var(--radius);
+    }
+
+    .card-pad {
       padding: 14px;
     }
 
     .stack {
       display: grid;
       gap: 12px;
-      padding-bottom: 8px;
     }
 
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      padding: 13px;
-    }
-
-    .panel-title {
+    .row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 10px;
-      margin-bottom: 10px;
     }
 
-    .panel-title h3 {
-      margin: 0;
-      font-size: 14px;
-      line-height: 1.2;
+    .row.between {
+      justify-content: space-between;
     }
 
-    .panel-title small {
+    .muted {
       color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
     }
 
-    .status {
+    .tiny {
+      font-size: 12px;
+    }
+
+    .label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .value {
+      font-weight: 800;
+    }
+
+    .pill,
+    .chip {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 24px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 850;
+      min-height: 28px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      background: var(--control);
+      font-size: 12px;
+      font-weight: 760;
       white-space: nowrap;
     }
 
-    .status.blue {
-      color: #174ea6;
-      background: var(--blue-soft);
+    .chip.active,
+    .pill.primary {
+      color: #001b22;
+      background: var(--cyan);
+      border-color: var(--cyan);
     }
 
-    .status.green {
-      color: #0c6b43;
-      background: var(--green-soft);
+    .pill.green {
+      color: var(--green);
+      border-color: rgba(37, 224, 163, 0.5);
+      background: rgba(37, 224, 163, 0.08);
     }
 
-    .status.amber {
-      color: #80520b;
-      background: var(--amber-soft);
+    .pill.red {
+      color: var(--red);
+      border-color: rgba(255, 71, 119, 0.55);
+      background: rgba(255, 71, 119, 0.1);
     }
 
-    .status.red {
-      color: #9f2f12;
-      background: var(--red-soft);
+    .pill.yellow {
+      color: var(--yellow);
+      border-color: rgba(246, 212, 0, 0.55);
+      background: rgba(246, 212, 0, 0.08);
     }
 
-    .toolbar {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 6px;
-      margin-bottom: 12px;
+    .pill.purple {
+      color: var(--purple);
+      border-color: rgba(154, 101, 255, 0.55);
+      background: rgba(154, 101, 255, 0.1);
     }
 
-    .toolbar button,
-    .icon-button {
-      min-height: 36px;
-      border: 1px solid var(--line);
-      border-radius: 4px;
+    .button {
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 14px;
+      color: #001b22;
+      background: var(--cyan);
+      font-weight: 820;
+    }
+
+    .button.ghost {
       color: var(--ink);
-      background: var(--surface);
+      background: var(--control);
+      border: 1px solid var(--line);
+    }
+
+    .button.danger {
+      color: var(--red);
+      background: transparent;
+      border: 1px solid rgba(255, 71, 119, 0.7);
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .stat {
+      padding: 11px;
+      border-radius: 11px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 21px;
+      margin-bottom: 4px;
+    }
+
+    .storage-track {
+      position: relative;
+      height: 8px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+    }
+
+    .storage-used,
+    .storage-project {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      border-radius: 999px;
+    }
+
+    .storage-used {
+      width: 24%;
+      background: rgba(37, 224, 163, 0.52);
+    }
+
+    .storage-project {
+      left: 16%;
+      width: 4%;
+      background: var(--cyan);
+    }
+
+    .project-card {
+      display: grid;
+      grid-template-columns: 12px 1fr auto auto auto;
+      align-items: center;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--cyan);
+    }
+
+    .dot.green {
+      background: var(--green);
+    }
+
+    .receiver-strip {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 8px 10px 12px;
+      border-radius: 14px;
+      background: rgba(20, 18, 35, 0.96);
+      border: 1px solid #304254;
+    }
+
+    .filter-row,
+    .chip-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+
+    .filter-row::-webkit-scrollbar,
+    .chip-row::-webkit-scrollbar {
+      display: none;
+    }
+
+    .photo-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .photo-tile {
+      position: relative;
+      min-height: 122px;
+      padding: 6px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(6, 31, 43, 0.88);
+    }
+
+    .photo-tile.selected {
+      border-color: var(--cyan);
+      box-shadow: inset 0 0 0 1px var(--cyan);
+    }
+
+    .photo-img {
+      width: 100%;
+      height: 78px;
+      border-radius: 10px;
+      object-fit: cover;
+      display: block;
+      background: linear-gradient(135deg, #153c45, #08151d);
+    }
+
+    .photo-img.tall {
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .badge-top {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      min-width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #c9a9ff;
+      background: rgba(64, 34, 117, 0.86);
+      border: 1px solid rgba(154, 101, 255, 0.55);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .badge-risk,
+    .badge-score,
+    .badge-format {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .badge-risk {
+      color: var(--red);
+      background: rgba(255, 71, 119, 0.15);
+      border: 1px solid rgba(255, 71, 119, 0.6);
+    }
+
+    .badge-score {
+      color: var(--yellow);
+      background: rgba(246, 212, 0, 0.12);
+      border: 1px solid rgba(246, 212, 0, 0.6);
+    }
+
+    .badge-format {
+      top: auto;
+      right: auto;
+      bottom: 8px;
+      left: 8px;
+      color: var(--purple);
+      background: rgba(154, 101, 255, 0.13);
+      border: 1px solid rgba(154, 101, 255, 0.55);
+    }
+
+    .selection-bar {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 88px;
+      z-index: 12;
+      padding: 12px;
+      border-radius: 18px;
+      background: rgba(6, 31, 43, 0.98);
+      border: 1px solid rgba(8, 212, 246, 0.55);
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .small-action {
+      min-height: 44px;
+      border-radius: 10px;
+      color: var(--cyan);
+      background: var(--control);
+      border: 1px solid rgba(8, 212, 246, 0.35);
       font-size: 12px;
       font-weight: 800;
     }
 
-    .toolbar button.active {
-      border-color: var(--blue);
-      color: var(--blue);
-      background: var(--blue-soft);
+    .small-action.disabled {
+      color: var(--soft);
+      border-color: var(--line);
+      opacity: 0.62;
     }
 
-    .icon-button {
-      width: 38px;
+    .receiver-card {
+      min-height: 532px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(6, 31, 43, 0.9);
+      border: 1px solid var(--line);
+    }
+
+    .launch-header {
+      position: relative;
+      height: 36px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+    }
+
+    .hero-button {
       display: grid;
       place-items: center;
-      font-size: 16px;
+      width: 142px;
+      height: 142px;
+      margin: 20px auto 12px;
+      border-radius: 50%;
+      color: #00232a;
+      background: var(--cyan);
+      font-size: 26px;
+      font-weight: 900;
     }
 
-    .metric-grid {
+    .hero-button.stop {
+      background: #ff4777;
+      color: #24000a;
+    }
+
+    .segmented {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-
-    .metric {
-      min-height: 70px;
-      padding: 10px;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: var(--surface-2);
-    }
-
-    .metric span {
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 750;
-      margin-bottom: 6px;
-    }
-
-    .metric strong {
-      display: block;
-      font-size: 15px;
-      overflow-wrap: anywhere;
-    }
-
-    .metric em {
-      display: block;
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 11px;
-      font-style: normal;
-      overflow-wrap: anywhere;
-    }
-
-    .kv {
-      display: grid;
-      grid-template-columns: 104px 1fr;
-      gap: 8px;
-      align-items: start;
-      padding: 9px 0;
-      border-bottom: 1px solid var(--line);
-      font-size: 13px;
-    }
-
-    .kv:last-child {
-      border-bottom: 0;
-    }
-
-    .kv span:first-child {
-      color: var(--muted);
-      font-weight: 720;
-    }
-
-    .kv strong {
-      font-weight: 750;
-      overflow-wrap: anywhere;
-    }
-
-    .field-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: 1fr 1fr;
       gap: 10px;
+      margin: 16px 0;
     }
 
-    label {
-      display: grid;
-      gap: 5px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
+    .segment {
+      height: 43px;
+      border-radius: 12px;
+      color: #001b22;
+      background: var(--cyan);
+      font-weight: 850;
     }
 
-    input,
-    select {
-      width: 100%;
-      height: 38px;
-      padding: 0 10px;
+    .segment.disabled {
+      color: #8799a2;
+      background: rgba(255, 255, 255, 0.08);
       border: 1px solid var(--line);
-      border-radius: 4px;
-      background: var(--surface);
-      color: var(--ink);
-      font-size: 13px;
-      font-weight: 650;
-      min-width: 0;
     }
 
-    .button-row {
+    .field {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .field input,
+    .field textarea {
+      width: 100%;
+      min-height: 50px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #061923;
+      color: var(--ink);
+      padding: 12px;
+    }
+
+    .field input:disabled {
+      color: var(--soft);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: grid;
+      align-items: end;
+      padding: 16px 16px 92px;
+      background: rgba(0, 0, 0, 0.46);
+      backdrop-filter: blur(3px);
+    }
+
+    .burst-modal {
+      max-height: 72vh;
+      overflow: auto;
+      padding: 16px;
+      border-radius: 18px;
+      background: #071e28;
+      border: 1px solid var(--line);
+    }
+
+    .burst-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       gap: 10px;
       margin-top: 12px;
     }
 
-    .primary,
-    .secondary,
-    .danger {
-      min-height: 42px;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 850;
-      border: 1px solid transparent;
+    .detail-photo-wrap {
+      position: relative;
+      width: 100%;
+      margin: 4px 0 12px;
+      overflow: visible;
     }
 
-    .primary {
-      color: #fff;
-      background: var(--blue);
+    .detail-photo {
+      width: calc(100% - 26px);
+      max-height: 420px;
+      margin: 0 auto;
+      display: block;
+      border-radius: 14px;
+      object-fit: contain;
+      background: transparent;
     }
 
-    .secondary {
-      color: var(--ink);
-      background: var(--surface);
-      border-color: var(--line);
+    .detail-photo.landscape {
+      height: 224px;
+      object-fit: cover;
     }
 
-    .danger {
+    .peek-next {
+      position: absolute;
+      top: 18px;
+      right: -5px;
+      width: 32px;
+      height: calc(100% - 36px);
+      border-radius: 16px;
+      overflow: hidden;
+      opacity: 0.5;
+      filter: blur(0.2px);
+      box-shadow: -12px 0 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .peek-next img {
+      width: 118px;
+      height: 100%;
+      object-fit: cover;
+      transform: translateX(-54px);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin: 10px 0 14px;
+    }
+
+    .action-round {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      color: var(--cyan);
+      background: rgba(8, 212, 246, 0.08);
+      border: 1px solid rgba(8, 212, 246, 0.46);
+    }
+
+    .action-round.green {
+      color: var(--green);
+      background: rgba(37, 224, 163, 0.08);
+      border-color: rgba(37, 224, 163, 0.46);
+    }
+
+    .action-round.yellow {
+      color: var(--yellow);
+      background: rgba(246, 212, 0, 0.08);
+      border-color: rgba(246, 212, 0, 0.46);
+    }
+
+    .action-round.red {
       color: var(--red);
-      background: var(--red-soft);
-      border-color: #ffd2c2;
+      background: rgba(255, 71, 119, 0.08);
+      border-color: rgba(255, 71, 119, 0.46);
     }
 
-    .row {
+    .smart-card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(6, 31, 43, 0.9);
+    }
+
+    .score-bubble {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      border-radius: 14px;
+      color: var(--red);
+      border: 1px solid rgba(255, 71, 119, 0.6);
+      background: rgba(255, 71, 119, 0.13);
+      font-weight: 900;
+      line-height: 1.05;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .menu-row {
+      min-height: 64px;
       display: grid;
       grid-template-columns: 1fr auto;
-      gap: 12px;
       align-items: center;
-      padding: 11px 0;
-      border-bottom: 1px solid var(--line);
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(36, 68, 84, 0.55);
     }
 
-    .row:last-child {
+    .menu-row:last-child {
       border-bottom: 0;
-      padding-bottom: 0;
     }
 
-    .row strong {
+    .switch {
+      width: 50px;
+      height: 30px;
+      padding: 4px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.13);
+    }
+
+    .switch::before {
+      content: "";
       display: block;
-      font-size: 13px;
-      overflow-wrap: anywhere;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #6b7d87;
     }
 
-    .row span {
-      display: block;
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
+    .switch.on {
+      background: var(--cyan);
     }
 
-    .tag-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+    .switch.on::before {
+      margin-left: 20px;
+      background: #001b22;
     }
 
-    .tag {
-      max-width: 100%;
-      padding: 4px 8px;
+    .slider {
+      height: 6px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--cyan) var(--value), rgba(255, 255, 255, 0.10) var(--value));
+      position: relative;
+      margin: 9px 0 5px;
+    }
+
+    .slider::after {
+      content: "";
+      position: absolute;
+      left: var(--value);
+      top: 50%;
+      width: 4px;
+      height: 22px;
+      margin-top: -11px;
+      border-radius: 999px;
+      background: var(--cyan);
+    }
+
+    .prompt-package {
       border: 1px solid var(--line);
-      border-radius: 4px;
-      color: var(--muted);
-      background: var(--surface);
-      font-size: 11px;
-      font-weight: 760;
-      overflow-wrap: anywhere;
-    }
-
-    .asset-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      padding-bottom: 12px;
-    }
-
-    .asset {
+      border-radius: 14px;
       overflow: hidden;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: var(--surface);
+      background: rgba(6, 31, 43, 0.9);
     }
 
-    .thumb {
-      height: 108px;
-      display: grid;
-      place-items: center;
-      color: rgba(23, 32, 46, 0.72);
-      font-size: 12px;
-      font-weight: 900;
-      background:
-        linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(15, 138, 95, 0.10)),
-        linear-gradient(160deg, #ccd9ec 0%, #f7f9fc 48%, #d7e8db 100%);
-    }
-
-    .thumb.alt {
-      background:
-        linear-gradient(130deg, rgba(109, 40, 217, 0.14), rgba(154, 101, 18, 0.12)),
-        linear-gradient(155deg, #e7ddff 0%, #f8f3e9 54%, #dce5ee 100%);
-    }
-
-    .asset-body {
-      padding: 9px;
-    }
-
-    .asset-name {
-      margin: 0;
-      min-height: 34px;
-      font-size: 12px;
-      font-weight: 850;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-
-    .asset-meta {
+    .prompt-head {
+      padding: 13px 14px;
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      gap: 6px;
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 11px;
-    }
-
-    .pill {
-      display: inline-flex;
       align-items: center;
-      min-height: 21px;
-      padding: 3px 7px;
-      border-radius: 4px;
-      background: var(--purple-soft);
-      color: var(--purple);
-      font-size: 10px;
-      font-weight: 900;
-      white-space: nowrap;
+      border-bottom: 1px solid rgba(36, 68, 84, 0.72);
     }
 
-    .pill.jpg {
-      color: #174ea6;
-      background: var(--blue-soft);
+    .markdown-preview {
+      min-height: 180px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #051b25;
+      color: var(--ink);
+      line-height: 1.55;
+      font-size: 14px;
     }
 
-    .pill.video {
-      color: #9f2f12;
-      background: var(--red-soft);
+    .shot-panel h2 {
+      margin: 0 0 10px;
+      font-size: 22px;
     }
 
-    .progress {
-      height: 7px;
-      overflow: hidden;
-      background: #e6ebf2;
-      border-radius: 4px;
-      margin-top: 8px;
-    }
-
-    .progress b {
-      display: block;
-      height: 100%;
-      border-radius: inherit;
-      background: var(--blue);
-    }
-
-    .notice {
-      border: 1px solid #f3d28b;
-      border-radius: 4px;
-      padding: 11px;
-      color: #66440a;
-      background: var(--amber-soft);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .tabbar {
-      min-height: 62px;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      background: rgba(255, 255, 255, 0.96);
-      border-top: 1px solid var(--line);
-    }
-
-    .tabbar button {
-      display: grid;
-      gap: 3px;
-      place-items: center;
-      border: 0;
-      background: transparent;
+    .shot-panel ul {
+      padding-left: 18px;
       color: var(--muted);
-      font-size: 11px;
-      font-weight: 820;
+      line-height: 1.7;
+      font-size: 14px;
     }
 
-    .tabbar button .tab-icon {
-      font-size: 19px;
-      line-height: 1;
-      font-weight: 500;
+    .shot-tag {
+      display: inline-flex;
+      margin: 10px 6px 0 0;
+      padding: 5px 9px;
+      color: var(--cyan);
+      border: 1px solid rgba(8, 212, 246, 0.35);
+      border-radius: 999px;
+      background: rgba(8, 212, 246, 0.08);
+      font-size: 12px;
+      font-weight: 800;
     }
 
-    .tabbar button.active {
-      color: var(--blue);
-    }
-
-    @media (max-width: 820px) {
+    @media (max-width: 1120px) {
       body {
         grid-template-columns: 1fr;
         align-items: start;
-        padding: 16px;
-      }
-
-      .brief {
-        max-width: none;
       }
 
       .phone {
-        height: 790px;
-        margin: 0 auto;
+        justify-self: center;
+      }
+
+      .brief,
+      .shot-panel {
+        max-height: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+        animation: none !important;
       }
     }
   </style>
 </head>
 <body>
   <aside class="brief">
-    <h1>Camera Connector</h1>
-    <p>端侧开发前的产品原型。当前版本对齐 core dashboard：receiver 设置、账号状态、设备连接、传输健康、失败记录和资产分组。</p>
-    <p>身份以账号和设备名为准，IP 只作为最近连接来源。上传目录保持扁平，原始相机路径进入日志和筛选标签。</p>
-    <div class="route-list" aria-label="prototype routes">
-      <div class="route-section">一级导航</div>
-      <button class="active" data-route="dashboard"><span>⌂</span>概览<small>dashboard</small></button>
-      <button data-route="inbox"><span>□</span>收件箱<small>assets</small></button>
-      <button data-route="transfers"><span>≡</span>传输日志<small>logs</small></button>
-      <div class="route-section">二级页面</div>
-      <button class="secondary-route" data-route="receiver"><span>⚙</span>接收设置<small>settings</small></button>
-      <button class="secondary-route" data-route="devices"><span>＋</span>设备账号<small>accounts</small></button>
+    <h1>Camera Connector 当前 HTML 原型</h1>
+    <p>用于录制介绍视频的可点击原型。左侧选择镜头，右侧手机界面切换到对应页面。原型强调当前产品结构：项目管理、项目内接收、照片列表、连拍优选、模型评价和全局配置。</p>
+
+    <div class="route-group">
+      <div class="route-title">视频主线</div>
+      <div class="route-list">
+        <button class="route active" data-route="projects"><span class="route-icon">1</span><span><strong>项目管理</strong><small>项目制、全局统计、手机存储</small></span></button>
+        <button class="route" data-route="accounts"><span class="route-icon">2</span><span><strong>账号管理</strong><small>相机 FTP 账号和连接状态</small></span></button>
+        <button class="route" data-route="receiver"><span class="route-icon">3</span><span><strong>启动接收</strong><small>项目内 FTP 启停和相机连接地址</small></span></button>
+        <button class="route" data-route="photos"><span class="route-icon">4</span><span><strong>项目照片</strong><small>照片列表、聚合、筛选和批量操作</small></span></button>
+        <button class="route" data-route="burst"><span class="route-icon">5</span><span><strong>连拍组概览</strong><small>先看整组，再进入单张详情</small></span></button>
+        <button class="route" data-route="detail"><span class="route-icon">6</span><span><strong>照片详情</strong><small>大图、评分、风险和人工选择</small></span></button>
+        <button class="route" data-route="project-ai"><span class="route-icon">7</span><span><strong>项目智能</strong><small>模型、流程、阈值、提示词</small></span></button>
+      </div>
+    </div>
+
+    <div class="route-group">
+      <div class="route-title">项目智能二级页</div>
+      <div class="route-list">
+        <button class="route" data-route="ai-model"><span class="route-icon">M</span><span><strong>模型服务选择</strong><small>项目选择全局模型配置</small></span></button>
+        <button class="route" data-route="ai-workflow"><span class="route-icon">A</span><span><strong>自动流程</strong><small>上传评价、连拍优选、风险参与</small></span></button>
+        <button class="route" data-route="ai-threshold"><span class="route-icon">T</span><span><strong>技术风险阈值</strong><small>宽松、标准、严格、自定义</small></span></button>
+        <button class="route" data-route="ai-prompt"><span class="route-icon">P</span><span><strong>评价提示词选择</strong><small>按提示词包选择项目偏好</small></span></button>
+      </div>
+    </div>
+
+    <div class="route-group">
+      <div class="route-title">全局设置</div>
+      <div class="route-list">
+        <button class="route" data-route="settings"><span class="route-icon">S</span><span><strong>系统设置</strong><small>网格、模型、提示词、导入位置</small></span></button>
+        <button class="route" data-route="providers"><span class="route-icon">API</span><span><strong>模型服务</strong><small>列表、新建、编辑 API 配置</small></span></button>
+        <button class="route" data-route="provider-edit"><span class="route-icon">E</span><span><strong>模型服务编辑</strong><small>URL、模型名、API Key、批量</small></span></button>
+        <button class="route" data-route="prompts"><span class="route-icon">MD</span><span><strong>提示词配置</strong><small>提示词包、内置包、用户包</small></span></button>
+        <button class="route" data-route="prompt-edit"><span class="route-icon">#</span><span><strong>提示词编辑</strong><small>Markdown 编辑和预览</small></span></button>
+        <button class="route" data-route="diagnostics"><span class="route-icon">D</span><span><strong>诊断日志</strong><small>连接、传输、写入排错</small></span></button>
+      </div>
     </div>
   </aside>
 
-  <main class="phone">
-    <section class="screen" aria-live="polite">
-      <div id="dashboard" class="view">
-        <header class="topbar">
-          <div>
-            <h2>概览</h2>
-            <small>FTP · Running · 1 个账号在线</small>
-          </div>
-          <span class="status green">健康</span>
-        </header>
-        <div class="content">
-          <div class="stack">
-            <section class="panel">
-              <div class="panel-title">
-                <h3>Receiver</h3>
-                <span class="status green">Running</span>
-              </div>
-              <div class="metric-grid">
-                <div class="metric">
-                  <span>Protocol</span>
-                  <strong>FTP</strong>
-                  <em>0.0.0.0:2121</em>
-                </div>
-                <div class="metric">
-                  <span>Camera Host</span>
-                  <strong>192.168.137.1</strong>
-                  <em>被动模式</em>
-                </div>
-                <div class="metric">
-                  <span>Transfers</span>
-                  <strong>126 / 1</strong>
-                  <em>completed / failed</em>
-                </div>
-                <div class="metric">
-                  <span>Assets</span>
-                  <strong>84 groups</strong>
-                  <em>RAW 62 · JPG 73 · Video 4</em>
-                </div>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>当前账号</h3>
-                <button class="secondary" data-route="devices">管理</button>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>Z5_2</strong>
-                  <span>username z5 · 192.168.137.56:50123 · last seen 12 秒前</span>
-                </div>
-                <span class="status green">online</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>X-T5</strong>
-                  <span>username xt5 · 192.168.137.44 · last seen 昨天 18:20</span>
-                </div>
-                <span class="status amber">recent</span>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>最近失败</h3>
-                <span class="status red">1</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>IMG_9999.CR3</strong>
-                  <span>ftp:verify-failed · connection reset · Verify Camera/IMG_9999.CR3</span>
-                </div>
-                <button class="secondary" data-route="transfers">查看</button>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>路径</h3>
-                <button class="secondary" data-route="receiver">编辑</button>
-              </div>
-              <div class="kv"><span>config</span><strong>AppData/CameraConnector/config.json</strong></div>
-              <div class="kv"><span>state</span><strong>AppData/CameraConnector/state</strong></div>
-              <div class="kv"><span>output</span><strong>Pictures/CameraConnector</strong></div>
-            </section>
-          </div>
-        </div>
-        <nav class="tabbar">
-          <button class="active" data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
-          <button data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
-          <button data-route="transfers"><span class="tab-icon">≡</span>传输</button>
-        </nav>
-      </div>
-
-      <div id="receiver" class="view hidden">
-        <header class="topbar secondary-topbar">
-          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
-          <div>
-            <h2>接收设置</h2>
-            <small>receiver-settings · core config</small>
-          </div>
-          <span class="status blue">已保存</span>
-        </header>
-        <div class="content">
-          <div class="stack">
-            <section class="panel">
-              <div class="panel-title">
-                <h3>运行参数</h3>
-                <small>CameraConnectorConfig.receiver</small>
-              </div>
-              <div class="field-grid">
-                <label>协议
-                  <select>
-                    <option selected>FTP</option>
-                    <option>SFTP</option>
-                  </select>
-                </label>
-                <label>监听地址
-                  <input value="0.0.0.0">
-                </label>
-                <label>FTP 端口
-                  <input value="2121" inputmode="numeric">
-                </label>
-                <label>SFTP 端口
-                  <input value="2222" inputmode="numeric">
-                </label>
-              </div>
-              <div class="button-row">
-                <button class="secondary">重置</button>
-                <button class="primary">保存设置</button>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>相机侧信息</h3>
-                <span class="status green">FTP</span>
-              </div>
-              <div class="kv"><span>服务器</span><strong>192.168.137.1</strong></div>
-              <div class="kv"><span>端口</span><strong>2121</strong></div>
-              <div class="kv"><span>模式</span><strong>Passive</strong></div>
-              <div class="kv"><span>账号</span><strong>z5</strong></div>
-              <div class="kv"><span>密码</span><strong>已配置，不显示明文</strong></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>相关设置</h3>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>账号与设备</strong>
-                  <span>管理 username、password、device name 和最近连接来源</span>
-                </div>
-                <button class="secondary" data-route="devices">进入</button>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>存储与日志</h3>
-                <small>分离目录</small>
-              </div>
-              <label>上传目录
-                <input value="C:\Users\hxn\Pictures\CameraConnector">
-              </label>
-              <div style="height: 8px;"></div>
-              <label>状态目录
-                <input value="C:\Users\hxn\AppData\Roaming\CameraConnector\state">
-              </label>
-              <div class="kv"><span>config</span><strong>C:\Users\hxn\AppData\Roaming\CameraConnector\config.json</strong></div>
-              <div class="kv"><span>transfer log</span><strong>state/transfer-log.jsonl</strong></div>
-              <div class="kv"><span>device state</span><strong>state/connected-devices.json</strong></div>
-            </section>
-
-            <section class="notice">
-              上传目录只保留最终照片和传输中的临时文件；路径、账号、来源、失败信息进入状态目录。
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <div id="devices" class="view hidden">
-        <header class="topbar secondary-topbar">
-          <button class="icon-button" title="返回概览" data-route="dashboard"><</button>
-          <div>
-            <h2>设备账号</h2>
-            <small>账号是身份，IP 是连接属性</small>
-          </div>
-          <button class="icon-button" title="新增账号">+</button>
-        </header>
-        <div class="content">
-          <div class="stack">
-            <section class="panel">
-              <div class="panel-title">
-                <h3>账号</h3>
-                <span class="status green">2</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>Z5_2</strong>
-                  <span>username z5 · password configured · active connections 1</span>
-                </div>
-                <span class="status green">online</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>X-T5</strong>
-                  <span>username xt5 · password configured · active connections 0</span>
-                </div>
-                <span class="status amber">offline</span>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>连接记录</h3>
-                <button class="secondary">刷新</button>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>192.168.137.56:50123</strong>
-                  <span>Z5_2 · username z5 · first seen 10:26 · last seen 12 秒前</span>
-                </div>
-                <span class="status green">online</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>192.168.137.44</strong>
-                  <span>X-T5 · username xt5 · last disconnected 18:20</span>
-                </div>
-                <span class="status amber">recent</span>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>编辑账号</h3>
-                <small>z5</small>
-              </div>
-              <label>设备名
-                <input value="Z5_2">
-              </label>
-              <div style="height: 8px;"></div>
-              <label>用户名
-                <input value="z5">
-              </label>
-              <div style="height: 8px;"></div>
-              <label>密码
-                <input value="••••••••" type="password">
-              </label>
-              <div class="button-row">
-                <button class="danger">删除</button>
-                <button class="primary">保存</button>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-
-      <div id="inbox" class="view hidden">
-        <header class="topbar">
-          <div>
-            <h2>收件箱</h2>
-            <small>84 groups · flat inbox</small>
-          </div>
-          <button class="icon-button" title="刷新">R</button>
-        </header>
-        <div class="content">
-          <div class="toolbar">
-            <button class="active">全部</button>
-            <button>JPG</button>
-            <button>RAW</button>
-            <button>视频</button>
-          </div>
-          <div class="tag-row" style="margin-bottom: 12px;">
-            <span class="tag">source: Z5_2</span>
-            <span class="tag">path: BB</span>
-            <span class="tag">remote: 192.168.137.56</span>
-            <span class="tag">duplicate: visible</span>
-          </div>
-          <div class="asset-grid">
-            <article class="asset" data-route="transfers">
-              <div class="thumb"></div>
-              <div class="asset-body">
-                <p class="asset-name">Z5_2/BB/IMG_1234.JPG + CR3</p>
-                <div class="asset-meta"><span class="pill">RAW+JPG</span><span>48.2 MB</span></div>
-              </div>
-            </article>
-            <article class="asset">
-              <div class="thumb alt"></div>
-              <div class="asset-body">
-                <p class="asset-name">Z5_2/BB/IMG_1234 (1).CR3</p>
-                <div class="asset-meta"><span class="pill">2/2</span><span>39.5 MB</span></div>
-              </div>
-            </article>
-            <article class="asset">
-              <div class="thumb">RAW</div>
-              <div class="asset-body">
-                <p class="asset-name">X-T5/102_FUJI/DSC_1239.RAF</p>
-                <div class="asset-meta"><span class="pill">RAW</span><span>41.0 MB</span></div>
-              </div>
-            </article>
-            <article class="asset">
-              <div class="thumb alt">MOV</div>
-              <div class="asset-body">
-                <p class="asset-name">Z5_2/BB/DSC_1240.MOV</p>
-                <div class="asset-meta"><span class="pill video">VIDEO</span><span>212 MB</span></div>
-              </div>
-            </article>
-            <article class="asset">
-              <div class="thumb"></div>
-              <div class="asset-body">
-                <p class="asset-name">IP-044/DCIM/IMG_1241.ARW</p>
-                <div class="asset-meta"><span class="pill">RAW</span><span>38.8 MB</span></div>
-              </div>
-            </article>
-            <article class="asset">
-              <div class="thumb alt"></div>
-              <div class="asset-body">
-                <p class="asset-name">Verify Camera/IMG_1242.JPG</p>
-                <div class="asset-meta"><span class="pill jpg">JPG</span><span>8.1 MB</span></div>
-              </div>
-            </article>
-          </div>
-        </div>
-        <nav class="tabbar">
-          <button data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
-          <button class="active" data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
-          <button data-route="transfers"><span class="tab-icon">≡</span>传输</button>
-        </nav>
-      </div>
-
-      <div id="transfers" class="view hidden">
-        <header class="topbar">
-          <div>
-            <h2>传输日志</h2>
-            <small>transfer-log.jsonl · status filter</small>
-          </div>
-          <span class="status red">1 failed</span>
-        </header>
-        <div class="content">
-          <div class="toolbar">
-            <button class="active">全部</button>
-            <button>完成</button>
-            <button>失败</button>
-            <button>z5</button>
-          </div>
-          <div class="stack">
-            <section class="panel">
-              <div class="panel-title">
-                <h3>当前接收</h3>
-                <span class="status blue">42%</span>
-              </div>
-              <strong>IMG_1234.CR3</strong>
-              <div class="progress"><b style="width: 42%;"></b></div>
-              <div class="tag-row" style="margin-top: 10px;">
-                <span class="tag">username: z5</span>
-                <span class="tag">remote: 192.168.137.56</span>
-                <span class="tag">path: BB/IMG_1234.CR3</span>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="row">
-                <div>
-                  <strong>IMG_1234.JPG</strong>
-                  <span>Completed · Verify Camera/IMG_1234.JPG · location local_path</span>
-                </div>
-                <span class="status green">done</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>IMG_9999.CR3</strong>
-                  <span>Failed · connection reset · remote 192.168.137.56</span>
-                </div>
-                <span class="status red">failed</span>
-              </div>
-              <div class="row">
-                <div>
-                  <strong>IMG_1234 (1).CR3</strong>
-                  <span>Completed · duplicate 2/2 · original BB/IMG_1234.CR3</span>
-                </div>
-                <span class="status green">done</span>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-title">
-                <h3>筛选字段</h3>
-              </div>
-              <div class="kv"><span>status</span><strong>completed / failed</strong></div>
-              <div class="kv"><span>username</span><strong>z5</strong></div>
-              <div class="kv"><span>source</span><strong>Verify Camera</strong></div>
-              <div class="kv"><span>original path</span><strong>BB/IMG_1234.CR3</strong></div>
-              <div class="kv"><span>transfer id</span><strong>ftp:1779454764767:IMG_1234.CR3</strong></div>
-            </section>
-          </div>
-        </div>
-        <nav class="tabbar">
-          <button data-route="dashboard"><span class="tab-icon">⌂</span>概览</button>
-          <button data-route="inbox"><span class="tab-icon">□</span>收件箱</button>
-          <button class="active" data-route="transfers"><span class="tab-icon">≡</span>传输</button>
-        </nav>
-      </div>
-    </section>
+  <main class="phone" aria-live="polite">
+    <div class="camera-hole"></div>
+    <div class="statusbar"><span>5:20</span><span>5G ▮</span></div>
+    <div id="app" class="app"></div>
+    <nav class="bottom-nav" aria-label="全局导航">
+      <button class="nav-btn" data-route="settings" aria-label="设置">
+        <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.09 1.65V21a2.1 2.1 0 0 1-4.2 0v-.06A1.8 1.8 0 0 0 8.45 19.3a1.8 1.8 0 0 0-1.98.36l-.04.04a2.1 2.1 0 1 1-2.97-2.97l.04-.04A1.8 1.8 0 0 0 3.86 14.7a1.8 1.8 0 0 0-1.65-1.09H2a2.1 2.1 0 0 1 0-4.2h.06A1.8 1.8 0 0 0 3.7 8.35a1.8 1.8 0 0 0-.36-1.98l-.04-.04a2.1 2.1 0 1 1 2.97-2.97l.04.04a1.8 1.8 0 0 0 1.98.36h.01A1.8 1.8 0 0 0 9.39 2.1V2a2.1 2.1 0 0 1 4.2 0v.06a1.8 1.8 0 0 0 1.09 1.65 1.8 1.8 0 0 0 1.98-.36l.04-.04a2.1 2.1 0 1 1 2.97 2.97l-.04.04a1.8 1.8 0 0 0-.36 1.98v.01a1.8 1.8 0 0 0 1.65 1.09H21a2.1 2.1 0 0 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z"/></svg>
+      </button>
+      <button class="nav-btn active" data-route="photos" aria-label="项目">
+        <svg viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+      </button>
+      <button class="nav-btn" data-route="accounts" aria-label="账号">
+        <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+      </button>
+    </nav>
   </main>
 
-  <script>
-    const views = [...document.querySelectorAll(".view")];
-    const routeButtons = [...document.querySelectorAll("[data-route]")];
+  <aside class="shot-panel" id="shotPanel">
+    <h2>镜头说明</h2>
+    <p>选择左侧页面后，这里会显示拍摄重点和旁白要点。</p>
+  </aside>
 
-    function show(route) {
-      views.forEach((view) => {
-        view.classList.toggle("hidden", view.id !== route);
-      });
-      routeButtons.forEach((button) => {
-        button.classList.toggle("active", button.dataset.route === route);
+  <script>
+    const icons = {
+      back: '<svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/><path d="M21 12H9"/></svg>',
+      spark: '<svg viewBox="0 0 24 24"><path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z"/><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z"/></svg>',
+      more: '<svg viewBox="0 0 24 24"><path d="M12 8h.01"/><path d="M12 12h.01"/><path d="M12 16h.01"/></svg>',
+      up: '<svg viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg>',
+      down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+      filter: '<svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>',
+      star: '<svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.2l-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></svg>',
+      mark: '<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-3-6 3V3Z"/><path d="M12 7v5"/><path d="M9.5 9.5h5"/></svg>',
+      trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 15H6L5 6"/></svg>',
+      split: '<svg viewBox="0 0 24 24"><path d="M5 6h14"/><path d="M5 12h9"/><path d="M5 18h14"/><path d="m16 9 3 3-3 3"/></svg>',
+      photo: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 15 5-5 4 4 3-3 6 6"/><circle cx="15.5" cy="9.5" r="1.5"/></svg>',
+      user: '<svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>',
+      refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>',
+    };
+
+    const photos = [
+      "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=700&q=80",
+      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=700&q=80",
+      "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=700&q=80",
+      "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=700&q=80",
+      "https://images.unsplash.com/photo-1517732306149-e8f829eb588a?auto=format&fit=crop&w=700&q=80",
+      "https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=700&q=80",
+    ];
+
+    const shotNotes = {
+      projects: {
+        title: "项目管理",
+        body: "第一镜头建议从这里开始。讲清楚每次拍摄都归入一个项目，全局统计展示项目数、在线连接、照片数量和手机存储。",
+        tags: ["项目制", "全局状态", "存储占用"]
+      },
+      accounts: {
+        title: "账号管理",
+        body: "展示相机登录账号。没有账号时，启动接收会提示先配置账号。在线账号不可编辑，避免接收过程中改坏凭据。",
+        tags: ["FTP 账号", "设备状态"]
+      },
+      receiver: {
+        title: "接收启动页",
+        body: "演示项目内启动接收。FTP 是当前可用路径，STC 是置灰占位。启动后 IP 和端口不可编辑，收起后回到照片列表。",
+        tags: ["FTP", "启动接收", "项目内"]
+      },
+      photos: {
+        title: "项目照片列表",
+        body: "这是主信息面。RAW+JPG 当成同一张照片，连拍组聚合成一张卡，筛选标签聚焦模型优选、收藏、标记和技术风险。",
+        tags: ["照片网格", "分组聚合", "批量操作"]
+      },
+      burst: {
+        title: "连拍组概览",
+        body: "点击连拍卡片先看组内概览，再进入详情。视频里适合展示模型优选封面和组内 M/N 位置。",
+        tags: ["连拍组", "组内预览"]
+      },
+      detail: {
+        title: "照片详情",
+        body: "用于展示大图判断、组内轮播、人工收藏和模型评价。收藏是用户选择，模型优选是算法结果，二者不互相覆盖。",
+        tags: ["大图", "模型评价", "人工选择"]
+      },
+      "project-ai": {
+        title: "项目智能",
+        body: "项目级策略入口。模型、自动流程、技术风险阈值、评价提示词都在项目下选择或配置。",
+        tags: ["项目策略", "模型优选"]
+      },
+      "ai-model": {
+        title: "模型服务选择",
+        body: "项目只选择全局模型配置，不在这里维护 URL 或 API Key。这样多个项目可以复用同一套模型服务。",
+        tags: ["项目选择", "全局复用"]
+      },
+      "ai-workflow": {
+        title: "自动流程",
+        body: "展示上传后自动模型评价、连拍组自动优选、风险照片是否参与优选。没有模型配置时开关给出提示。",
+        tags: ["自动评价", "连拍优选"]
+      },
+      "ai-threshold": {
+        title: "技术风险阈值",
+        body: "本地 CV 风险门控。宽松、标准、严格快速切换，自定义里调整失焦、死黑死白、偏色和人像相关灵敏度。",
+        tags: ["CV 风险", "高级配置"]
+      },
+      "ai-prompt": {
+        title: "评价提示词选择",
+        body: "项目选择提示词包中的摄影偏好。编辑发生在全局提示词配置里，系统锁定输入输出协议。",
+        tags: ["提示词包", "摄影偏好"]
+      },
+      settings: {
+        title: "系统设置",
+        body: "全局设置只放 App 级能力，例如网格列数、模型服务、提示词配置、诊断和导入位置。",
+        tags: ["全局配置", "App 级"]
+      },
+      providers: {
+        title: "模型服务列表",
+        body: "展示模型服务是二级页面，有列表、新建和编辑能力。一个 API 可以配置多个模型名称。",
+        tags: ["模型 API", "列表管理"]
+      },
+      "provider-edit": {
+        title: "模型服务编辑",
+        body: "配置 URL、模型名、API Key、发送模式和批量数量。API Key 保存后不回显，留空不覆盖。",
+        tags: ["URL", "API Key", "模型名"]
+      },
+      prompts: {
+        title: "提示词配置",
+        body: "按提示词包管理，支持我的提示词包和内置提示词包。包是未来共享分发的单位。",
+        tags: ["提示词包", "社区共享"]
+      },
+      "prompt-edit": {
+        title: "提示词编辑",
+        body: "用户编辑 Markdown 摄影偏好，系统负责把偏好拼入锁定协议，保证模型输出结构稳定。",
+        tags: ["Markdown", "偏好编辑"]
+      },
+      diagnostics: {
+        title: "诊断日志",
+        body: "作为设置下的二级工具，不进入主流程。用于连接、传输、写入失败排查。",
+        tags: ["诊断", "排错"]
+      }
+    };
+
+    let currentRoute = "projects";
+    let receiverRunning = false;
+
+    function shell(content, navActive = "projects") {
+      document.getElementById("app").innerHTML = `<section class="screen">${content}</section>`;
+      document.querySelectorAll(".nav-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.route === navActive);
       });
     }
 
-    routeButtons.forEach((button) => {
-      button.addEventListener("click", () => show(button.dataset.route));
+    function header(title, subtitle, backRoute = null, compact = false) {
+      return `
+        <div class="page-header ${compact ? "compact" : ""}">
+          ${backRoute ? `<button class="back-btn" data-route="${backRoute}" aria-label="返回">${icons.back}</button>` : ""}
+          <div class="title-stack">
+            <h2>${title}</h2>
+            ${subtitle ? `<p>${subtitle}</p>` : ""}
+          </div>
+        </div>`;
+    }
+
+    function receiverStrip() {
+      return `
+        <div class="receiver-strip" data-route="receiver">
+          <button class="back-btn" data-route="projects" aria-label="返回项目管理">${icons.back}</button>
+          <div class="row" style="min-width:0">
+            <span class="dot ${receiverRunning ? "green" : ""}"></span>
+            <div style="min-width:0">
+              <div class="value" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Real Verify</div>
+              <div class="muted tiny">FTP 192.168.50.1:2121</div>
+            </div>
+          </div>
+          <button class="icon-btn" data-route="project-ai" aria-label="项目智能">${icons.spark}</button>
+          <button class="icon-btn" aria-label="更多">${icons.more}</button>
+        </div>`;
+    }
+
+    function screenProjects() {
+      shell(`
+        ${header("项目管理", "启动后默认进入，用户选择或新建项目。")}
+        <div class="stack">
+          <div class="card card-pad stack">
+            <div class="row between"><strong>全局状态</strong><span class="pill green">25%</span></div>
+            <div class="stat-grid">
+              <div class="stat"><strong>2</strong><span class="muted tiny">项目</span></div>
+              <div class="stat"><strong>1</strong><span class="muted tiny">在线连接</span></div>
+              <div class="stat"><strong>48</strong><span class="muted tiny">照片</span></div>
+            </div>
+            <div>
+              <div class="row between"><strong>手机存储</strong><span class="muted tiny">内部存储使用情况</span></div>
+              <div class="storage-track" style="margin:10px 0 12px;"><span class="storage-used"></span><span class="storage-project"></span></div>
+              <div class="stat-grid">
+                <div><span class="label">已用</span><div class="value">1.5 GB</div></div>
+                <div><span class="label">项目</span><div class="value" style="color:var(--cyan)">88 MB</div></div>
+                <div><span class="label">可用</span><div class="value">4.3 GB</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card project-card">
+            <span class="dot green"></span>
+            <div>
+              <strong>Real Verify</strong>
+              <div class="muted">当前项目</div>
+            </div>
+            <button class="button ghost" data-route="project-ai">配置</button>
+            <button class="button" data-route="photos">进入</button>
+            <button class="icon-btn" aria-label="更多">${icons.more}</button>
+          </div>
+
+          <div class="card project-card">
+            <span class="dot"></span>
+            <div>
+              <strong>Portrait Test</strong>
+              <div class="muted">活跃项目</div>
+            </div>
+            <button class="button ghost" data-route="project-ai">配置</button>
+            <button class="button" data-route="photos">进入</button>
+            <button class="icon-btn" aria-label="更多">${icons.more}</button>
+          </div>
+
+          <button class="button" data-route="project-ai">新建项目并配置</button>
+        </div>
+      `, "projects");
+    }
+
+    function screenPhotos() {
+      shell(`
+        <div class="stack">
+          ${receiverStrip()}
+          <div class="row between">
+            <div class="filter-row">
+              ${["全部", "模型优选", "收藏", "标记", "技术风险", "待分析"].map((x, i) => `<button class="chip ${i === 0 ? "active" : ""}">${x}</button>`).join("")}
+            </div>
+            <button class="icon-btn">${icons.filter}</button>
+          </div>
+          <div class="photo-grid">
+            ${tile(0, { count: 2, risk: true, route: "burst", format: "JPG+RAW" })}
+            ${tile(1, { count: 2, score: 58, route: "burst", format: "JPG+RAW", selected: true })}
+            ${tile(2, { risk: true, route: "detail", format: "JPG+RAW" })}
+            ${tile(3, { score: 56, route: "detail", format: "JPG" })}
+            ${tile(4, { favorite: true, route: "detail", format: "RAW" })}
+            ${tile(5, { marked: true, route: "detail", format: "JPG" })}
+          </div>
+          <div class="selection-bar">
+            <div class="row between"><strong>已选 2 项</strong><div class="row"><button class="back-btn">全选</button><button class="back-btn" style="color:var(--red)">删除</button><button class="back-btn">完成</button></div></div>
+            <div class="action-grid">
+              <button class="small-action">打开</button>
+              <button class="small-action">评价</button>
+              <button class="small-action">移出</button>
+              <button class="small-action">合并</button>
+              <button class="small-action disabled">更多</button>
+            </div>
+          </div>
+        </div>
+      `, "projects");
+    }
+
+    function tile(index, opts = {}) {
+      const img = photos[index % photos.length];
+      const labels = [
+        opts.count ? `<span class="badge-top">${opts.count}</span>` : "",
+        opts.risk ? `<span class="badge-risk">风险</span>` : "",
+        opts.score ? `<span class="badge-score">评分 ${opts.score}</span>` : "",
+        opts.favorite ? `<span class="badge-score" style="color:var(--green);border-color:rgba(37,224,163,.6);background:rgba(37,224,163,.1)">优选</span>` : "",
+        opts.marked ? `<span class="badge-score" style="color:var(--cyan);border-color:rgba(8,212,246,.6);background:rgba(8,212,246,.1)">标记</span>` : "",
+        opts.format ? `<span class="badge-format">${opts.format}</span>` : "",
+      ].join("");
+      return `
+        <button class="photo-tile ${opts.selected ? "selected" : ""}" data-route="${opts.route || "detail"}" aria-label="照片">
+          <img class="photo-img ${index === 3 ? "tall" : ""}" src="${img}" alt="">
+          ${labels}
+        </button>`;
+    }
+
+    function screenReceiver() {
+      shell(`
+        <div class="receiver-card">
+          <div class="launch-header">
+            <div class="row"><button class="back-btn" data-route="photos">${icons.back}</button><strong>Real Verify</strong></div>
+            <button class="icon-btn" data-route="photos">${icons.up}</button>
+            <div class="row" style="justify-content:flex-end"><button class="icon-btn" data-route="project-ai">${icons.spark}</button><button class="icon-btn">${icons.more}</button></div>
+          </div>
+          <button class="hero-button ${receiverRunning ? "stop" : ""}" data-action="toggleReceiver">
+            <span>${receiverRunning ? "停止" : "启动"}<br><small style="font-size:14px">${receiverRunning ? "接收服务" : "开始接收"}</small></span>
+          </button>
+          <div class="row" style="justify-content:center">
+            <span class="pill ${receiverRunning ? "green" : ""}">${receiverRunning ? "运行中" : "已停止"}</span>
+            <span class="pill">未连接</span>
+            <span class="pill primary">已配置账号 1</span>
+          </div>
+          <div class="segmented">
+            <button class="segment">FTP</button>
+            <button class="segment disabled" disabled>STC 开发中</button>
+          </div>
+          <div class="field"><label>相机连接 IP</label><input value="192.168.50.1" ${receiverRunning ? "disabled" : ""}></div>
+          <div class="field"><label>端口</label><input value="2121" ${receiverRunning ? "disabled" : ""}></div>
+          <div class="muted tiny">输出目录：/data/user/0/com.cameraconnector.app/files/output</div>
+        </div>
+      `, "projects");
+    }
+
+    function screenBurst() {
+      shell(`
+        <div class="stack">
+          ${receiverStrip()}
+          <div class="photo-grid">
+            ${tile(0, { count: 4, score: 54, route: "burst", format: "JPG+RAW" })}
+            ${tile(1, { count: 2, risk: true, route: "detail", format: "JPG+RAW" })}
+            ${tile(2, { risk: true, route: "detail", format: "JPG" })}
+          </div>
+          <div class="modal-backdrop">
+            <div class="burst-modal">
+              <div class="row between"><div><h2 style="margin:0">连拍组</h2><p class="muted">4 张，优选 DSC_9125.JPG</p></div><button class="back-btn" data-route="photos">关闭</button></div>
+              <div class="burst-grid">
+                ${burstTile(0, "1/4", "评分 42")}
+                ${burstTile(1, "2/4", "评分 54", true)}
+                ${burstTile(2, "3/4", "风险")}
+                ${burstTile(3, "4/4", "评分 48")}
+              </div>
+            </div>
+          </div>
+        </div>
+      `, "projects");
+    }
+
+    function burstTile(index, pos, score, best = false) {
+      return `
+        <button class="photo-tile" data-route="detail">
+          <img class="photo-img" src="${photos[index]}" alt="">
+          <span class="badge-top">${pos}</span>
+          <span class="${score === "风险" ? "badge-risk" : "badge-score"}">${score}</span>
+          ${best ? '<span class="badge-format" style="color:var(--green);border-color:rgba(37,224,163,.6);background:rgba(37,224,163,.1)">优选</span>' : ""}
+        </button>`;
+    }
+
+    function screenDetail() {
+      shell(`
+        ${header("DSC_9118", "照片详情", "photos", true)}
+        <div class="detail-photo-wrap">
+          <span class="badge-top" style="top:-2px;left:10px">1/2</span>
+          <img class="detail-photo landscape" src="${photos[1]}" alt="">
+          <div class="peek-next"><img src="${photos[0]}" alt=""></div>
+        </div>
+        <div class="actions">
+          <button class="action-round">${icons.mark}</button>
+          <button class="action-round green">${icons.star}</button>
+          <button class="action-round">${icons.spark}</button>
+          <button class="action-round yellow">${icons.split}</button>
+          <button class="action-round red">${icons.trash}</button>
+        </div>
+        <div class="stack">
+          <div class="smart-card">
+            <div class="row between">
+              <div><strong>智能优选</strong><p class="muted tiny" style="margin:8px 0 0">主体清晰，但暗部存在明显死黑，建议谨慎入选。</p></div>
+              <div class="score-bubble">58<br><small>评分</small></div>
+            </div>
+            <div class="chip-row" style="margin-top:10px"><span class="pill red">有风险</span><span class="pill purple">1/2</span><span class="pill">待推荐</span></div>
+            <div class="row" style="margin-top:10px"><span class="label">风险</span><strong style="color:var(--red)">失焦 / 暗部死黑</strong></div>
+          </div>
+          <div class="card card-pad">
+            <strong>拍摄参数</strong>
+            <div class="meta-grid" style="margin-top:12px">
+              <div><span class="label">拍摄时间</span><div>2026-01-24 13:00:42</div></div>
+              <div><span class="label">相机</span><div>NIKON Z5_2</div></div>
+              <div><span class="label">镜头</span><div>NIKKOR Z 24-200mm</div></div>
+              <div><span class="label">ISO</span><div>ISO 100</div></div>
+              <div><span class="label">光圈</span><div>f/6.3</div></div>
+              <div><span class="label">快门</span><div>1/640 s</div></div>
+            </div>
+          </div>
+        </div>
+      `, "projects");
+    }
+
+    function screenProjectAi() {
+      shell(`
+        ${header("Real Verify", "项目智能、场景和优选策略", "photos")}
+        <div class="stack">
+          <div class="card card-pad">
+            <strong>项目场景</strong>
+            <div class="chip-row" style="margin-top:12px">
+              ${["通用", "人像", "动作", "风光"].map((x, i) => `<button class="chip ${i === 1 ? "active" : ""}">${x}</button>`).join("")}
+            </div>
+            <p class="muted tiny" style="margin:10px 0 0">人像场景会优先启用人像相关风险判断，并影响模型评价语境。</p>
+          </div>
+          <div class="card">
+            ${menu("模型服务", "OpenAI · gpt-5.4-mini-2026-03-17", "ai-model")}
+            ${menu("自动流程", "自动评价开 · 连拍优选开 · 风险参与关", "ai-workflow")}
+            ${menu("技术风险阈值", "标准", "ai-threshold")}
+            ${menu("评价提示词", "人像稳健", "ai-prompt")}
+            <div style="padding:14px 16px"><button class="button" style="width:100%">生成项目优选</button></div>
+          </div>
+        </div>
+      `, "projects");
+    }
+
+    function menu(title, subtitle, route) {
+      return `<button class="menu-row" data-route="${route}"><span><strong>${title}</strong><br><span class="muted">${subtitle}</span></span><span class="muted">›</span></button>`;
+    }
+
+    function screenAiModel() {
+      shell(`
+        ${header("模型服务", "选择当前项目使用的模型配置", "project-ai")}
+        <div class="stack">
+          <button class="card card-pad row between" data-route="providers"><span><strong>OpenAI · gpt-5.4-mini-2026-03-17</strong><br><span class="muted">https://api.openai.com/v1</span></span><span class="pill primary">当前</span></button>
+          <button class="card card-pad row between" data-route="providers"><span><strong>Local Vision Review</strong><br><span class="muted">http://192.168.50.20:11434</span></span><span class="pill">可选</span></button>
+          <button class="button ghost" data-route="providers">管理模型服务</button>
+        </div>
+      `, "projects");
+    }
+
+    function screenAiWorkflow() {
+      shell(`
+        ${header("自动流程", "控制上传后评价与连拍优选", "project-ai")}
+        <div class="card">
+          ${switchRow("上传后自动评价", "上传发布完成后自动进入模型评价", true)}
+          ${switchRow("连拍组自动优选", "连拍组先预选，再评价和推荐", true)}
+          ${switchRow("允许风险照片参与优选", "默认关闭，降低误选废片概率", false)}
+        </div>
+      `, "projects");
+    }
+
+    function switchRow(title, subtitle, on) {
+      return `<div class="menu-row"><span><strong>${title}</strong><br><span class="muted">${subtitle}</span></span><span class="switch ${on ? "on" : ""}"></span></div>`;
+    }
+
+    function screenAiThreshold() {
+      shell(`
+        ${header("技术风险阈值", "设置本项目的本地风险检测灵敏度", "project-ai")}
+        <div class="stack">
+          <div class="card card-pad">
+            <strong>阈值预设</strong>
+            <div class="chip-row" style="margin-top:12px">
+              <button class="chip">宽松</button><button class="chip active">标准</button><button class="chip">严格</button><button class="chip">自定义</button>
+            </div>
+            <p class="muted tiny" style="margin-top:10px">标准模式平衡误报和漏报，适合大多数项目。</p>
+          </div>
+          <div class="card card-pad stack">
+            ${slider("失焦灵敏度", "38%", "38%", "边缘和高频细节都低于阈值时提示失焦。")}
+            ${slider("死黑/死白灵敏度", "59%", "59%", "阴影或高光占比异常时提示风险。")}
+            ${slider("偏色灵敏度", "56%", "56%", "RGB 通道相对亮度差异过大时提示偏色。")}
+            ${slider("闭眼灵敏度", "43%", "43%", "人像场景下检测到闭眼风险时提示。")}
+          </div>
+        </div>
+      `, "projects");
+    }
+
+    function slider(name, value, percent, hint) {
+      return `<div><div class="row between"><strong>${name}</strong><strong>${value}</strong></div><div class="slider" style="--value:${percent}"></div><p class="muted tiny">${hint}</p></div>`;
+    }
+
+    function screenAiPrompt() {
+      shell(`
+        ${header("评价提示词", "选择模型评价使用的摄影偏好", "project-ai")}
+        <div class="stack">
+          ${promptChoice("我的提示词包", "人像稳健", "人像 / 稳健 / 自定义", true)}
+          ${promptChoice("内置提示词包", "通用评价", "通用 / 均衡 / 内置", false)}
+          ${promptChoice("内置提示词包", "风光技术", "风光 / 技术 / 内置", false)}
+          <button class="button ghost" data-route="prompts">管理提示词配置</button>
+        </div>
+      `, "projects");
+    }
+
+    function promptChoice(pack, name, meta, selected) {
+      return `<button class="card card-pad row between" data-route="prompt-edit"><span><span class="muted tiny">${pack}</span><br><strong>${name}</strong><br><span class="muted">${meta}</span></span>${selected ? '<span class="pill primary">当前</span>' : '<span class="muted">›</span>'}</button>`;
+    }
+
+    function screenAccounts() {
+      shell(`
+        ${header("账号管理", "相机账号和连接状态")}
+        <div class="stack">
+          <button class="card card-pad row between" data-route="account-detail"><span><strong>verify</strong><br><span class="muted">Verify Camera · 在线连接 1</span></span><span class="pill green">在线</span></button>
+          <button class="card card-pad row between" data-route="account-detail"><span><strong>backup</strong><br><span class="muted">备用相机 · 未连接</span></span><span class="pill">离线</span></button>
+          <button class="button" data-route="account-detail">新增账号</button>
+        </div>
+      `, "accounts");
+    }
+
+    function screenAccountDetail() {
+      shell(`
+        ${header("账号详情", "用户名、密码、设备名", "accounts")}
+        <div class="stack">
+          <div class="card card-pad"><div class="row"><span class="pill green">在线</span><span class="pill">连接 1</span></div><p class="muted tiny" style="margin-top:10px">最近来源：192.168.50.22:49210</p></div>
+          <div class="card card-pad">
+            <div class="field"><label>用户名</label><input value="verify"></div>
+            <div class="field"><label>设备名称</label><input value="Verify Camera"></div>
+            <div class="field"><label>新密码，留空不修改</label><input value="" placeholder="••••••••"></div>
+            <button class="button" style="width:100%">保存账号</button>
+            <button class="button danger" style="width:100%;margin-top:10px">删除账号</button>
+          </div>
+        </div>
+      `, "accounts");
+    }
+
+    function screenSettings() {
+      shell(`
+        ${header("系统设置", "接收、存储与通知权限")}
+        <div class="stack">
+          <div class="card">${menu("诊断日志", "连接、传输和写入状态", "diagnostics")}</div>
+          <div class="card card-pad row between"><span><strong>项目照片网格</strong><br><span class="muted">3列</span></span><span class="row"><button class="chip">2列</button><button class="chip active">3列</button></span></div>
+          <div class="card">
+            ${menu("模型服务", "已配置 2 个，项目内选择使用", "providers")}
+            ${menu("提示词配置", "全局评价偏好，按包共享", "prompts")}
+          </div>
+          <div class="card">${menu("外部文件夹授权", "未授权", "settings")}</div>
+        </div>
+      `, "settings");
+    }
+
+    function screenProviders() {
+      shell(`
+        ${header("模型服务", "配置可复用的模型 API", "settings")}
+        <div class="stack">
+          <button class="button" data-route="provider-edit">新建模型服务</button>
+          <button class="card card-pad row between" data-route="provider-edit"><span><strong>OpenAI · gpt-5.4-mini-2026-03-17</strong><br><span class="muted">仅发送预览 · 批处理 8</span></span><span class="muted">›</span></button>
+          <button class="card card-pad row between" data-route="provider-edit"><span><strong>Local Vision Review</strong><br><span class="muted">发送大图 · 批处理 2</span></span><span class="muted">›</span></button>
+        </div>
+      `, "settings");
+    }
+
+    function screenProviderEdit() {
+      shell(`
+        ${header("编辑模型服务", "服务地址、模型和密钥", "providers")}
+        <div class="card card-pad">
+          <div class="field"><label>配置名称</label><input value="OpenAI · gpt-5.4-mini-2026-03-17"></div>
+          <div class="chip-row"><button class="chip active">OpenAI</button><button class="chip">自定义</button></div>
+          <div class="field" style="margin-top:12px"><label>服务地址</label><input value="https://api.openai.com/v1"></div>
+          <div class="field"><label>模型名称</label><input value="gpt-5.4-mini-2026-03-17"></div>
+          <div class="field"><label>API Key</label><input placeholder="已保存密钥，留空不会覆盖"></div>
+          <div class="chip-row"><button class="chip active">仅发送预览</button><button class="chip">发送大图</button><button class="chip active">批处理 8</button></div>
+          <button class="button" style="width:100%;margin-top:14px">保存模型配置</button>
+          <button class="button danger" style="width:100%;margin-top:10px">删除模型服务</button>
+        </div>
+      `, "settings");
+    }
+
+    function screenPrompts() {
+      shell(`
+        ${header("提示词配置", "按提示词包管理摄影评价偏好", "settings")}
+        <div class="stack">
+          <button class="button">新建提示词包</button>
+          <div class="prompt-package">
+            <div class="prompt-head"><strong>我的提示词包</strong><button class="button ghost" data-route="prompt-edit">新建</button></div>
+            <button class="menu-row" data-route="prompt-edit"><span><strong>人像稳健</strong><br><span class="muted">人像 / 稳健 / 自定义</span></span><span class="muted">编辑</span></button>
+          </div>
+          <div class="prompt-package">
+            <div class="prompt-head"><strong>内置提示词包</strong><span class="muted">3 个提示词</span></div>
+            <button class="menu-row" data-route="prompt-edit"><span><strong>通用评价</strong><br><span class="muted">通用 / 均衡 / 内置</span></span><span class="muted">查看</span></button>
+            <button class="menu-row" data-route="prompt-edit"><span><strong>风光技术</strong><br><span class="muted">风光 / 技术 / 内置</span></span><span class="muted">查看</span></button>
+          </div>
+        </div>
+      `, "settings");
+    }
+
+    function screenPromptEdit() {
+      shell(`
+        ${header("人像稳健", "保存后成为全局偏好的新版本", "prompts")}
+        <div class="stack">
+          <div class="chip-row"><button class="chip active">编辑</button><button class="chip">预览</button></div>
+          <div class="field"><label>提示词名称</label><input value="人像稳健"></div>
+          <div class="field"><label>提示词包</label><input value="我的提示词包"></div>
+          <div class="field"><label>风格标签</label><input value="人像 稳健"></div>
+          <div class="field"><label>我的摄影评价偏好</label><textarea rows="8"># 人像稳健
+- 优先关注眼神、表情、面部受光和主体姿态
+- 技术风险高的照片不建议入选
+- 可以保留轻微氛围暗部，但不要接受大面积死黑</textarea><span class="muted tiny">支持 Markdown：# 标题、列表、引用、代码、**加粗**、*斜体*</span></div>
+          <div class="markdown-preview"><strong>预览</strong><p>人像稳健偏好会参与单张评价、连拍组内优选和项目优选，系统会保持输出格式稳定。</p></div>
+          <button class="button">保存提示词</button>
+        </div>
+      `, "settings");
+    }
+
+    function screenDiagnostics() {
+      shell(`
+        ${header("诊断日志", "连接、传输和写入状态", "settings")}
+        <div class="stack">
+          <div class="stat-grid">
+            <div class="stat"><strong>1</strong><span class="muted tiny">在线账号</span></div>
+            <div class="stat"><strong>0</strong><span class="muted tiny">失败传输</span></div>
+            <div class="stat"><strong>0</strong><span class="muted tiny">队列待处理</span></div>
+          </div>
+          <div class="card card-pad"><strong>DSC_9118.JPG</strong><p class="muted">已发布 · FTP · 192.168.50.22</p></div>
+          <div class="card card-pad"><strong>DSC_9119.NEF</strong><p class="muted">模型评价中 · 等待推荐结果</p></div>
+        </div>
+      `, "settings");
+    }
+
+    const screens = {
+      projects: screenProjects,
+      photos: screenPhotos,
+      receiver: screenReceiver,
+      burst: screenBurst,
+      detail: screenDetail,
+      "project-ai": screenProjectAi,
+      "ai-model": screenAiModel,
+      "ai-workflow": screenAiWorkflow,
+      "ai-threshold": screenAiThreshold,
+      "ai-prompt": screenAiPrompt,
+      accounts: screenAccounts,
+      "account-detail": screenAccountDetail,
+      settings: screenSettings,
+      providers: screenProviders,
+      "provider-edit": screenProviderEdit,
+      prompts: screenPrompts,
+      "prompt-edit": screenPromptEdit,
+      diagnostics: screenDiagnostics,
+    };
+
+    function setRoute(route, syncHash = true) {
+      currentRoute = route;
+      if (syncHash && location.hash.slice(1) !== route) {
+        history.replaceState(null, "", `#${route}`);
+      }
+      document.querySelectorAll(".route").forEach(btn => btn.classList.toggle("active", btn.dataset.route === route));
+      const note = shotNotes[route] || shotNotes.projects;
+      document.getElementById("shotPanel").innerHTML = `
+        <h2>${note.title}</h2>
+        <p>${note.body}</p>
+        <ul>
+          <li>录制时先停留 1 秒，让观众看清页面结构。</li>
+          <li>重点拍摄当前页面的主操作和状态变化。</li>
+          <li>不需要解释工程实现，旁白只讲用户能感知的价值。</li>
+        </ul>
+        ${(note.tags || []).map(tag => `<span class="shot-tag">${tag}</span>`).join("")}
+      `;
+      (screens[route] || screenProjects)();
+    }
+
+    document.addEventListener("click", event => {
+      const routeTarget = event.target.closest("[data-route]");
+      if (routeTarget) {
+        event.preventDefault();
+        setRoute(routeTarget.dataset.route);
+        return;
+      }
+      const actionTarget = event.target.closest("[data-action]");
+      if (actionTarget?.dataset.action === "toggleReceiver") {
+        receiverRunning = !receiverRunning;
+        setRoute("receiver");
+      }
     });
+
+    window.addEventListener("hashchange", () => {
+      const route = location.hash.slice(1);
+      if (screens[route]) {
+        setRoute(route, false);
+      }
+    });
+
+    setRoute(screens[location.hash.slice(1)] ? location.hash.slice(1) : "projects", false);
   </script>
 </body>
 </html>
