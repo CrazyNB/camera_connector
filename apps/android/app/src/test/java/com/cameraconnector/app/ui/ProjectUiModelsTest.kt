@@ -358,6 +358,46 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun lanShareAssetQueryKeepsCurrentListAndCombinesTagsAsOr() {
+        val baseQuery = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.ModelSelects,
+            selectedFilter = AssetFormatFilter.Raw,
+            selectedSort = PhotoSortMode.ModelScore,
+            selectedGuestMarkFilter = GuestMarkFilter.Reject,
+            selectedMinModelScore = 80,
+        )
+        val query = lanShareAssetQuery(
+            baseQuery = baseQuery,
+            favoriteOnly = true,
+            markedOnly = true,
+            minModelScore = 70,
+        )
+
+        assertEquals("model_selects", query.collection)
+        assertEquals(com.cameraconnector.app.core.ProjectAssetRole.Raw, query.role)
+        assertEquals(PhotoSortMode.ModelScore, query.sort)
+        assertNull(query.favorite)
+        assertNull(query.marked)
+        assertEquals(listOf("favorite", "marked"), query.userMarkAny)
+        assertEquals("reject", query.guestMark)
+        assertEquals(70, query.minModelScore)
+    }
+
+    @Test
+    fun assetListQueryIncludesGuestMarkAndScoreFilters() {
+        val query = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.All,
+            selectedFilter = AssetFormatFilter.All,
+            selectedSort = PhotoSortMode.LatestReceived,
+            selectedGuestMarkFilter = GuestMarkFilter.None,
+            selectedMinModelScore = 80,
+        )
+
+        assertEquals("none", query.guestMark)
+        assertEquals(80, query.minModelScore)
+    }
+
+    @Test
     fun projectPhotoGridItemsCollapseBurstMembersToBestCover() {
         val burst = ProjectAssetBurst(
             burstGroupId = "burst-1",

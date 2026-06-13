@@ -7,6 +7,7 @@ import java.io.BufferedInputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.net.URLEncoder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,7 +32,7 @@ class CoreLanShareGateway(private val coreGateway: CoreGateway) : LanShareGatewa
         coreGateway.setLanShareGuestMark(token, groupId, guestMark)
 }
 
-typealias LanSharePreviewLoader = suspend (token: String, groupId: String) -> ByteArray?
+typealias LanSharePreviewLoader = suspend (token: String, groupId: String, fullQuality: Boolean) -> ByteArray?
 
 data class LanShareRequest(
     val method: String,
@@ -78,7 +79,14 @@ class LanShareRouter(
                 segments[0] == "api" &&
                 segments[1] == "s" &&
                 segments[3] == "preview" ->
-                preview(segments[2], decodePathPart(segments[4]))
+                preview(segments[2], decodePathPart(segments[4]), fullQuality = false)
+
+            request.method == "GET" &&
+                segments.size == 5 &&
+                segments[0] == "api" &&
+                segments[1] == "s" &&
+                segments[3] == "preview-full" ->
+                preview(segments[2], decodePathPart(segments[4]), fullQuality = true)
 
             request.method == "PUT" &&
                 segments.size == 6 &&
@@ -98,9 +106,429 @@ class LanShareRouter(
             "text/html; charset=utf-8",
             """
             <!doctype html>
-            <html>
-            <head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Camera Connector</title></head>
-            <body data-token="$token"><main id="app"></main></body>
+            <html lang="zh-CN">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>多方筛选</title>
+              <style>
+                :root {
+                  color-scheme: dark;
+                  --bg: #061018;
+                  --panel: #0b1b25;
+                  --panel-2: #0e2330;
+                  --border: #203546;
+                  --text: #eaf6ff;
+                  --muted: #82a0b2;
+                  --blue: #00d5ff;
+                  --green: #27e7a2;
+                  --danger: #ff4d6d;
+                }
+                * { box-sizing: border-box; }
+                body {
+                  margin: 0;
+                  min-height: 100vh;
+                  background: var(--bg);
+                  color: var(--text);
+                  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                }
+                header {
+                  position: sticky;
+                  top: 0;
+                  z-index: 2;
+                  padding: 14px 16px;
+                  background: rgba(6, 16, 24, 0.94);
+                  border-bottom: 1px solid var(--border);
+                }
+                h1 {
+                  margin: 0;
+                  font-size: 18px;
+                  line-height: 1.25;
+                }
+                .subtle {
+                  color: var(--muted);
+                  font-size: 12px;
+                  line-height: 1.4;
+                }
+                main {
+                  width: min(1180px, 100%);
+                  margin: 0 auto;
+                  padding: 14px;
+                }
+                .toolbar {
+                  display: flex;
+                  flex-wrap: wrap;
+                  gap: 10px 16px;
+                  align-items: center;
+                  margin-bottom: 14px;
+                }
+                .filter-group {
+                  display: flex;
+                  flex-wrap: wrap;
+                  gap: 8px;
+                }
+                .filter-button {
+                  padding: 8px 12px;
+                  color: var(--muted);
+                }
+                .filter-button.active {
+                  color: #031018;
+                }
+                .status {
+                  padding: 28px 16px;
+                  color: var(--muted);
+                  text-align: center;
+                }
+                .lightbox {
+                  position: fixed;
+                  inset: 0;
+                  z-index: 10;
+                  display: none;
+                  align-items: center;
+                  justify-content: center;
+                  background: rgba(0, 0, 0, 0.92);
+                }
+                .lightbox.open {
+                  display: flex;
+                }
+                .lightbox img {
+                  max-width: 100vw;
+                  max-height: 100vh;
+                  object-fit: contain;
+                }
+                .lightbox-close {
+                  position: fixed;
+                  top: 14px;
+                  right: 14px;
+                  width: 42px;
+                  height: 42px;
+                  padding: 0;
+                  border-color: rgba(234, 246, 255, 0.34);
+                  background: rgba(14, 35, 48, 0.82);
+                  color: var(--text);
+                  font-size: 22px;
+                }
+                .grid {
+                  display: grid;
+                  grid-template-columns: repeat(auto-fill, minmax(154px, 1fr));
+                  gap: 12px;
+                }
+                .asset {
+                  overflow: hidden;
+                  border: 1px solid var(--border);
+                  border-radius: 10px;
+                  background: var(--panel);
+                }
+                .thumb {
+                  display: block;
+                  width: 100%;
+                  aspect-ratio: 1 / 1;
+                  object-fit: cover;
+                  background: #02070b;
+                  cursor: zoom-in;
+                }
+                .marks {
+                  display: flex;
+                  flex-wrap: nowrap;
+                  gap: 4px;
+                  min-height: 28px;
+                  overflow: hidden;
+                  padding: 6px 8px;
+                }
+                .chip {
+                  border: 1px solid var(--border);
+                  border-radius: 999px;
+                  flex: 0 1 auto;
+                  max-width: 50%;
+                  overflow: hidden;
+                  padding: 2px 6px;
+                  color: var(--muted);
+                  font-size: 10px;
+                  line-height: 1;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+                }
+                .chip.photographer {
+                  border-color: rgba(0, 213, 255, 0.58);
+                  color: var(--blue);
+                }
+                .chip.guest {
+                  border-color: rgba(39, 231, 162, 0.58);
+                  color: var(--green);
+                }
+                .actions {
+                  display: flex;
+                  gap: 5px;
+                  padding: 6px 8px 8px;
+                  border-top: 1px solid rgba(32, 53, 70, 0.72);
+                }
+                button {
+                  flex: 1 1 0;
+                  min-width: 0;
+                  border: 1px solid var(--border);
+                  border-radius: 999px;
+                  background: var(--panel-2);
+                  color: var(--text);
+                  font: inherit;
+                  font-size: 11px;
+                  font-weight: 700;
+                  line-height: 1;
+                  padding: 6px 6px;
+                  white-space: nowrap;
+                }
+                button.active {
+                  border-color: transparent;
+                  background: var(--blue);
+                  color: #031018;
+                }
+                button.reject.active {
+                  background: var(--danger);
+                  color: #fff;
+                }
+                button:disabled {
+                  opacity: 0.56;
+                }
+                @media (max-width: 520px) {
+                  main { padding: 10px; }
+                  .toolbar { gap: 8px; }
+                  .grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 10px;
+                  }
+                }
+              </style>
+            </head>
+            <body data-token="${htmlAttrEscape(token)}">
+              <header>
+                <h1>多方筛选</h1>
+                <div id="summary" class="subtle">正在载入照片</div>
+              </header>
+              <main>
+                <div id="controls" class="toolbar"></div>
+                <section id="app"><div class="status">正在载入照片...</div></section>
+              </main>
+              <div id="lightbox" class="lightbox" role="dialog" aria-modal="true">
+                <button id="lightboxClose" class="lightbox-close" type="button" aria-label="关闭">×</button>
+                <img id="lightboxImage" alt="">
+              </div>
+              <script>
+                (function () {
+                  var token = document.body.dataset.token || "";
+                  var app = document.getElementById("app");
+                  var controls = document.getElementById("controls");
+                  var summary = document.getElementById("summary");
+                  var lightbox = document.getElementById("lightbox");
+                  var lightboxImage = document.getElementById("lightboxImage");
+                  var lightboxClose = document.getElementById("lightboxClose");
+                  var assets = [];
+                  var guestFilter = "all";
+                  var minScore = null;
+
+                  function text(value) {
+                    return value == null ? "" : String(value);
+                  }
+
+                  function markLabel(mark) {
+                    if (mark === "favorite") return "收藏";
+                    if (mark === "marked") return "标记";
+                    if (mark === "reject") return "删除";
+                    return "未标记";
+                  }
+
+                  function render() {
+                    var visible = visibleAssets();
+                    renderControls();
+                    summary.textContent = visible.length === assets.length
+                      ? assets.length + " 张照片"
+                      : visible.length + " / " + assets.length + " 张照片";
+                    if (!visible.length) {
+                      app.innerHTML = '<div class="status">当前没有可筛选照片</div>';
+                      return;
+                    }
+                    var grid = document.createElement("section");
+                    grid.className = "grid";
+                    visible.forEach(function (asset) {
+                      grid.appendChild(assetCard(asset));
+                    });
+                    app.replaceChildren(grid);
+                  }
+
+                  function visibleAssets() {
+                    return assets.filter(function (asset) {
+                      if (guestFilter !== "all") {
+                        if (guestFilter === "none" && asset.guest_mark) return false;
+                        if (guestFilter !== "none" && asset.guest_mark !== guestFilter) return false;
+                      }
+                      if (minScore != null) {
+                        var score = Number(asset.model_score);
+                        if (!Number.isFinite(score) || score < minScore) return false;
+                      }
+                      return true;
+                    });
+                  }
+
+                  function renderControls() {
+                    var marks = document.createElement("div");
+                    marks.className = "filter-group";
+                    [
+                      ["all", "全部"],
+                      ["favorite", "收藏"],
+                      ["marked", "标记"],
+                      ["reject", "删除"],
+                      ["none", "未标记"]
+                    ].forEach(function (item) {
+                      marks.appendChild(filterButton(item[1], guestFilter === item[0], function () {
+                        guestFilter = item[0];
+                        render();
+                      }));
+                    });
+
+                    var scores = document.createElement("div");
+                    scores.className = "filter-group";
+                    [
+                      [null, "不限"],
+                      [60, "≥60"],
+                      [70, "≥70"],
+                      [80, "≥80"]
+                    ].forEach(function (item) {
+                      scores.appendChild(filterButton(item[1], minScore === item[0], function () {
+                        minScore = item[0];
+                        render();
+                      }));
+                    });
+
+                    controls.replaceChildren(marks, scores);
+                  }
+
+                  function filterButton(label, active, onClick) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.className = active ? "filter-button active" : "filter-button";
+                    button.textContent = label;
+                    button.addEventListener("click", onClick);
+                    return button;
+                  }
+
+                  function assetCard(asset) {
+                    var article = document.createElement("article");
+                    article.className = "asset";
+
+                    var img = document.createElement("img");
+                    img.className = "thumb";
+                    img.loading = "lazy";
+                    img.alt = text(asset.display_path);
+                    img.src = text(asset.preview_url);
+                    img.addEventListener("click", function () {
+                      openLightbox(asset);
+                    });
+                    article.appendChild(img);
+
+                    var marks = document.createElement("div");
+                    marks.className = "marks";
+                    if (asset.user_marks && asset.user_marks.favorite) {
+                      marks.appendChild(chip("收藏", "photographer"));
+                    }
+                    if (asset.user_marks && asset.user_marks.marked) {
+                      marks.appendChild(chip("标记", "photographer"));
+                    }
+                    if (asset.guest_mark) {
+                      marks.appendChild(chip(markLabel(asset.guest_mark), "guest"));
+                    }
+                    article.appendChild(marks);
+
+                    var actions = document.createElement("div");
+                    actions.className = "actions";
+                    actions.appendChild(markButton(asset, "favorite", "收藏"));
+                    actions.appendChild(markButton(asset, "marked", "标记"));
+                    actions.appendChild(markButton(asset, "reject", "删除", "reject"));
+                    article.appendChild(actions);
+
+                    return article;
+                  }
+
+                  function chip(label, tone) {
+                    var node = document.createElement("span");
+                    node.className = tone ? "chip " + tone : "chip";
+                    node.textContent = label;
+                    return node;
+                  }
+
+                  function markButton(asset, mark, label, extraClass) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.textContent = label;
+                    if (asset.guest_mark === mark) {
+                      button.className = "active" + (extraClass ? " " + extraClass : "");
+                    } else if (extraClass) {
+                      button.className = extraClass;
+                    }
+                    button.addEventListener("click", function () {
+                      setMark(asset, asset.guest_mark === mark ? null : mark, button);
+                    });
+                    return button;
+                  }
+
+                  function setMark(asset, mark, button) {
+                    button.disabled = true;
+                    fetch("/api/s/" + encodeURIComponent(token) + "/assets/" + encodeURIComponent(asset.id) + "/guest-mark", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ guest_mark: mark })
+                    })
+                      .then(function (response) {
+                        if (!response.ok) throw new Error("mark_failed");
+                        return response.json();
+                      })
+                      .then(function (payload) {
+                        asset.guest_mark = payload.guest_mark || null;
+                        render();
+                      })
+                      .catch(function () {
+                        summary.textContent = "标记失败，请刷新后重试";
+                        button.disabled = false;
+                      });
+                  }
+
+                  function openLightbox(asset) {
+                    lightboxImage.removeAttribute("src");
+                    lightboxImage.alt = text(asset.display_path);
+                    lightboxImage.src = text(asset.full_preview_url || asset.preview_url);
+                    lightbox.classList.add("open");
+                  }
+
+                  function closeLightbox() {
+                    lightbox.classList.remove("open");
+                    lightboxImage.removeAttribute("src");
+                  }
+
+                  lightbox.addEventListener("click", function (event) {
+                    if (event.target === lightbox) {
+                      closeLightbox();
+                    }
+                  });
+                  lightboxClose.addEventListener("click", closeLightbox);
+                  document.addEventListener("keydown", function (event) {
+                    if (event.key === "Escape" && lightbox.classList.contains("open")) {
+                      closeLightbox();
+                    }
+                  });
+
+                  fetch("/api/s/" + encodeURIComponent(token) + "/assets")
+                    .then(function (response) {
+                      if (!response.ok) throw new Error("assets_failed");
+                      return response.json();
+                    })
+                    .then(function (payload) {
+                      assets = Array.isArray(payload.assets) ? payload.assets : [];
+                      render();
+                    })
+                    .catch(function () {
+                      summary.textContent = "载入失败";
+                      app.innerHTML = '<div class="status">无法载入共享照片，请确认共享仍在开启。</div>';
+                    });
+                })();
+              </script>
+            </body>
             </html>
             """.trimIndent(),
         )
@@ -118,8 +546,8 @@ class LanShareRouter(
         )
     }
 
-    private suspend fun preview(token: String, groupId: String): LanShareResponse {
-        val bytes = previewLoader(token, groupId)
+    private suspend fun preview(token: String, groupId: String, fullQuality: Boolean): LanShareResponse {
+        val bytes = previewLoader(token, groupId, fullQuality)
             ?: return LanShareResponse.json(404, JSONObject().put("error", "preview_not_found"))
         return LanShareResponse(200, "image/jpeg", bytes)
     }
@@ -188,11 +616,14 @@ class LanShareHttpServer(
 }
 
 private fun ProjectAsset.toLanShareJson(token: String): JSONObject =
+    (id.ifBlank { displayPath }).let { shareId ->
     JSONObject()
-        .put("id", id)
+        .put("id", shareId)
         .put("display_path", displayPath)
         .put("format", format)
-        .put("preview_url", "/api/s/$token/preview/$id")
+        .put("model_score", modelScore ?: JSONObject.NULL)
+        .put("preview_url", "/api/s/${encodePathPart(token)}/preview/${encodePathPart(shareId)}")
+        .put("full_preview_url", "/api/s/${encodePathPart(token)}/preview-full/${encodePathPart(shareId)}")
         .put("guest_mark", guestMark?.wireName ?: JSONObject.NULL)
         .put(
             "user_marks",
@@ -200,6 +631,7 @@ private fun ProjectAsset.toLanShareJson(token: String): JSONObject =
                 .put("favorite", userMarks.favorite)
                 .put("marked", userMarks.marked),
         )
+    }
 
 private fun guestMarkFromWire(value: String): GuestMark? =
     when (value.trim().lowercase()) {
@@ -270,3 +702,13 @@ private fun httpResponseBytes(response: LanShareResponse): ByteArray {
 
 private fun decodePathPart(value: String): String =
     URLDecoder.decode(value, Charsets.UTF_8.name())
+
+private fun encodePathPart(value: String): String =
+    URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+
+private fun htmlAttrEscape(value: String): String =
+    value
+        .replace("&", "&amp;")
+        .replace("\"", "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")

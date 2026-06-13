@@ -132,6 +132,14 @@ internal enum class ProjectPhotoCollection(val label: String) {
     PendingAnalysis("\u5f85\u5206\u6790"),
 }
 
+internal enum class GuestMarkFilter(val label: String, val queryValue: String?) {
+    All("全部访客", null),
+    Favorite("访客收藏", "favorite"),
+    Marked("访客标记", "marked"),
+    Reject("访客删除", "reject"),
+    None("未标记", "none"),
+}
+
 internal enum class ReceiverStartBlockReason {
     Busy,
     MissingAccount,
@@ -461,6 +469,8 @@ internal fun assetListQuery(
     selectedCollection: ProjectPhotoCollection,
     selectedFilter: AssetFormatFilter,
     selectedSort: PhotoSortMode,
+    selectedGuestMarkFilter: GuestMarkFilter = GuestMarkFilter.All,
+    selectedMinModelScore: Int? = null,
 ): ProjectAssetQuery {
     val favorite = if (selectedCollection == ProjectPhotoCollection.Favorites) true else null
     val marked = if (selectedCollection == ProjectPhotoCollection.Marked) true else null
@@ -476,6 +486,8 @@ internal fun assetListQuery(
         collection = collection,
         favorite = favorite,
         marked = marked,
+        guestMark = selectedGuestMarkFilter.queryValue,
+        minModelScore = selectedMinModelScore,
     )
 }
 

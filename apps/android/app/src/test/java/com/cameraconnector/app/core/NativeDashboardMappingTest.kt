@@ -44,6 +44,9 @@ class NativeDashboardMappingTest {
                 favorite = true,
                 marked = false,
                 collection = "model_selects",
+                userMarkAny = listOf("favorite", "marked"),
+                guestMark = "reject",
+                minModelScore = 70,
             ),
         )
 
@@ -51,6 +54,10 @@ class NativeDashboardMappingTest {
         assertEquals(true, json.getBoolean("favorite"))
         assertEquals(false, json.getBoolean("marked"))
         assertEquals("model_selects", json.getString("collection"))
+        assertEquals("favorite", json.getJSONArray("user_mark_any").getString(0))
+        assertEquals("marked", json.getJSONArray("user_mark_any").getString(1))
+        assertEquals("reject", json.getString("guest_mark"))
+        assertEquals(70, json.getInt("min_model_score"))
         assertFalse(json.has("username"))
         assertFalse(json.has("source_name"))
         assertFalse(json.has("original_path"))

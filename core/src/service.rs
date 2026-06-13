@@ -81,6 +81,10 @@ pub struct AssetGroupQuery {
     pub collection: Option<String>,
     pub favorite: Option<bool>,
     pub marked: Option<bool>,
+    #[serde(default)]
+    pub user_mark_any: Vec<String>,
+    pub guest_mark: Option<String>,
+    pub min_model_score: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -3071,7 +3075,58 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
         .marked
         .map(|expected| group.user_marks.marked == expected)
         .unwrap_or(true);
-    asset_matches && favorite_matches && marked_matches
+    let user_mark_any_matches = user_mark_any_matches(group, &query.user_mark_any);
+    let guest_mark_matches = guest_mark_matches(group, query.guest_mark.as_deref());
+    let score_matches = query
+        .min_model_score
+        .map(|minimum| group_best_score(group).map(|score| score >= minimum).unwrap_or(false))
+        .unwrap_or(true);
+    asset_matches
+        && favorite_matches
+        && marked_matches
+        && user_mark_any_matches
+        && guest_mark_matches
+        && score_matches
+}
+
+fn user_mark_any_matches(group: &ReceivedAssetGroup, marks: &[String]) -> bool {
+    if marks.is_empty() {
+        return true;
+    }
+    marks.iter().any(|mark| match mark.trim().to_ascii_lowercase().as_str() {
+        "favorite" | "favorites" => group.user_marks.favorite,
+        "marked" | "mark" | "flag" | "flagged" => group.user_marks.marked,
+        _ => false,
+    })
+}
+
+fn guest_mark_matches(group: &ReceivedAssetGroup, mark: Option<&str>) -> bool {
+    match mark.map(|value| value.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(value) if value.is_empty() || value == "all" => true,
+        Some(value) if value == "none" || value == "unmarked" => group.guest_mark.is_none(),
+        Some(value) => group
+            .guest_mark
+            .map(|guest_mark| guest_mark.as_wire() == value.as_str())
+            .unwrap_or(false),
+    }
+}
+
+fn group_best_score(group: &ReceivedAssetGroup) -> Option<i64> {
+    group
+        .burst
+        .as_ref()
+        .and_then(|burst| burst.best_score)
+        .map(score_for_threshold)
+        .or(group.model_score)
+}
+
+fn score_for_threshold(score: f64) -> i64 {
+    if score > 1.0 {
+        score.round() as i64
+    } else {
+        (score * 100.0).round() as i64
+    }
 }
 
 fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {

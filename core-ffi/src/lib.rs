@@ -88,6 +88,10 @@ pub struct MobileAssetGroupQuery {
     pub collection: Option<String>,
     pub favorite: Option<bool>,
     pub marked: Option<bool>,
+    #[serde(default)]
+    pub user_mark_any: Vec<String>,
+    pub guest_mark: Option<String>,
+    pub min_model_score: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2444,6 +2448,9 @@ fn asset_group_query_from_json(query_json: &str) -> MobileCoreResult<AssetGroupQ
         collection: query.collection.and_then(non_blank),
         favorite: query.favorite,
         marked: query.marked,
+        user_mark_any: query.user_mark_any,
+        guest_mark: query.guest_mark,
+        min_model_score: query.min_model_score,
     })
 }
 

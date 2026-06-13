@@ -571,6 +571,11 @@ internal fun assetGroupQueryJson(query: ProjectAssetQuery): JSONObject =
         query.collection?.takeIf { it.isNotBlank() }?.let { put("collection", it) }
         query.favorite?.let { put("favorite", it) }
         query.marked?.let { put("marked", it) }
+        if (query.userMarkAny.isNotEmpty()) {
+            put("user_mark_any", JSONArray().apply { query.userMarkAny.forEach(::put) })
+        }
+        query.guestMark?.takeIf { it.isNotBlank() }?.let { put("guest_mark", it) }
+        query.minModelScore?.let { put("min_model_score", it) }
     }
 
 internal fun userMarksPatchJson(favorite: Boolean?, marked: Boolean?): JSONObject =

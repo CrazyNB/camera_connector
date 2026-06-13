@@ -358,6 +358,9 @@ data class ProjectAssetQuery(
     val collection: String? = null,
     val favorite: Boolean? = null,
     val marked: Boolean? = null,
+    val userMarkAny: List<String> = emptyList(),
+    val guestMark: String? = null,
+    val minModelScore: Int? = null,
 )
 
 data class ModelEvaluationPreviewInput(
@@ -426,6 +429,9 @@ class PreviewCoreGateway : CoreGateway {
             .filter { asset -> query.role == null || asset.matchesRole(query.role) }
             .filter { asset -> query.favorite == null || asset.userMarks.favorite == query.favorite }
             .filter { asset -> query.marked == null || asset.userMarks.marked == query.marked }
+            .filter { asset -> query.userMarkAny.isEmpty() || asset.matchesAnyUserMark(query.userMarkAny) }
+            .filter { asset -> asset.matchesGuestMark(query.guestMark) }
+            .filter { asset -> query.minModelScore == null || (asset.groupBestModelScore()?.let(::scoreForThreshold) ?: -1) >= query.minModelScore }
             .sortedWith(query.sort.previewComparator())
             .drop(offset.coerceAtLeast(0))
             .take(limit.coerceAtLeast(0))
@@ -845,6 +851,25 @@ private fun ProjectAsset.matchesRole(role: ProjectAssetRole): Boolean = when (ro
     ProjectAssetRole.Video -> hasVideo
 }
 
+private fun ProjectAsset.matchesAnyUserMark(marks: List<String>): Boolean =
+    marks.any { mark ->
+        when (mark.lowercase()) {
+            "favorite", "favorites" -> userMarks.favorite
+            "marked", "mark", "flag", "flagged" -> userMarks.marked
+            else -> false
+        }
+    }
+
+private fun ProjectAsset.matchesGuestMark(mark: String?): Boolean =
+    when (mark?.trim()?.lowercase()) {
+        null, "", "all" -> true
+        "favorite", "favorites" -> guestMark == GuestMark.Favorite
+        "marked", "mark", "flag", "flagged" -> guestMark == GuestMark.Marked
+        "reject", "delete", "deleted" -> guestMark == GuestMark.Reject
+        "none", "unmarked" -> guestMark == null
+        else -> false
+    }
+
 private fun PhotoSortMode.previewComparator(): Comparator<ProjectAsset> = when (this) {
     PhotoSortMode.LatestReceived -> compareByDescending { it.receivedAt.toLongOrNull() ?: 0L }
     PhotoSortMode.Filename -> compareBy { it.groupKey.ifBlank { it.displayPath } }
@@ -858,6 +883,9 @@ private fun ProjectAsset.groupBestModelScore(): Double? =
 
 private fun normalizedQueryScore(value: Double): Double =
     if (value > 1.0) value / 100.0 else value
+
+private fun scoreForThreshold(value: Double): Int =
+    (if (value > 1.0) value else value * 100.0).toInt()
 
 private fun previewPromptPacks(projectId: String): List<PromptPackUi> =
     listOf(

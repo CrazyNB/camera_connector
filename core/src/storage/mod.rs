@@ -5167,13 +5167,52 @@ fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQu
         .marked
         .map(|expected| group.user_marks.marked == expected)
         .unwrap_or(true);
+    let user_mark_any_matches = user_mark_any_matches(group, &query.user_mark_any);
+    let guest_mark_matches = guest_mark_matches(group, query.guest_mark.as_deref());
     let collection_matches = query
         .collection
         .as_ref()
         .map(|collection| asset_group_matches_collection(group, collection))
         .unwrap_or(true);
+    let score_matches = query
+        .min_model_score
+        .map(|minimum| {
+            group_best_score(group)
+                .map(score_for_threshold)
+                .map(|score| score >= minimum)
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
 
-    favorite_matches && marked_matches && collection_matches
+    favorite_matches
+        && marked_matches
+        && user_mark_any_matches
+        && guest_mark_matches
+        && collection_matches
+        && score_matches
+}
+
+fn user_mark_any_matches(group: &ReceivedAssetGroup, marks: &[String]) -> bool {
+    if marks.is_empty() {
+        return true;
+    }
+    marks.iter().any(|mark| match mark.trim().to_ascii_lowercase().as_str() {
+        "favorite" | "favorites" => group.user_marks.favorite,
+        "marked" | "mark" | "flag" | "flagged" => group.user_marks.marked,
+        _ => false,
+    })
+}
+
+fn guest_mark_matches(group: &ReceivedAssetGroup, mark: Option<&str>) -> bool {
+    match mark.map(|value| value.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(value) if value.is_empty() || value == "all" => true,
+        Some(value) if value == "none" || value == "unmarked" => group.guest_mark.is_none(),
+        Some(value) => group
+            .guest_mark
+            .map(|guest_mark| guest_mark.as_wire() == value.as_str())
+            .unwrap_or(false),
+    }
 }
 
 fn asset_group_matches_collection(group: &ReceivedAssetGroup, collection: &str) -> bool {
@@ -5257,6 +5296,14 @@ fn score_sort_key(score: Option<f64>) -> i64 {
         .filter(|value| value.is_finite())
         .map(|value| (value * 1_000_000.0).round() as i64)
         .unwrap_or(i64::MIN)
+}
+
+fn score_for_threshold(score: f64) -> i64 {
+    if score > 1.0 {
+        score.round() as i64
+    } else {
+        (score * 100.0).round() as i64
+    }
 }
 
 fn group_received_sort_time(group: &ReceivedAssetGroup) -> Option<i64> {

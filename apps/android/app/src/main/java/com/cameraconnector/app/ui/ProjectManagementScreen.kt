@@ -355,6 +355,9 @@ private fun DeviceStorageContent(
     modifier: Modifier = Modifier,
 ) {
     val segments = storageBarSegments(storage, projectBytes)
+    val usedStorageColor = storage.accentColor()
+    val projectStorageColor = ElementBlue.copy(alpha = 0.64f)
+    val projectStorageTextColor = ElementBlue.copy(alpha = 0.72f)
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -398,7 +401,7 @@ private fun DeviceStorageContent(
                         .fillMaxWidth(usedRatio)
                         .height(10.dp)
                         .clip(CircleShape)
-                        .background(storage.accentColor().copy(alpha = 0.36f)),
+                        .background(usedStorageColor),
                 ) {
                     if (projectShareOfUsed > 0f) {
                         Box(
@@ -407,7 +410,7 @@ private fun DeviceStorageContent(
                                 .fillMaxWidth(projectShareOfUsed)
                                 .height(10.dp)
                                 .clip(CircleShape)
-                                .background(ElementBlue),
+                                .background(projectStorageColor),
                         )
                     }
                 }
@@ -426,8 +429,8 @@ private fun DeviceStorageContent(
             StorageValueColumn(
                 "\u9879\u76ee",
                 formatBytes(projectBytes),
-                valueColor = ElementBlue,
-                indicatorColor = ElementBlue,
+                valueColor = projectStorageTextColor,
+                indicatorColor = projectStorageColor,
             )
             StorageValueColumn("\u53ef\u7528", formatBytes(storage.availableBytes))
             StorageValueColumn("\u603b\u91cf", formatBytes(storage.totalBytes))
