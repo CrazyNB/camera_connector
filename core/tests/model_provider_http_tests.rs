@@ -59,7 +59,7 @@ fn upload_model_evaluation_uses_configured_openai_compatible_provider() {
             "偏好主体清晰、情绪自然、技术稳定的照片。",
             2_000,
         )
-        .expect("prompt profile should create");
+        .expect("prompt pack should create");
     select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
     service
         .record_project_transfer(
@@ -691,7 +691,7 @@ fn burst_selection_recommendation_uses_configured_model_provider_decision() {
             "连拍优选时优先选择决定性瞬间，其次考虑技术质量。",
             2_100,
         )
-        .expect("prompt profile should create");
+        .expect("prompt pack should create");
     select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
 
     let recommendation = service
@@ -1104,7 +1104,7 @@ fn project_selection_recommendation_uses_configured_model_provider_decision() {
             "项目优选时偏好有叙事感、可交付、可入选作品集的照片。",
             2_200,
         )
-        .expect("prompt profile should create");
+        .expect("prompt pack should create");
     select_prompt_pack(&service, &project.project_id, &prompt.prompt_pack_id);
 
     let recommendation = service

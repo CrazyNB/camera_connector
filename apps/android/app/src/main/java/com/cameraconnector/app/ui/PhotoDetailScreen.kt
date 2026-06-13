@@ -92,6 +92,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
@@ -154,6 +156,8 @@ internal fun PhotoDetailScreen(
     onSplitBurstMember: ((String, String) -> Unit)? = null,
     burstMembers: List<BurstMemberFilmstripItemUi> = emptyList(),
     onOpenBurstMember: ((ProjectAsset) -> Unit)? = null,
+    previousGroupAsset: ProjectAsset? = null,
+    nextGroupAsset: ProjectAsset? = null,
     onNavigatePreviousGroup: (() -> Unit)? = null,
     onNavigateNextGroup: (() -> Unit)? = null,
     onToggleMarked: ((String) -> Unit)? = null,
@@ -168,23 +172,221 @@ internal fun PhotoDetailScreen(
             onDismiss = { fullScreenPreview = false },
         )
     }
-    PhotoDetailContent(
-        asset = asset,
-        onBack = onBack,
-        modifier = modifier,
-        actionsEnabled = actionsEnabled,
-        onSplitBurstMember = onSplitBurstMember,
-        burstMembers = burstMembers,
-        onOpenBurstMember = onOpenBurstMember,
-        onNavigatePreviousGroup = onNavigatePreviousGroup,
-        onNavigateNextGroup = onNavigateNextGroup,
-        onToggleMarked = onToggleMarked,
-        onToggleFavorite = onToggleFavorite,
-        onEvaluateModel = onEvaluateModel,
-        onDeleteAsset = onDeleteAsset,
-        onPreviewClick = { fullScreenPreview = true },
-    )
+    val assetId = asset.assetSelectionId()
+    val scope = rememberCoroutineScope()
+    var dragOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
+    var settleOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
+    var settling by remember(assetId) { mutableStateOf(false) }
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds(),
+    ) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val pageStridePx = pageWidthPx * 0.96f
+        val thresholdPx = pageWidthPx * 0.16f
+        val pageOffsetX = if (settling) settleOffsetX else dragOffsetX
+        val dragDirection = if (pageOffsetX >= 0f) {
+            DetailNavigationDirection.Previous
+        } else {
+            DetailNavigationDirection.Next
+        }
+        val shadowAlpha = (abs(pageOffsetX) / thresholdPx).coerceIn(0f, 1f)
+        val groupSwipeCallbacks = remember(
+            assetId,
+            previousGroupAsset?.assetSelectionId(),
+            nextGroupAsset?.assetSelectionId(),
+            pageStridePx,
+            thresholdPx,
+        ) {
+            DetailGroupSwipeCallbacks(
+                onDragStart = {
+                    settling = false
+                    settleOffsetX = 0f
+                },
+                onDrag = { dragAmount ->
+                    dragOffsetX = (dragOffsetX + dragAmount).coerceIn(
+                        minimumValue = if (nextGroupAsset != null && onNavigateNextGroup != null) {
+                            -pageStridePx
+                        } else {
+                            0f
+                        },
+                        maximumValue = if (previousGroupAsset != null && onNavigatePreviousGroup != null) {
+                            pageStridePx
+                        } else {
+                            0f
+                        },
+                    )
+                },
+                onDragEnd = {
+                    val releaseOffset = dragOffsetX
+                    val target = when {
+                        releaseOffset > thresholdPx && previousGroupAsset != null && onNavigatePreviousGroup != null ->
+                            DetailNavigationDirection.Previous
+                        releaseOffset < -thresholdPx && nextGroupAsset != null && onNavigateNextGroup != null ->
+                            DetailNavigationDirection.Next
+                        else -> null
+                    }
+                    scope.launch {
+                        settling = true
+                        settleOffsetX = releaseOffset
+                        val animation = Animatable(releaseOffset)
+                        if (target == null) {
+                            animation.animateTo(0f, tween(durationMillis = 110)) {
+                                settleOffsetX = value
+                            }
+                            dragOffsetX = 0f
+                            settleOffsetX = 0f
+                            settling = false
+                        } else {
+                            val targetOffset = if (target == DetailNavigationDirection.Previous) {
+                                pageStridePx
+                            } else {
+                                -pageStridePx
+                            }
+                            animation.animateTo(targetOffset, tween(durationMillis = 130)) {
+                                settleOffsetX = value
+                            }
+                            if (target == DetailNavigationDirection.Previous) {
+                                onNavigatePreviousGroup?.invoke()
+                            } else {
+                                onNavigateNextGroup?.invoke()
+                            }
+                            dragOffsetX = 0f
+                            settleOffsetX = 0f
+                            settling = false
+                        }
+                    }
+                },
+                onDragCancel = {
+                    val releaseOffset = dragOffsetX
+                    scope.launch {
+                        settling = true
+                        settleOffsetX = releaseOffset
+                        Animatable(releaseOffset).animateTo(0f, tween(durationMillis = 110)) {
+                            settleOffsetX = value
+                        }
+                        dragOffsetX = 0f
+                        settleOffsetX = 0f
+                        settling = false
+                    }
+                },
+            )
+        }
+        val showPreviousPage = previousGroupAsset != null && pageOffsetX > 0.5f
+        val showNextPage = nextGroupAsset != null && pageOffsetX < -0.5f
+        Box(Modifier.fillMaxSize()) {
+            previousGroupAsset?.takeIf { showPreviousPage }?.let { previous ->
+                PhotoDetailContent(
+                    asset = previous,
+                    onBack = onBack,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((pageOffsetX - pageStridePx).roundToInt(), 0) },
+                    actionsEnabled = false,
+                    onSplitBurstMember = null,
+                    burstMembers = emptyList(),
+                    onOpenBurstMember = null,
+                    groupSwipeCallbacks = null,
+                    onToggleMarked = null,
+                    onToggleFavorite = null,
+                    onEvaluateModel = null,
+                    onDeleteAsset = null,
+                    onPreviewClick = {},
+                )
+            }
+            nextGroupAsset?.takeIf { showNextPage }?.let { next ->
+                PhotoDetailContent(
+                    asset = next,
+                    onBack = onBack,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset((pageOffsetX + pageStridePx).roundToInt(), 0) },
+                    actionsEnabled = false,
+                    onSplitBurstMember = null,
+                    burstMembers = emptyList(),
+                    onOpenBurstMember = null,
+                    groupSwipeCallbacks = null,
+                    onToggleMarked = null,
+                    onToggleFavorite = null,
+                    onEvaluateModel = null,
+                    onDeleteAsset = null,
+                    onPreviewClick = {},
+                )
+            }
+            PhotoDetailContent(
+                asset = asset,
+                onBack = onBack,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(pageOffsetX.roundToInt(), 0) },
+                actionsEnabled = actionsEnabled,
+                onSplitBurstMember = onSplitBurstMember,
+                burstMembers = burstMembers,
+                onOpenBurstMember = onOpenBurstMember,
+                groupSwipeCallbacks = groupSwipeCallbacks,
+                onToggleMarked = onToggleMarked,
+                onToggleFavorite = onToggleFavorite,
+                onEvaluateModel = onEvaluateModel,
+                onDeleteAsset = onDeleteAsset,
+                onPreviewClick = { fullScreenPreview = true },
+            )
+            DetailPageTurnShadow(
+                direction = dragDirection,
+                alpha = shadowAlpha,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 }
+
+@Composable
+private fun DetailPageTurnShadow(
+    direction: DetailNavigationDirection,
+    alpha: Float,
+    modifier: Modifier = Modifier,
+) {
+    if (alpha <= 0.01f) {
+        return
+    }
+    val edgeAlignment = if (direction == DetailNavigationDirection.Next) {
+        Alignment.CenterEnd
+    } else {
+        Alignment.CenterStart
+    }
+    val shadowColors = if (direction == DetailNavigationDirection.Next) {
+        listOf(
+            Color.Transparent,
+            ElementBackground.copy(alpha = 0.18f),
+            Color.Black.copy(alpha = 0.34f),
+        )
+    } else {
+        listOf(
+            Color.Black.copy(alpha = 0.34f),
+            ElementBackground.copy(alpha = 0.18f),
+            Color.Transparent,
+        )
+    }
+    Box(
+        modifier = modifier.graphicsLayer { this.alpha = alpha },
+    ) {
+        Box(
+            modifier = Modifier
+                .align(edgeAlignment)
+                .fillMaxHeight()
+                .width(54.dp)
+                .background(Brush.horizontalGradient(shadowColors)),
+        )
+    }
+}
+
+private class DetailGroupSwipeCallbacks(
+    val onDragStart: () -> Unit,
+    val onDrag: (Float) -> Unit,
+    val onDragEnd: () -> Unit,
+    val onDragCancel: () -> Unit,
+)
 
 @Composable
 private fun PhotoDetailContent(
@@ -195,8 +397,7 @@ private fun PhotoDetailContent(
     onSplitBurstMember: ((String, String) -> Unit)?,
     burstMembers: List<BurstMemberFilmstripItemUi>,
     onOpenBurstMember: ((ProjectAsset) -> Unit)?,
-    onNavigatePreviousGroup: (() -> Unit)?,
-    onNavigateNextGroup: (() -> Unit)?,
+    groupSwipeCallbacks: DetailGroupSwipeCallbacks?,
     onToggleMarked: ((String) -> Unit)?,
     onToggleFavorite: ((String) -> Unit)?,
     onEvaluateModel: ((ProjectAsset) -> Unit)?,
@@ -251,7 +452,7 @@ private fun PhotoDetailContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 104.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         HeaderWithBack(
@@ -264,7 +465,12 @@ private fun PhotoDetailContent(
             previousAsset = previousBurstMember,
             nextAsset = nextBurstMember,
             positionText = detailBurstPositionText,
-            imageAspectRatio = photoMetadata?.dimensions?.let(::photoMetadataAspectRatio),
+            imageAspectRatio = photoMetadata?.let {
+                photoMetadataDisplayAspectRatio(
+                    dimensions = it.dimensions,
+                    orientation = it.orientation,
+                )
+            },
             onPrevious = previousBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
             onNext = nextBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
             onClick = onPreviewClick,
@@ -317,20 +523,14 @@ private fun PhotoDetailContent(
                 onEvaluateModel = null,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .detailHorizontalSwipe(
-                        onSwipePrevious = onNavigatePreviousGroup,
-                        onSwipeNext = onNavigateNextGroup,
-                    ),
+                    .detailHorizontalSwipe(groupSwipeCallbacks),
             )
         }
         photoMetadata?.lines()?.takeIf { it.isNotEmpty() }?.let { metadataLines ->
             ElementCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .detailHorizontalSwipe(
-                        onSwipePrevious = onNavigatePreviousGroup,
-                        onSwipeNext = onNavigateNextGroup,
-                    ),
+                    .detailHorizontalSwipe(groupSwipeCallbacks),
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("拍摄参数", style = MaterialTheme.typography.titleMedium)
@@ -342,10 +542,7 @@ private fun PhotoDetailContent(
         ElementCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .detailHorizontalSwipe(
-                    onSwipePrevious = onNavigatePreviousGroup,
-                    onSwipeNext = onNavigateNextGroup,
-                ),
+                .detailHorizontalSwipe(groupSwipeCallbacks),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text("来源信息", style = MaterialTheme.typography.titleMedium)
@@ -356,10 +553,7 @@ private fun PhotoDetailContent(
         ElementCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .detailHorizontalSwipe(
-                    onSwipePrevious = onNavigatePreviousGroup,
-                    onSwipeNext = onNavigateNextGroup,
-                ),
+                .detailHorizontalSwipe(groupSwipeCallbacks),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text("文件", style = MaterialTheme.typography.titleMedium)
@@ -616,15 +810,21 @@ private fun ProjectAssetTechnicalDefect.userFacingRiskText(): String {
             ?: technicalDefectTypeLabel(defectType)
     }
 }
-private fun photoMetadataAspectRatio(dimensions: String): Float? {
+internal fun photoMetadataDisplayAspectRatio(
+    dimensions: String?,
+    orientation: String?,
+): Float? {
     val values = Regex("""\d+""")
-        .findAll(dimensions)
+        .findAll(dimensions.orEmpty())
         .mapNotNull { it.value.toFloatOrNull() }
         .take(2)
         .toList()
     val width = values.getOrNull(0)?.takeIf { it > 0f } ?: return null
     val height = values.getOrNull(1)?.takeIf { it > 0f } ?: return null
-    return width / height
+    val swapsAxes = orientation
+        .orEmpty()
+        .contains(Regex("""90|270|转置"""))
+    return if (swapsAxes) height / width else width / height
 }
 
 internal fun photoDetailSourceLines(asset: ProjectAsset): List<Pair<String, String>> =
@@ -646,10 +846,10 @@ internal fun photoDetailFileLines(asset: ProjectAsset): List<Pair<String, String
 
 internal fun detailCarouselHeight(imageAspectRatio: Float?): Dp =
     when {
-        imageAspectRatio == null -> 300.dp
-        imageAspectRatio >= 1.2f -> 220.dp
-        imageAspectRatio <= 0.82f -> 480.dp
-        else -> 380.dp
+        imageAspectRatio == null -> 340.dp
+        imageAspectRatio >= 1.2f -> 304.dp
+        imageAspectRatio <= 0.82f -> 520.dp
+        else -> 420.dp
     }
 
 @Composable
@@ -687,13 +887,21 @@ private fun DetailPhotoCarousel(
                 }
         }
     }
+    var previewAspectRatio by remember(assetId) {
+        mutableStateOf(cachedPreviewAspectRatio(asset.previewLocation))
+    }
+    LaunchedEffect(assetId, imageAspectRatio) {
+        imageAspectRatio?.let { previewAspectRatio = it }
+    }
+    val displayAspectRatio = imageAspectRatio ?: previewAspectRatio ?: PHOTO_DETAIL_LOADING_ASPECT_RATIO
     BoxWithConstraints(
         modifier = modifier
-            .height(detailCarouselHeight(imageAspectRatio))
+            .height(detailCarouselHeight(displayAspectRatio))
             .clip(RoundedCornerShape(18.dp)),
     ) {
         val density = LocalDensity.current
         val pageWidthPx = with(density) { maxWidth.toPx() }
+        val sidePageScale = 0.9f
         val sidePeekPx = with(density) { 24.dp.toPx() }
         val sideGapPx = with(density) { 16.dp.toPx() }
         val sidePaddingPx = with(density) { 48.dp.toPx() }
@@ -701,16 +909,8 @@ private fun DetailPhotoCarousel(
             .coerceAtLeast(pageWidthPx * 0.72f + sideGapPx)
         val thresholdPx = pageStridePx * 0.18f
         val pageOffsetX = if (settling) settleOffsetX else dragOffsetX
-        val mainHorizontalPadding = if (imageAspectRatio != null && imageAspectRatio >= 1.2f) {
-            16.dp
-        } else {
-            40.dp
-        }
-        val sideHorizontalPadding = if (imageAspectRatio != null && imageAspectRatio >= 1.2f) {
-            28.dp
-        } else {
-            48.dp
-        }
+        val mainHorizontalPadding = 24.dp
+        val sideHorizontalPadding = 48.dp
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -783,34 +983,40 @@ private fun DetailPhotoCarousel(
                     asset = previous,
                     previewQuality = PreviewQuality.Thumbnail,
                     horizontalPadding = sideHorizontalPadding,
-                    pageScale = 0.9f,
+                    pageScale = sidePageScale,
                     onClick = onPrevious,
                     modifier = Modifier
                         .fillMaxSize()
                         .offset { IntOffset((pageOffsetX - pageStridePx).roundToInt(), 0) },
                 )
             }
-            DetailCarouselPhotoPage(
-                asset = asset,
-                previewQuality = PreviewQuality.Detail,
-                horizontalPadding = mainHorizontalPadding,
-                onClick = onClick,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset { IntOffset(pageOffsetX.roundToInt(), 0) },
-            )
             nextAsset?.let { next ->
                 DetailCarouselPhotoPage(
                     asset = next,
                     previewQuality = PreviewQuality.Thumbnail,
                     horizontalPadding = sideHorizontalPadding,
-                    pageScale = 0.9f,
+                    pageScale = sidePageScale,
                     onClick = onNext,
                     modifier = Modifier
                         .fillMaxSize()
                         .offset { IntOffset((pageOffsetX + pageStridePx).roundToInt(), 0) },
                 )
             }
+            DetailCarouselPhotoPage(
+                asset = asset,
+                previewQuality = PreviewQuality.Detail,
+                horizontalPadding = mainHorizontalPadding,
+                preferredAspectRatio = displayAspectRatio,
+                onPreviewAspectRatio = { aspect ->
+                    if (imageAspectRatio == null) {
+                        previewAspectRatio = aspect
+                    }
+                },
+                onClick = onClick,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(pageOffsetX.roundToInt(), 0) },
+            )
             positionText?.let {
                 Surface(
                     modifier = Modifier
@@ -839,8 +1045,10 @@ private fun DetailCarouselPhotoPage(
     asset: ProjectAsset,
     previewQuality: PreviewQuality,
     horizontalPadding: Dp,
+    preferredAspectRatio: Float? = null,
     pageScale: Float = 1f,
     onClick: (() -> Unit)?,
+    onPreviewAspectRatio: ((Float) -> Unit)? = null,
     onPreviewReady: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -857,9 +1065,11 @@ private fun DetailCarouselPhotoPage(
             asset = asset,
             previewQuality = previewQuality,
             fitToImageAspect = true,
+            preferredAspectRatio = preferredAspectRatio,
             contentScale = ContentScale.Fit,
             backgroundColor = ElementSurface,
             onClick = onClick,
+            onPreviewAspectRatio = onPreviewAspectRatio,
             onPreviewReady = onPreviewReady,
             showFallbackText = false,
             modifier = Modifier.fillMaxHeight(),
@@ -989,33 +1199,24 @@ private fun PhotoDetailIconAction(
 }
 
 private fun Modifier.detailHorizontalSwipe(
-    onSwipePrevious: (() -> Unit)?,
-    onSwipeNext: (() -> Unit)?,
+    callbacks: DetailGroupSwipeCallbacks?,
 ): Modifier {
-    if (onSwipePrevious == null && onSwipeNext == null) {
+    if (callbacks == null) {
         return this
     }
-    return pointerInput(onSwipePrevious, onSwipeNext) {
-        var totalX = 0f
+    return pointerInput(callbacks) {
         detectHorizontalDragGestures(
             onDragStart = {
-                totalX = 0f
+                callbacks.onDragStart()
             },
             onDragEnd = {
-                if (kotlin.math.abs(totalX) > 90f) {
-                    if (totalX > 0f) {
-                        onSwipePrevious?.invoke()
-                    } else {
-                        onSwipeNext?.invoke()
-                    }
-                }
-                totalX = 0f
+                callbacks.onDragEnd()
             },
             onDragCancel = {
-                totalX = 0f
+                callbacks.onDragCancel()
             },
         ) { _, dragAmount ->
-            totalX += dragAmount
+            callbacks.onDrag(dragAmount)
         }
     }
 }
@@ -1113,6 +1314,18 @@ internal fun ImmersiveSystemBars() {
     }
 }
 
+private fun cachedPreviewAspectRatio(previewLocation: String?): Float? =
+    cachedPreviewBitmap(
+        location = previewLocation.takeIf(::isDecodablePreviewLocation),
+        quality = PreviewQuality.Detail,
+        allowLowerQualityFallback = true,
+    )?.let(::bitmapDisplayAspectRatio)
+
+private fun bitmapDisplayAspectRatio(bitmap: Bitmap?): Float? =
+    bitmap
+        ?.takeIf { it.width > 0 && it.height > 0 }
+        ?.let { it.width.toFloat() / it.height.toFloat() }
+
 @Composable
 internal fun PhotoPreview(
     asset: ProjectAsset,
@@ -1120,10 +1333,13 @@ internal fun PhotoPreview(
     compactFallback: Boolean = false,
     previewQuality: PreviewQuality = PreviewQuality.Thumbnail,
     fitToImageAspect: Boolean = false,
+    preferredAspectRatio: Float? = null,
     contentScale: ContentScale = ContentScale.Crop,
     backgroundColor: Color = ElementPanel,
     clipPreview: Boolean = true,
+    trimLetterbox: Boolean = false,
     onClick: (() -> Unit)? = null,
+    onPreviewAspectRatio: ((Float) -> Unit)? = null,
     onPreviewReady: (() -> Unit)? = null,
     showFallbackText: Boolean = true,
 ) {
@@ -1145,6 +1361,7 @@ internal fun PhotoPreview(
         val exactCached = cachedPreviewBitmap(previewLocation, previewQuality)
         if (exactCached != null) {
             bitmap = exactCached
+            bitmapDisplayAspectRatio(exactCached)?.let { onPreviewAspectRatio?.invoke(it) }
             onPreviewReady?.invoke()
             return@LaunchedEffect
         }
@@ -1154,29 +1371,38 @@ internal fun PhotoPreview(
             allowLowerQualityFallback = true,
         )?.let { fallbackBitmap ->
             bitmap = fallbackBitmap
+            bitmapDisplayAspectRatio(fallbackBitmap)?.let { onPreviewAspectRatio?.invoke(it) }
         }
         if (previewQuality != PreviewQuality.Thumbnail && bitmap == null) {
             withContext(Dispatchers.IO) {
                 loadCachedPreviewBitmap(context, previewLocation, PreviewQuality.Thumbnail)
             }?.let { thumbnailBitmap ->
                 bitmap = thumbnailBitmap
+                bitmapDisplayAspectRatio(thumbnailBitmap)?.let { onPreviewAspectRatio?.invoke(it) }
             }
         }
         withContext(Dispatchers.IO) {
             loadCachedPreviewBitmap(context, previewLocation, previewQuality)
         }?.let { loadedBitmap ->
             bitmap = loadedBitmap
+            bitmapDisplayAspectRatio(loadedBitmap)?.let { onPreviewAspectRatio?.invoke(it) }
             onPreviewReady?.invoke()
         }
     }
 
     val loadedBitmap = bitmap
+    val displayBitmap = remember(loadedBitmap, trimLetterbox) {
+        if (trimLetterbox && loadedBitmap != null) {
+            loadedBitmap.trimNearBlackLetterbox() ?: loadedBitmap
+        } else {
+            loadedBitmap
+        }
+    }
     val showTextLoadingFallback = loadedBitmap == null &&
         (previewQuality == PreviewQuality.Thumbnail || compactFallback)
     val aspectModifier = if (fitToImageAspect) {
-        val imageAspectRatio = loadedBitmap
-            ?.takeIf { it.width > 0 && it.height > 0 }
-            ?.let { it.width.toFloat() / it.height.toFloat() }
+        val imageAspectRatio = preferredAspectRatio
+            ?: bitmapDisplayAspectRatio(loadedBitmap)
             ?: PREVIEW_DETAIL_FALLBACK_ASPECT_RATIO
         modifier.aspectRatio(imageAspectRatio)
     } else {
@@ -1196,9 +1422,9 @@ internal fun PhotoPreview(
         modifier = clickableModifier.background(backgroundColor),
         contentAlignment = Alignment.Center,
     ) {
-        if (loadedBitmap != null) {
+        if (displayBitmap != null) {
             Image(
-                bitmap = loadedBitmap.asImageBitmap(),
+                bitmap = displayBitmap.asImageBitmap(),
                 contentDescription = asset.groupTitle(),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale,
@@ -1227,6 +1453,54 @@ internal fun PhotoPreview(
     }
 }
 
+private fun Bitmap.trimNearBlackLetterbox(): Bitmap? {
+    val width = width
+    val height = height
+    if (width < 12 || height < 12) {
+        return null
+    }
+    fun isMostlyBlackRow(y: Int): Boolean {
+        var black = 0
+        for (x in 0 until width) {
+            if (pixelLuma(getPixel(x, y)) <= 14) black += 1
+        }
+        return black >= width * 0.9f
+    }
+    fun isMostlyBlackColumn(x: Int): Boolean {
+        var black = 0
+        for (y in 0 until height) {
+            if (pixelLuma(getPixel(x, y)) <= 14) black += 1
+        }
+        return black >= height * 0.9f
+    }
+    var left = 0
+    var right = width - 1
+    var top = 0
+    var bottom = height - 1
+    while (left < right && isMostlyBlackColumn(left)) left += 1
+    while (right > left && isMostlyBlackColumn(right)) right -= 1
+    while (top < bottom && isMostlyBlackRow(top)) top += 1
+    while (bottom > top && isMostlyBlackRow(bottom)) bottom -= 1
+    val cropWidth = right - left + 1
+    val cropHeight = bottom - top + 1
+    if (cropWidth >= width - 2 && cropHeight >= height - 2) {
+        return null
+    }
+    if (cropWidth < width * 0.72f || cropHeight < height * 0.72f) {
+        return null
+    }
+    return runCatching {
+        Bitmap.createBitmap(this, left, top, cropWidth, cropHeight)
+    }.getOrNull()
+}
+
+private fun pixelLuma(pixel: Int): Int {
+    val red = pixel shr 16 and 0xff
+    val green = pixel shr 8 and 0xff
+    val blue = pixel and 0xff
+    return ((red * 299) + (green * 587) + (blue * 114)) / 1000
+}
+
 internal tailrec fun Context.findActivity(): Activity? {
     return when (this) {
         is Activity -> this
@@ -1238,6 +1512,7 @@ internal tailrec fun Context.findActivity(): Activity? {
 internal const val FULLSCREEN_MIN_SCALE = 1f
 internal const val FULLSCREEN_DOUBLE_TAP_SCALE = 2.5f
 internal const val FULLSCREEN_MAX_SCALE = 5f
+private const val PHOTO_DETAIL_LOADING_ASPECT_RATIO = 0.67f
 
 @Composable
 private fun CompactDetailGrid(lines: List<Pair<String, String>>) {

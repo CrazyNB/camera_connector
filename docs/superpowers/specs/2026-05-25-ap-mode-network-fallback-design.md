@@ -8,9 +8,13 @@ The first AP-mode slice must be useful without a built-in VPN. It should detect 
 
 ## Context
 
-The current product route is push-based FTP/SFTP. AP mode still means the camera creates its own Wi-Fi AP and the phone joins it. Camera Connector already has:
+The current product route is push-based FTP on Android. AP mode still means the
+camera creates its own Wi-Fi AP and the phone joins it. Camera Connector already
+has:
 
-- A Rust FTP/SFTP receiver and runtime status model in `core`.
+- A Rust push receiver and runtime status model in `core`; SFTP exists as an
+  engineering path, while Android keeps FTP as the active route and reserves the
+  secondary UI slot for future STC.
 - Android foreground service ownership for long-running receiver lifecycle.
 - Android gateway boundaries around native core calls.
 - A dashboard model that can show receiver status, connected devices, transfers, and failures.
@@ -106,7 +110,8 @@ The receiver should keep the existing runtime model but accept AP-mode overrides
 
 - `bind_host`: prefer the Wi-Fi/AP interface address when known; fall back to `0.0.0.0`.
 - `advertised_host`: set to the phone's Wi-Fi/AP address shown to the camera.
-- `protocol`: reuse saved FTP/SFTP setting.
+- `protocol`: use the saved active FTP setting; future STC settings can join
+  this model when implemented.
 - `port`: reuse saved AP-mode or receiver setting.
 - `state_dir`: app-private state.
 - `output_dir`: current app-private output location until SAF/MediaStore write backend lands.
@@ -147,7 +152,8 @@ When cellular is missing or unvalidated:
 When camera IP is unreachable:
 
 - Show the expected phone Wi-Fi IP and receiver endpoint.
-- Ask the user to confirm the camera upload profile host, port, protocol, username, and passive FTP mode.
+- Ask the user to confirm the camera FTP upload profile host, port, username,
+  and passive FTP mode.
 
 When AP mode cannot keep Wi-Fi and cellular available together:
 
@@ -206,7 +212,8 @@ Device smoke tests:
 - Wi-Fi no-internet confirmation flow.
 - OEM smart-switching behavior on at least Samsung, Xiaomi/Redmi, Oppo/OnePlus, Vivo, Pixel, and Huawei/Honor if available.
 - FTP RAW/JPEG pair upload and transfer-log validation.
-- SFTP validation only after FTP AP mode is stable.
+- Secondary receiver validation only after FTP AP mode is stable and the
+  product route is explicitly chosen.
 
 VPN experiments, if built:
 

@@ -23,10 +23,8 @@ use camera_connector_ffi::{
     camera_connector_mobile_core_list_projects_json,
     camera_connector_mobile_core_mark_publish_completed_json,
     camera_connector_mobile_core_mark_publish_failed_json,
-    camera_connector_mobile_core_merge_burst_member_json,
     camera_connector_mobile_core_model_provider_settings_json,
     camera_connector_mobile_core_model_provider_settings_list_json,
-    camera_connector_mobile_core_move_project_group_json,
     camera_connector_mobile_core_project_dashboard_json,
     camera_connector_mobile_core_project_evaluation_settings_json,
     camera_connector_mobile_core_project_group_assets_json,
@@ -718,68 +716,6 @@ fn ffi_returns_project_group_assets_json_envelope() {
 }
 
 #[test]
-fn ffi_moves_project_group_json_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let source_project = service.create_project("FFI Wrong Project").unwrap();
-    let target_project = service.create_project("FFI Correct Project").unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:ffi-move-jpg", "DCIM/100/IMG_6102.JPG", 20),
-        )
-        .unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:ffi-move-raw", "DCIM/100/IMG_6102.NEF", 21),
-        )
-        .unwrap();
-    let source_page = service
-        .project_asset_group_page_with_query(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .unwrap();
-    let group_id = source_page.groups[0].group_id.clone().unwrap();
-
-    let config_path = CString::new(config_path.to_string_lossy().as_bytes())
-        .expect("config path should not contain nul");
-    let source_project_id = CString::new(source_project.project_id.clone()).unwrap();
-    let target_project_id = CString::new(target_project.project_id.clone()).unwrap();
-    let group_id = CString::new(group_id).unwrap();
-
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-    let response = take_ffi_string(unsafe {
-        camera_connector_mobile_core_move_project_group_json(
-            core,
-            source_project_id.as_ptr(),
-            group_id.as_ptr(),
-            target_project_id.as_ptr(),
-        )
-    });
-    let source_dashboard = take_ffi_string(unsafe {
-        camera_connector_mobile_core_project_dashboard_json(core, source_project_id.as_ptr(), 0, 25)
-    });
-    let target_dashboard = take_ffi_string(unsafe {
-        camera_connector_mobile_core_project_dashboard_json(core, target_project_id.as_ptr(), 0, 25)
-    });
-    unsafe { camera_connector_mobile_core_destroy(core) };
-
-    let value: Value = serde_json::from_str(&response).unwrap();
-    let source_dashboard: Value = serde_json::from_str(&source_dashboard).unwrap();
-    let target_dashboard: Value = serde_json::from_str(&target_dashboard).unwrap();
-    assert_eq!(value["ok"], true);
-    assert_eq!(value["value"]["project_id"], target_project.project_id);
-    assert_eq!(value["value"]["member_count"], 2);
-    assert_eq!(source_dashboard["value"]["assets"]["total_groups"], 0);
-    assert_eq!(target_dashboard["value"]["assets"]["total_groups"], 1);
-}
-
-#[test]
 fn ffi_splits_burst_member_json_envelope() {
     let fixture = three_member_burst_fixture("FFI Split Decision");
     let core = unsafe { camera_connector_mobile_core_create(fixture.config_path.as_ptr()) };
@@ -797,75 +733,6 @@ fn ffi_splits_burst_member_json_envelope() {
     assert_eq!(updated["ok"], true);
     assert_eq!(updated["value"]["member_count"], 2);
     assert_eq!(updated["value"]["recommendation_status"], "pending");
-}
-
-#[test]
-fn ffi_merges_burst_member_json_envelope() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let project = service.create_project("FFI Merge Decision").unwrap();
-    for (transfer_id, path, completed_at_ms) in [
-        ("ftp:ffi-merge-a-1", "DCIM/250/IMG_8251.JPG", 1000),
-        ("ftp:ffi-merge-a-2", "DCIM/250/IMG_8252.JPG", 1100),
-        ("ftp:ffi-merge-b-1", "DCIM/251/IMG_9251.JPG", 5000),
-        ("ftp:ffi-merge-b-2", "DCIM/251/IMG_9252.JPG", 5100),
-    ] {
-        service
-            .record_project_transfer(
-                &project.project_id,
-                completed_transfer(transfer_id, path, completed_at_ms),
-            )
-            .unwrap();
-    }
-    service.drain_analysis_jobs(10).unwrap();
-    let page = service
-        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
-        .unwrap();
-    let target = page
-        .groups
-        .iter()
-        .find(|group| {
-            group
-                .primary
-                .original_path
-                .as_deref()
-                .map(|path| path.ends_with("IMG_8251.JPG"))
-                .unwrap_or(false)
-        })
-        .unwrap();
-    let source = page
-        .groups
-        .iter()
-        .find(|group| {
-            group
-                .primary
-                .original_path
-                .as_deref()
-                .map(|path| path.ends_with("IMG_9251.JPG"))
-                .unwrap_or(false)
-        })
-        .unwrap();
-    let target_burst_id =
-        CString::new(target.burst.as_ref().unwrap().burst_group_id.as_str()).unwrap();
-    let source_group_id = CString::new(source.group_id.as_ref().unwrap().as_str()).unwrap();
-    let config_path = CString::new(config_path.to_string_lossy().as_bytes()).unwrap();
-    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
-
-    let merged = take_ffi_string(unsafe {
-        camera_connector_mobile_core_merge_burst_member_json(
-            core,
-            target_burst_id.as_ptr(),
-            source_group_id.as_ptr(),
-        )
-    });
-    unsafe { camera_connector_mobile_core_destroy(core) };
-
-    let merged: Value = serde_json::from_str(&merged).unwrap();
-    assert_eq!(merged["ok"], true);
-    assert_eq!(merged["value"]["member_count"], 4);
-    assert_eq!(merged["value"]["recommendation_status"], "pending");
-    assert_eq!(merged["value"]["manual_grouping_state"], "merge");
 }
 
 #[test]

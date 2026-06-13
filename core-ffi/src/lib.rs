@@ -195,6 +195,12 @@ struct MobileBurstRecommendationWithVisualsRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct MobileManualBurstGroupRequest {
+    project_id: String,
+    member_group_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct MobileProjectRecommendationWithVisualsRequest {
     project_id: String,
     candidate_visuals: Vec<SelectionCandidateVisualInput>,
@@ -288,6 +294,14 @@ impl MobileCore {
         project_json(project)
     }
 
+    pub fn delete_project_json(&self, project_id: String) -> MobileCoreResult<String> {
+        let deleted = self.service.delete_project(&project_id)?;
+        Ok(serde_json::to_string(&json!({
+            "project_id": project_id,
+            "deleted": deleted,
+        }))?)
+    }
+
     pub fn restore_project_json(&self, project_id: String) -> MobileCoreResult<String> {
         let project = self.service.restore_project(&project_id)?;
         project_json(project)
@@ -338,20 +352,6 @@ impl MobileCore {
     ) -> MobileCoreResult<String> {
         let assets = self.service.project_group_assets(&project_id, &group_id)?;
         Ok(serde_json::to_string(&assets)?)
-    }
-
-    pub fn move_project_group_json(
-        &self,
-        source_project_id: String,
-        group_id: String,
-        target_project_id: String,
-    ) -> MobileCoreResult<String> {
-        let group = self.service.move_project_asset_group(
-            &source_project_id,
-            &group_id,
-            &target_project_id,
-        )?;
-        Ok(serde_json::to_string(&group)?)
     }
 
     pub fn delete_project_group_json(
@@ -573,14 +573,11 @@ impl MobileCore {
         Ok(serde_json::to_string(&burst)?)
     }
 
-    pub fn merge_burst_member_json(
-        &self,
-        target_burst_group_id: String,
-        member_group_id: String,
-    ) -> MobileCoreResult<String> {
+    pub fn create_manual_burst_group_json(&self, request_json: &str) -> MobileCoreResult<String> {
+        let request: MobileManualBurstGroupRequest = serde_json::from_str(request_json)?;
         let burst = self
             .service
-            .merge_burst_member(&target_burst_group_id, &member_group_id)?;
+            .create_manual_burst_group(&request.project_id, &request.member_group_ids)?;
         Ok(serde_json::to_string(&burst)?)
     }
 
@@ -1298,6 +1295,22 @@ pub unsafe extern "C" fn camera_connector_mobile_core_archive_project_json(
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
 /// `project_id` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
+pub unsafe extern "C" fn camera_connector_mobile_core_delete_project_json(
+    core: *const MobileCore,
+    project_id: *const c_char,
+) -> *mut c_char {
+    ffi_response(|| {
+        let project_id = required_c_string(project_id, "project_id")?;
+        let result = core_ref(core)?.delete_project_json(project_id)?;
+        parse_json_value(&result)
+    })
+}
+
+/// # Safety
+///
+/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
+/// `project_id` must be a valid, null-terminated UTF-8 C string.
+#[no_mangle]
 pub unsafe extern "C" fn camera_connector_mobile_core_restore_project_json(
     core: *const MobileCore,
     project_id: *const c_char,
@@ -1374,30 +1387,6 @@ pub unsafe extern "C" fn camera_connector_mobile_core_project_group_assets_json(
         let group_id = required_c_string(group_id, "group_id")?;
         let assets = core_ref(core)?.project_group_assets_json(project_id, group_id)?;
         parse_json_value(&assets)
-    })
-}
-
-/// # Safety
-///
-/// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
-/// All string pointers must be valid, null-terminated UTF-8 strings.
-#[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_move_project_group_json(
-    core: *const MobileCore,
-    source_project_id: *const c_char,
-    group_id: *const c_char,
-    target_project_id: *const c_char,
-) -> *mut c_char {
-    ffi_response(|| {
-        let source_project_id = required_c_string(source_project_id, "source_project_id")?;
-        let group_id = required_c_string(group_id, "group_id")?;
-        let target_project_id = required_c_string(target_project_id, "target_project_id")?;
-        let group = core_ref(core)?.move_project_group_json(
-            source_project_id,
-            group_id,
-            target_project_id,
-        )?;
-        parse_json_value(&group)
     })
 }
 
@@ -1637,19 +1626,15 @@ pub unsafe extern "C" fn camera_connector_mobile_core_split_burst_member_json(
 /// # Safety
 ///
 /// `core` must be a valid pointer returned by `camera_connector_mobile_core_create`.
-/// `target_burst_group_id` and `member_group_id` must be valid, null-terminated UTF-8 C strings.
+/// `request_json` must be a valid, null-terminated UTF-8 C string.
 #[no_mangle]
-pub unsafe extern "C" fn camera_connector_mobile_core_merge_burst_member_json(
+pub unsafe extern "C" fn camera_connector_mobile_core_create_manual_burst_group_json(
     core: *const MobileCore,
-    target_burst_group_id: *const c_char,
-    member_group_id: *const c_char,
+    request_json: *const c_char,
 ) -> *mut c_char {
     ffi_response(|| {
-        let target_burst_group_id =
-            required_c_string(target_burst_group_id, "target_burst_group_id")?;
-        let member_group_id = required_c_string(member_group_id, "member_group_id")?;
-        let result =
-            core_ref(core)?.merge_burst_member_json(target_burst_group_id, member_group_id)?;
+        let request_json = required_c_string(request_json, "request_json")?;
+        let result = core_ref(core)?.create_manual_burst_group_json(&request_json)?;
         parse_json_value(&result)
     })
 }
@@ -2509,6 +2494,23 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_archiv
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_deleteProjectJson(
+    mut env: EnvUnowned,
+    _class: JClass,
+    handle: jlong,
+    project_id: JString,
+) -> jstring {
+    env.with_env(|env| {
+        let project_id = required_java_string(env, project_id, "project_id");
+        java_response(env, || {
+            let result = mobile_core_from_handle(handle)?.delete_project_json(project_id?)?;
+            parse_json_value(&result)
+        })
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_restoreProjectJson(
     mut env: EnvUnowned,
     _class: JClass,
@@ -2604,31 +2606,6 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_projec
             let assets = mobile_core_from_handle(handle)?
                 .project_group_assets_json(project_id?, group_id?)?;
             parse_json_value(&assets)
-        })
-    })
-    .resolve::<ThrowRuntimeExAndDefault>()
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_moveProjectGroupJson(
-    mut env: EnvUnowned,
-    _class: JClass,
-    handle: jlong,
-    source_project_id: JString,
-    group_id: JString,
-    target_project_id: JString,
-) -> jstring {
-    env.with_env(|env| {
-        let source_project_id = required_java_string(env, source_project_id, "source_project_id");
-        let group_id = required_java_string(env, group_id, "group_id");
-        let target_project_id = required_java_string(env, target_project_id, "target_project_id");
-        java_response(env, || {
-            let group = mobile_core_from_handle(handle)?.move_project_group_json(
-                source_project_id?,
-                group_id?,
-                target_project_id?,
-            )?;
-            parse_json_value(&group)
         })
     })
     .resolve::<ThrowRuntimeExAndDefault>()
@@ -2943,20 +2920,17 @@ pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_splitB
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_mergeBurstMemberJson(
+pub extern "system" fn Java_com_cameraconnector_app_core_NativeMobileCore_createManualBurstGroupJson(
     mut env: EnvUnowned,
     _class: JClass,
     handle: jlong,
-    target_burst_group_id: JString,
-    member_group_id: JString,
+    request_json: JString,
 ) -> jstring {
     env.with_env(|env| {
-        let target_burst_group_id =
-            required_java_string(env, target_burst_group_id, "target_burst_group_id");
-        let member_group_id = required_java_string(env, member_group_id, "member_group_id");
+        let request_json = required_java_string(env, request_json, "request_json");
         java_response(env, || {
-            let result = mobile_core_from_handle(handle)?
-                .merge_burst_member_json(target_burst_group_id?, member_group_id?)?;
+            let result =
+                mobile_core_from_handle(handle)?.create_manual_burst_group_json(&request_json?)?;
             parse_json_value(&result)
         })
     })

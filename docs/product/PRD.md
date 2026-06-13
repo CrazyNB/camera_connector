@@ -20,8 +20,12 @@ The previous brand-specific PTP/IP pull route is deprecated for this project. Re
 Current priorities:
 
 1. FTP push mode.
-2. SFTP push mode.
+2. Android-visible secondary mode is future STC, shown as disabled until implemented.
 3. AP mode remains the original camera-hotspot meaning, but is paused.
+
+SFTP is no longer a current Android product route. The core/CLI SFTP path may
+remain as an engineering validation surface, but it should not appear as a
+primary user setup path before real-camera compatibility is proven.
 
 ## 3. Users
 
@@ -88,7 +92,9 @@ P0:
 - Expose receiver runtime lifecycle from core: stopped, starting, running, stopping, and failed.
 - Persist receiver runtime status as receiver metadata and detect stale `Running` status when the listener is no longer reachable.
 - Expose an app dashboard read-model that combines receiver status, connected devices, asset summary, and a paged asset list.
-- Provide the same account model, flat sink, transfer log, connected-device metadata, runtime status, and temporary-file publish behavior for SFTP core receiver validation.
+- Keep SFTP validation behind core/CLI engineering tools when needed, sharing the
+  same account, storage, transfer-log, connected-device, runtime-status, and
+  staged-write behavior as FTP.
 - Keep project photos as the primary browsing surface with burst groups, compact
   preview tiles, detail carousel browsing, model evaluation summaries, technical
   risk indicators, and independent user favorite/mark actions.
@@ -102,7 +108,8 @@ P0:
 P1:
 
 - Add authentication polish.
-- Validate SFTP receiver with real cameras and update compatibility coverage.
+- Keep SFTP real-camera validation as an engineering task, not an Android
+  user-facing route.
 
 P2:
 
@@ -136,22 +143,22 @@ P2:
 | RX-008A | Duplicate detection | P0 | Re-uploaded assets from the same account/source and original camera path expose duplicate index and duplicate count in grouped asset views |
 | RX-009 | Compatibility log | P0 | Each real-camera test updates `docs/compatibility.md` |
 | RX-010 | Transfer log | P0 | Each completed transfer records transfer id, original path, final filename, platform final location, bytes, protocol, optional login username, remote address, and optional source name |
-| RX-011 | Tag-style filters and virtual paths | P0 | Project photo and diagnostics views can filter by format, login username, transfer id, and original path; display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
-| RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; FTP and SFTP receivers authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
+| RX-011 | Project photo filters and virtual paths | P0 | Project photo views filter by work collection (`All`, model-selected, favorite, marked, technical risk, pending analysis), optional file format, and sort order. Account/source/path metadata stays available for diagnostics and detail display, but is not a primary photo-list filter under the project-scoped account model. Display path resolves username to the current account device name, then falls back to source name or `IP-###` plus original path without creating local subfolders |
+| RX-012 | Camera account configuration | P0 | User can list, set, and remove camera accounts with username, password, and device name; the FTP receiver and engineering SFTP validator authenticate against these accounts, store password hashes rather than plaintext passwords, and reject invalid account config |
 | RX-012A | Receiver settings configuration | P0 | Core config persists receiver defaults including protocol, bind host, camera-facing port, optional output/state directories, advertised host, and source name; Android presents one unified port and writes it to the relevant core port fields; runtime start requests can override these values without rewriting saved config |
-| RX-013 | Connected device view | P0 | FTP and SFTP receivers record current/recent device IPs, login username, and online state; receiver startup clears stale online state from previous runs |
+| RX-013 | Connected device view | P0 | FTP receiver sessions record current/recent device IPs, login username, and online state; engineering SFTP validation follows the same receiver-state contract; receiver startup clears stale online state from previous runs |
 | RX-014 | Receiver runtime lifecycle | P0 | Core exposes start, stop, and status with phase, protocol, authentication mode, local address, output directory, account count, and failure message; persisted status survives process boundaries and stale running state is reported as stopped |
 | RX-014A | Dashboard read-model | P0 | Core exposes one dashboard query for UI shells with config/state/output paths, safe account summaries, per-account current connection state, receiver status, transfer health counts, recent failed transfers with error text, connected devices, filtered asset summary, and paged asset groups; CLI can emit the same model as JSON for app shells and automation |
-| RX-015 | SFTP route | P1 | SSH/SFTP receiver accepts password-authenticated uploads through the same account model, flat sink, transfer log, connected-device metadata, runtime status model, and temporary-file publish behavior as FTP |
+| RX-015 | Secondary receiver routes | P1 | The Android app keeps FTP as the current visible receiver route and shows future STC-style mode as disabled while it is not implemented. Core/CLI SFTP validation can continue behind engineering tools, but it is not exposed as the main Android user path until real-camera compatibility is proven |
 | RX-016 | Cross-platform storage backend | P1 | Core write flow uses a storage backend contract; desktop uses local paths, while Android/iOS can save through media/document/photo APIs without leaking platform URIs into receiver protocol logic |
-| INT-001 | Technical gate | P0 | Every published asset group can receive a local technical assessment; the result is risk/gate context, not a final aesthetic score |
+| INT-001 | Technical gate | P0 | Every written asset group can receive a local technical assessment; the result is risk/gate context, not a final aesthetic score |
 | INT-002 | Model provider profiles | P0 | App config can create, update, delete, and select named provider profiles with URL, model name, send mode, batch size, and API-key configured state |
-| INT-003 | Project evaluation settings | P0 | Each project chooses whether automatic model evaluation and automatic burst recommendation are enabled, which provider profile to use, and which prompt profile/version applies |
-| INT-004 | Prompt profiles | P0 | Prompt profiles are named, style-tagged, versioned, and user-editable while the locked request/response protocol remains system-owned |
+| INT-003 | Project evaluation settings | P0 | Each project chooses scene profile, automatic model evaluation, automatic burst recommendation, provider profile, prompt pack, risk participation, and technical threshold policy |
+| INT-004 | Prompt packs | P0 | Prompt packs are package-grouped, shareable, Markdown-backed photographic preference resources; the locked request/response protocol remains system-owned |
 | INT-005 | Model evaluation | P0 | Model evaluation rows store model score/tier/summary/source for single-photo and burst work units when provider capability exists |
 | INT-006 | Model recommendation | P0 | `selection_recommendations` stores model recommendations only; burst recommendations may be automatic, project recommendations are manual-only |
 | INT-007 | User marks | P0 | User favorite and user mark state is stored independently and never mutates model evaluation or recommendation rows |
-| INT-008 | No-key behavior | P0 | With no configured provider/API key, upload, thumbnails, grouping, publishing, and technical CV continue; model evaluation/recommendation is skipped or disabled with a visible setup state |
+| INT-008 | No-key behavior | P0 | With no configured provider/API key, upload, thumbnails, grouping, local writing, and technical CV continue; model evaluation/recommendation is skipped or disabled with a visible setup state |
 | AP-001 | Camera AP mode | P2 | Keep original AP meaning; resume after push path works |
 
 ## 8. Success Metrics
@@ -171,7 +178,7 @@ P2:
 
 ```mermaid
 flowchart LR
-  Camera["Camera\nFTP/SFTP upload profile"]
+  Camera["Camera\nFTP upload profile"]
   Network["Phone hotspot / LAN\nAP later"]
   Receiver["Push Receiver\nFTP first"]
   Sink["Storage Backend\n.tmp then publish"]
@@ -199,6 +206,6 @@ The CLI is a thin operational adapter for development, validation, headless/NAS 
 2. Build FTP receiver core and CLI smoke path.
 3. Validate with one real camera in FTP mode.
 4. Update compatibility table and receiver setup guide.
-5. Validate SFTP receiver with real cameras and fill the compatibility matrix.
+5. Keep SFTP validation behind engineering tools until compatibility justifies product exposure.
 6. Resume AP-mode exploration only after push import is stable.
 

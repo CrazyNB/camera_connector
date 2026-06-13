@@ -3,8 +3,9 @@
 Current technical route:
 
 1. High priority: camera pushes files to a receiver owned by this app.
-2. Protocol order: FTP first, then SFTP.
-3. AP mode keeps its original meaning, but is paused for now: the camera creates its own Wi-Fi AP and the phone/computer joins it. We are not implementing that path in the current slice.
+2. Current product route: FTP. Android may show a future STC-style route as disabled until implemented.
+3. SFTP remains an engineering/core validation path only.
+4. AP mode keeps its original meaning, but is paused for now: the camera creates its own Wi-Fi AP and the phone/computer joins it. We are not implementing that path in the current slice.
 
 ## FTP Push
 
@@ -40,9 +41,9 @@ Minimum FTP commands supported by the core receiver:
 
 `STOR` writes bytes to the app state staging area first, then publishes the completed staged file into the final object store. The transfer record and SQLite asset index are updated after the completed file is published.
 
-## SFTP Push
+## SFTP Push Engineering Validation
 
-The core receiver can run an SSH/SFTP endpoint and accept password-authenticated uploads. The core path is implemented; real-camera SFTP compatibility still needs field validation per vendor and firmware.
+The core receiver can run an SSH/SFTP endpoint and accept password-authenticated uploads. This is not the current Android user-facing route; it is retained for core/CLI engineering validation until real-camera SFTP compatibility is proven per vendor and firmware.
 
 Implemented behavior:
 
@@ -70,8 +71,8 @@ Not yet implemented:
   - Desktop: `local_path`.
   - Android: `media_uri` or `document_uri` through MediaStore/SAF.
   - iOS: `document_uri` or `photo_asset` through Files/Photos APIs.
-- Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then publish contract.
-- Publish workers must claim a pending `publish_queue` item before writing to final storage; claiming moves `staged` items, or `failed` items whose `next_attempt_at_ms` is due, to `publishing` so retry workers do not publish the same staged bytes twice or hammer revoked storage permissions.
+- Receiver implementations write through `LocalStagingStore` first. The current desktop final object backend is `LocalFolderObjectStore`; mobile shells should provide SAF, MediaStore, Files, or Photos object stores while preserving the same staged-write then final-write contract.
+- Write workers must claim a pending `publish_queue` item before writing to final storage; claiming moves `staged` items, or `failed` items whose `next_attempt_at_ms` is due, to `publishing` so retry workers do not write the same staged bytes twice or hammer revoked storage permissions. The table name is currently internal implementation vocabulary; product surfaces should describe this as the write queue.
 - App shells may clear `next_attempt_at_ms` for failed rows in the active project after the user explicitly retries or reauthorizes storage; the next worker poll can then claim those rows immediately.
 - Every completed upload is indexed under a project in SQLite. The app shell must provide or select an active project before receiving files; the core no longer creates a default system project. Dashboard and asset browsing/detail views must name a project; audit-log diagnostics are separate from project views.
 - Never trust uploaded paths.
@@ -90,7 +91,7 @@ Not yet implemented:
 The receiver writes `transfer-log.jsonl` in the state/log directory as an audit stream. SQLite is the durable state and dashboard index. Each completed transfer records:
 
 - `transfer_id`: stable enough to reference a single transfer.
-- `protocol`: FTP, SFTP, or manual validation source.
+- `protocol`: FTP, engineering SFTP validation, or manual validation source.
 - `original_path`: remote path sent by the camera, such as `DCIM/100CANON/IMG_1001.CR3`.
 - `final_filename`: flattened result name.
 - `final_location`: platform save target, such as `local_path`, `media_uri`, `document_uri`, or `photo_asset`.
@@ -100,7 +101,7 @@ The receiver writes `transfer-log.jsonl` in the state/log directory as an audit 
 - `source_name`: optional user-set camera/source label.
 - `started_at_ms` and `completed_at_ms`.
 
-The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, `publish_queue`, `receiver_accounts`, `connected_devices`, and `receiver_status` tables for project-scoped dashboard queries and mutable receiver state. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
+The product uses the SQLite `projects`, `transfers`, `assets`, `asset_groups`, `publish_queue`, `receiver_accounts`, `connected_devices`, and `receiver_status` tables for project-scoped dashboard queries and mutable receiver state. `publish_queue` is the current internal write-queue table. Username, source name, original path, remote address, transfer id, and final filename are metadata only; they do not create local subfolders.
 
 For display, the UI builds a virtual path from metadata:
 
@@ -109,11 +110,11 @@ For display, the UI builds a virtual path from metadata:
 
 This virtual path is not a filesystem path. It is a compact grouping label; the saved object remains flat in the chosen storage backend, and the full `remote_addr` remains available in the log.
 
-Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; SFTP authenticates SSH password login. Both protocols use the same account table and write the login username to new connection and transfer records. Display views resolve the username through the current account table first, then fall back to the recorded source name. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
+Camera accounts are user configuration. They map push-login credentials to a device name. FTP authenticates `USER`/`PASS`; the engineering SFTP validator authenticates SSH password login. Both routes use the same account table and write the login username to new connection and transfer records. Display views resolve the username through the current account table first, then fall back to the recorded source name. Password hashing and verification live in the core receiver/account layer so CLI, UI, and future app shells share the same credential behavior. IP addresses are observed per connection and transfer; they are not persisted as account identity.
 
 ## Connected Devices
 
-The receiver writes connected-device state to the SQLite `connected_devices` table in the state/log directory. It records current and recently seen FTP control connections and SFTP sessions:
+The receiver writes connected-device state to the SQLite `connected_devices` table in the state/log directory. It records current and recently seen FTP control connections and, for engineering validation, SFTP sessions:
 
 - `remote_addr` and last remote port.
 - authenticated login `username` when the device has logged in.
@@ -123,14 +124,14 @@ The receiver writes connected-device state to the SQLite `connected_devices` tab
 
 This table powers the "connected devices" view and shows the latest IP used by each login. It is receiver metadata, not a received asset.
 
-When the FTP or SFTP receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old sessions still exist, so the device view only returns to online after the camera opens a new connection.
+When a receiver starts, it marks any previously online device records as offline. A fresh process cannot know whether old sessions still exist, so the device view only returns to online after the camera opens a new connection.
 
 ## Receiver Runtime Status
 
 The receiver writes runtime status to the SQLite `receiver_status` table in the state/log directory. It records:
 
 - `phase`: stopped, starting, running, stopping, or failed.
-- `protocol`: FTP or SFTP when known.
+- `protocol`: FTP or engineering SFTP validation when known.
 - `auth_mode`: anonymous or accounts.
 - `local_addr`: the socket address that accepted camera connections.
 - `output_dir`.
@@ -148,7 +149,7 @@ For each camera, record:
 
 - Camera model and firmware.
 - Network mode: phone hotspot, LAN, or camera AP.
-- Protocol: FTP or SFTP.
+- Protocol: FTP, or engineering SFTP validation when explicitly testing that path.
 - Passive mode support.
 - Successful `STOR` upload.
 - RAW/JPEG/video behavior.

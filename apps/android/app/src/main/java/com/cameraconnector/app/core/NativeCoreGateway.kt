@@ -88,20 +88,16 @@ class NativeCoreGateway(
         refresh()
     }
 
-    override suspend fun restoreProject(projectId: String) {
+    override suspend fun deleteProject(projectId: String) {
         withContext(Dispatchers.IO) {
-            nativeCore.restoreProject(projectId)
+            nativeCore.deleteProject(projectId)
         }
         refresh()
     }
 
-    override suspend fun moveProjectGroup(
-        sourceProjectId: String,
-        groupId: String,
-        targetProjectId: String,
-    ) {
+    override suspend fun restoreProject(projectId: String) {
         withContext(Dispatchers.IO) {
-            nativeCore.moveProjectGroup(sourceProjectId, groupId, targetProjectId)
+            nativeCore.restoreProject(projectId)
         }
         refresh()
     }
@@ -218,24 +214,24 @@ class NativeCoreGateway(
             )
         }
 
-    override suspend fun loadGlobalPromptProfiles(): List<PromptProfileUi> =
+    override suspend fun loadGlobalPromptPacks(): List<PromptPackUi> =
         withContext(Dispatchers.IO) {
-            mapPromptProfiles(nativeCore.globalPromptProfiles())
+            mapPromptPacks(nativeCore.globalPromptPacks())
         }
 
-    override suspend fun createGlobalPromptProfile(
+    override suspend fun createGlobalPromptPack(
         name: String,
         styleTags: List<String>,
         sceneProfile: String,
         distributionFolder: String,
         promptText: String,
-    ): PromptProfileUi =
+    ): PromptPackUi =
         withContext(Dispatchers.IO) {
             val tagsJson = JSONArray().apply {
                 styleTags.forEach { put(it) }
             }
-            mapPromptProfile(
-                nativeCore.createGlobalPromptProfile(
+            mapPromptPack(
+                nativeCore.createGlobalPromptPack(
                     name,
                     tagsJson.toString(),
                     sceneProfile,
@@ -245,13 +241,13 @@ class NativeCoreGateway(
             )
         }
 
-    override suspend fun forkGlobalPromptProfile(
-        sourceProfileId: String,
+    override suspend fun forkGlobalPromptPack(
+        sourcePackId: String,
         name: String,
         distributionFolder: String,
-    ): PromptProfileUi =
+    ): PromptPackUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkGlobalPromptProfile(sourceProfileId, name, distributionFolder))
+            mapPromptPack(nativeCore.forkGlobalPromptPack(sourcePackId, name, distributionFolder))
         }
 
     override suspend fun saveGlobalPromptPack(
@@ -260,11 +256,11 @@ class NativeCoreGateway(
         styleTags: List<String>,
         sceneProfile: String,
         promptText: String,
-    ): PromptProfileUi =
+    ): PromptPackUi =
         withContext(Dispatchers.IO) {
             val tagsJson = JSONArray()
             styleTags.forEach { tagsJson.put(it) }
-            mapPromptProfile(
+            mapPromptPack(
                 nativeCore.saveGlobalPromptVersion(
                     promptPackId,
                     name,
@@ -287,19 +283,19 @@ class NativeCoreGateway(
         }
     }
 
-    override suspend fun loadPromptProfiles(projectId: String): List<PromptProfileUi> =
+    override suspend fun loadPromptPacks(projectId: String): List<PromptPackUi> =
         withContext(Dispatchers.IO) {
-            mapPromptProfiles(nativeCore.promptProfilesForProject(projectId))
+            mapPromptPacks(nativeCore.promptPacksForProject(projectId))
         }
 
-    override suspend fun forkPromptProfile(
+    override suspend fun forkPromptPack(
         projectId: String,
-        sourceProfileId: String,
+        sourcePackId: String,
         name: String,
         distributionFolder: String,
-    ): PromptProfileUi =
+    ): PromptPackUi =
         withContext(Dispatchers.IO) {
-            mapPromptProfile(nativeCore.forkPromptProfile(projectId, sourceProfileId, name, distributionFolder))
+            mapPromptPack(nativeCore.forkPromptPack(projectId, sourcePackId, name, distributionFolder))
         }
 
     override suspend fun savePromptPack(
@@ -309,11 +305,11 @@ class NativeCoreGateway(
         styleTags: List<String>,
         sceneProfile: String,
         promptText: String,
-    ): PromptProfileUi =
+    ): PromptPackUi =
         withContext(Dispatchers.IO) {
             val tagsJson = JSONArray()
             styleTags.forEach { tagsJson.put(it) }
-            mapPromptProfile(
+            mapPromptPack(
                 nativeCore.savePromptVersion(
                     projectId,
                     promptPackId,
@@ -426,9 +422,9 @@ class NativeCoreGateway(
         refresh()
     }
 
-    override suspend fun mergeBurstMember(targetBurstGroupId: String, memberGroupId: String) {
+    override suspend fun createManualBurstGroup(projectId: String, memberGroupIds: List<String>) {
         withContext(Dispatchers.IO) {
-            nativeCore.mergeBurstMember(targetBurstGroupId, memberGroupId)
+            nativeCore.createManualBurstGroup(projectId, memberGroupIds)
         }
         refresh()
     }
@@ -533,6 +529,7 @@ class NativeCoreGateway(
             assets = mapProjectAssets(assets),
             transfers = transferRows,
             publishQueue = mapPublishQueueState(value.optJSONObject("publish_queue")),
+            globalAssets = mapGlobalAssetSummary(value.optJSONObject("global_assets")),
         )
     }
 
@@ -821,7 +818,7 @@ internal fun mapModelProviderSettings(value: JSONObject): ModelProviderSettingsU
     ModelProviderSettingsUi(
         settingsId = value.optString("settings_id").ifBlank { "global" },
         providerKind = value.optString("provider_kind").ifBlank { "none" },
-        providerLabel = value.optString("provider_label").ifBlank { "Model provider" },
+        providerLabel = value.optString("provider_label").ifBlank { "模型服务" },
         baseUrl = value.optString("base_url"),
         defaultModel = value.optString("default_model"),
         defaultMaxImageSide = value.optInt("default_max_image_side", 1536),
@@ -868,7 +865,7 @@ internal fun mapProjectEvaluationSettings(value: JSONObject): ProjectEvaluationS
         autoEvaluateOnUpload = value.optBoolean("auto_evaluate_on_upload", false),
         autoBurstRecommendationEnabled = value.optBoolean("auto_burst_recommendation_enabled", true),
         projectRecommendationMode = "manual",
-        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
+        promptPackId = jsonStringOrNull(value, "prompt_pack_id"),
         modelProviderSettingsId = jsonStringOrNull(value, "model_provider_settings_id"),
         sceneProfile = value.optString("scene_profile").ifBlank { "general" },
         cvPolicy = value.optString("cv_policy").ifBlank { "standard" },
@@ -885,7 +882,7 @@ internal fun ProjectEvaluationSettingsUi.toProjectEvaluationSettingsJson(): JSON
         .put("auto_evaluate_on_upload", autoEvaluateOnUpload)
         .put("auto_burst_recommendation_enabled", autoBurstRecommendationEnabled)
         .put("project_recommendation_mode", "manual")
-        .put("prompt_pack_id", promptProfileId ?: JSONObject.NULL)
+        .put("prompt_pack_id", promptPackId ?: JSONObject.NULL)
         .put("model_provider_settings_id", modelProviderSettingsId ?: JSONObject.NULL)
         .put("scene_profile", sceneProfile.ifBlank { "general" })
         .put("cv_policy", cvPolicy.ifBlank { "standard" })
@@ -932,24 +929,24 @@ private fun TechnicalAssessmentPolicyUi.toJson(): JSONObject =
         .put("face_exposure_warn_ratio", faceExposureWarnRatio)
         .put("face_color_cast_warn_threshold", faceColorCastWarnThreshold)
 
-internal fun mapPromptProfiles(profiles: JSONArray?): List<PromptProfileUi> {
+internal fun mapPromptPacks(profiles: JSONArray?): List<PromptPackUi> {
     if (profiles == null) {
         return emptyList()
     }
     return buildList {
         for (index in 0 until profiles.length()) {
-            profiles.optJSONObject(index)?.let { add(mapPromptProfile(it)) }
+            profiles.optJSONObject(index)?.let { add(mapPromptPack(it)) }
         }
     }
 }
 
-internal fun mapPromptProfile(value: JSONObject): PromptProfileUi {
+internal fun mapPromptPack(value: JSONObject): PromptPackUi {
     val activePromptText = jsonStringOrNull(value, "prompt_text")
     val promptMarkdown = activePromptText
         ?.trim()
         ?.takeIf { it.isNotBlank() }
-    return PromptProfileUi(
-        promptProfileId = value.optString("prompt_pack_id"),
+    return PromptPackUi(
+        promptPackId = value.optString("prompt_pack_id"),
         distributionFolder = value.optString("distribution_folder").ifBlank { "user" },
         scope = if (value.optBoolean("built_in", false)) "built_in" else "user",
         projectId = null,
@@ -976,7 +973,7 @@ internal fun mapEvaluationRun(value: JSONObject): EvaluationRunUi =
         status = value.optString("status"),
         providerKind = value.optString("provider_kind").ifBlank { "none" },
         providerModel = value.optString("provider_model"),
-        promptProfileId = jsonStringOrNull(value, "prompt_pack_id"),
+        promptPackId = jsonStringOrNull(value, "prompt_pack_id"),
         promptVersionId = jsonStringOrNull(value, "prompt_pack_version"),
         promptHash = jsonStringOrNull(value, "prompt_hash"),
         errorMessage = jsonStringOrNull(value, "error_message"),
@@ -1103,6 +1100,13 @@ internal fun mapPublishQueueState(value: JSONObject?): PublishQueueState =
         failedCount = value?.optInt("failed_count") ?: 0,
     )
 
+internal fun mapGlobalAssetSummary(value: JSONObject?): GlobalAssetSummaryUi =
+    GlobalAssetSummaryUi(
+        photoCount = value?.optInt("photo_count") ?: 0,
+        fileCount = value?.optInt("file_count") ?: 0,
+        storageBytes = value?.optLong("storage_bytes") ?: 0L,
+    )
+
 internal fun mapPublishFailureTransfers(value: JSONArray?): List<TransferRow> {
     if (value == null) {
         return emptyList()
@@ -1128,7 +1132,7 @@ private fun publishFailureDisplayPath(item: JSONObject): String {
     val path = item.optString("original_path")
         .ifBlank { item.optString("final_filename") }
         .ifBlank { item.optString("transfer_id") }
-        .ifBlank { "Publish failed" }
+        .ifBlank { "\u5199\u5165\u5931\u8d25" }
     val source = item.optString("display_source").takeIf { it.isNotBlank() }
     return if (source == null || path.startsWith("$source/")) {
         path

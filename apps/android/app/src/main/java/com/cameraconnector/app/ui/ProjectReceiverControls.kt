@@ -84,7 +84,7 @@ internal fun ReceiverHeroControl(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("重试发布")
+                Text("\u91cd\u8bd5\u5199\u5165")
             }
         }
         message?.takeIf { running }?.let {

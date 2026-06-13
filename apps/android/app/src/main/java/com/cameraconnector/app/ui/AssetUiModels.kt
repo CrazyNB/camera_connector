@@ -32,7 +32,7 @@ internal fun ProjectAsset.filename(): String =
 internal fun ProjectAsset.groupTitle(): String =
     groupKey.ifBlank { filename().substringBeforeLast('.', filename()) }
 
-internal fun ProjectAsset.groupMoveId(): String? =
+internal fun ProjectAsset.assetGroupId(): String? =
     id.takeIf { it.isNotBlank() }
 
 internal fun ProjectAsset.sourceLabel(): String =
@@ -283,7 +283,7 @@ internal fun ProjectAsset.isBestRecommendedAsset(): Boolean {
     }
     val bestId = burst?.bestAssetGroupId?.takeIf { it.isNotBlank() } ?: return false
     return bestId == id ||
-        bestId == groupMoveId() ||
+        bestId == assetGroupId() ||
         bestId == assetSelectionId() ||
         bestId == groupKey
 }

@@ -497,11 +497,75 @@ fn manual_split_survives_later_burst_detection() {
 }
 
 #[test]
-fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() {
+fn manual_merge_member_groups_can_create_new_burst_group_from_singles() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
     let project = store
-        .create_project("Manual Merge Persistence Project")
+        .create_project("Manual New Burst Project")
+        .expect("project should create");
+    publish_jpeg(
+        &store,
+        &project.project_id,
+        "ftp:1",
+        "DCIM/100/IMG_1001.JPG",
+        1000,
+    );
+    publish_jpeg(
+        &store,
+        &project.project_id,
+        "ftp:2",
+        "DCIM/101/IMG_3001.JPG",
+        5000,
+    );
+
+    let groups = store
+        .stored_asset_groups(&project.project_id)
+        .expect("groups should query");
+    let member_group_ids = groups
+        .iter()
+        .map(|group| group.group_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(member_group_ids.len(), 2);
+
+    let merged = store
+        .create_manual_burst_group(&project.project_id, &member_group_ids)
+        .expect("manual burst should create")
+        .expect("manual burst should exist");
+
+    assert_eq!(merged.member_count, 2);
+    assert_eq!(merged.manual_grouping_state.as_deref(), Some("merge"));
+    assert_eq!(merged.recommendation_status, "pending");
+
+    store
+        .detect_bursts_for_asset_group(
+            &project.project_id,
+            &member_group_ids[0],
+            &BurstGroupingProfile::default(),
+        )
+        .expect("later detection should preserve manual merge");
+    let page = store
+        .asset_group_page(&project.project_id, Default::default(), 0, 25)
+        .expect("asset page should load");
+    let burst_ids = page
+        .groups
+        .iter()
+        .filter_map(|group| {
+            group
+                .burst
+                .as_ref()
+                .map(|burst| (burst.burst_group_id.clone(), burst.member_count))
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(burst_ids, BTreeSet::from([(merged.burst_group_id, 2)]));
+}
+
+#[test]
+fn manual_merge_member_groups_can_merge_existing_burst_containers() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let store = SqliteStore::open(temp_dir.path().join("state.sqlite")).expect("store should open");
+    let project = store
+        .create_project("Manual Merge Burst Containers Project")
         .expect("project should create");
     publish_jpeg(
         &store,
@@ -540,44 +604,41 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
         .expect("first burst member should exist")
         .group_id
         .clone();
-    let source_member_group_id = groups
+    let second_group_id = groups
         .iter()
         .find(|group| group.display_key == "IMG_2001")
-        .expect("source burst member should exist")
+        .expect("second burst member should exist")
         .group_id
         .clone();
-    let bursts = store
+    store
         .detect_bursts_for_asset_group(
             &project.project_id,
             &first_group_id,
             &BurstGroupingProfile::default(),
         )
-        .expect("bursts should detect");
-    assert_eq!(bursts.len(), 1);
+        .expect("initial bursts should detect");
 
-    let target_burst_id = bursts[0].burst_group_id.clone();
-    let before_page = store
-        .asset_group_page(&project.project_id, Default::default(), 0, 25)
-        .expect("asset page should load before merge");
-    let source_burst_id = before_page
-        .groups
-        .iter()
-        .find(|group| group.group_id.as_deref() == Some(source_member_group_id.as_str()))
-        .and_then(|group| group.burst.as_ref())
-        .expect("source burst should exist")
-        .burst_group_id
-        .clone();
     let merged = store
-        .merge_burst_member(&target_burst_id, &source_member_group_id)
-        .expect("member group should merge into target burst")
-        .expect("target burst should remain");
+        .create_manual_burst_group(
+            &project.project_id,
+            &[first_group_id.clone(), second_group_id],
+        )
+        .expect("manual burst should merge")
+        .expect("manual burst should exist");
 
     assert_eq!(merged.member_count, 4);
-    assert_eq!(merged.recommendation_status, "pending");
     assert_eq!(merged.manual_grouping_state.as_deref(), Some("merge"));
+    assert_eq!(merged.recommendation_status, "pending");
     assert_eq!(
-        store.burst_group(&source_burst_id).expect("source lookup"),
-        None
+        merged
+            .member_group_ids
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        groups
+            .iter()
+            .map(|group| group.group_id.clone())
+            .collect::<BTreeSet<_>>(),
     );
 
     store
@@ -586,7 +647,7 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
             &first_group_id,
             &BurstGroupingProfile::default(),
         )
-        .expect("later detection should run");
+        .expect("later detection should preserve manual container merge");
     let page = store
         .asset_group_page(&project.project_id, Default::default(), 0, 25)
         .expect("asset page should load");
@@ -601,7 +662,7 @@ fn manual_merge_member_group_merges_source_burst_and_survives_later_detection() 
         })
         .collect::<BTreeSet<_>>();
 
-    assert_eq!(burst_ids, BTreeSet::from([(target_burst_id, 4)]));
+    assert_eq!(burst_ids, BTreeSet::from([(merged.burst_group_id, 4)]));
 }
 
 fn publish_jpeg(

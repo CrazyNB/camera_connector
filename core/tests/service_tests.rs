@@ -919,7 +919,7 @@ fn service_rejects_invalid_prompt_id_when_prompt_is_selected() {
     without_prompt.updated_at_ms = 5_100;
     let saved = service
         .save_project_evaluation_settings(without_prompt)
-        .expect("prompt profile may be omitted");
+        .expect("prompt pack may be omitted");
     assert_eq!(saved.prompt_pack_id, None);
 
     let _ = std::fs::remove_file(config_path);

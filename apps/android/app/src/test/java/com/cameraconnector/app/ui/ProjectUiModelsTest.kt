@@ -27,7 +27,7 @@ class ProjectUiModelsTest {
                 blurHighEdgeThreshold = 0.12,
                 blurHighFrequencyThreshold = 0.12,
                 highlightClipThreshold = 245,
-                shadowClipThreshold = 10,
+                shadowClipThreshold = 5,
                 clippingHighRatio = 0.12,
                 clippingHighConnectedRatio = 0.18,
                 clippingSevereRatio = 0.50,
@@ -41,8 +41,14 @@ class ProjectUiModelsTest {
         )
 
         assertEquals(
-            listOf("失焦灵敏度", "死黑/死白灵敏度", "偏色灵敏度"),
-            controls.map { it.title },
+            listOf(
+                CvThresholdControlKey.BlurHigh,
+                CvThresholdControlKey.Clipping,
+                CvThresholdControlKey.ShadowClipThreshold,
+                CvThresholdControlKey.HighlightClipThreshold,
+                CvThresholdControlKey.ColorCast,
+            ),
+            controls.map { it.key },
         )
         assertEquals(38, controls.first { it.key == CvThresholdControlKey.BlurHigh }.displayPercent)
         assertEquals(
@@ -53,14 +59,14 @@ class ProjectUiModelsTest {
             56,
             controls.first { it.key == CvThresholdControlKey.ColorCast }.displayPercent,
         )
+        assertEquals("<=5", controls.first { it.key == CvThresholdControlKey.ShadowClipThreshold }.displayLabel)
+        assertEquals(">=245", controls.first { it.key == CvThresholdControlKey.HighlightClipThreshold }.displayLabel)
         assertEquals(
             "当前：边缘和高频细节都低于 12% 时标记失焦；低于 4% 视为严重。",
             controls.first { it.key == CvThresholdControlKey.BlurHigh }.description,
         )
-        assertEquals(
-            "当前：近黑 <=10 / 近白 >=245，占比超过 12% 或连片超过 18% 时标记；50% 以上视为严重。",
-            controls.first { it.key == CvThresholdControlKey.Clipping }.description,
-        )
+        assertTrue(controls.first { it.key == CvThresholdControlKey.Clipping }.description.contains("<=5"))
+        assertTrue(controls.first { it.key == CvThresholdControlKey.Clipping }.description.contains(">=245"))
         assertEquals(
             "当前：RGB 通道相对亮度差异超过 0.42 时标记偏色；超过 0.70 视为严重。",
             controls.first { it.key == CvThresholdControlKey.ColorCast }.description,
@@ -76,7 +82,7 @@ class ProjectUiModelsTest {
                 blurHighEdgeThreshold = 0.12,
                 blurHighFrequencyThreshold = 0.12,
                 highlightClipThreshold = 245,
-                shadowClipThreshold = 10,
+                shadowClipThreshold = 5,
                 clippingHighRatio = 0.12,
                 clippingHighConnectedRatio = 0.18,
                 clippingSevereRatio = 0.50,
@@ -94,6 +100,8 @@ class ProjectUiModelsTest {
             listOf(
                 CvThresholdControlKey.BlurHigh,
                 CvThresholdControlKey.Clipping,
+                CvThresholdControlKey.ShadowClipThreshold,
+                CvThresholdControlKey.HighlightClipThreshold,
                 CvThresholdControlKey.ColorCast,
                 CvThresholdControlKey.FaceEyes,
                 CvThresholdControlKey.FaceExposure,
@@ -111,7 +119,7 @@ class ProjectUiModelsTest {
             blurHighEdgeThreshold = 0.12,
             blurHighFrequencyThreshold = 0.12,
             highlightClipThreshold = 245,
-            shadowClipThreshold = 10,
+            shadowClipThreshold = 5,
             clippingHighRatio = 0.12,
             clippingHighConnectedRatio = 0.18,
             clippingSevereRatio = 0.50,
@@ -133,6 +141,16 @@ class ProjectUiModelsTest {
         assertEquals(0.35, clippingUpdated.clippingSevereRatio, 0.0001)
         assertEquals(0.35, clippingUpdated.clippingSevereConnectedRatio, 0.0001)
 
+        val shadowThresholdUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.ShadowClipThreshold, 0.0)
+        assertEquals(0, shadowThresholdUpdated.shadowClipThreshold)
+
+        val highlightThresholdUpdated = updateCvThresholdControl(
+            policy,
+            CvThresholdControlKey.HighlightClipThreshold,
+            0.5,
+        )
+        assertEquals(245, highlightThresholdUpdated.highlightClipThreshold)
+
         val colorCastUpdated = updateCvThresholdControl(policy, CvThresholdControlKey.ColorCast, 1.0)
         assertEquals(0.28, colorCastUpdated.colorCastHighThreshold, 0.0001)
         assertEquals(0.50, colorCastUpdated.colorCastSevereThreshold, 0.0001)
@@ -148,10 +166,53 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun detailCarouselHeightKeepsLandscapePhotosCompact() {
-        assertEquals(300.dp, detailCarouselHeight(null))
-        assertEquals(220.dp, detailCarouselHeight(1.5f))
-        assertEquals(480.dp, detailCarouselHeight(0.67f))
+    fun cvThresholdModeSelectionUsesCustomAsAPresetOption() {
+        val settings = ProjectEvaluationSettingsUi(projectId = "project-1", cvPolicy = "standard")
+
+        assertEquals("standard", selectedCvThresholdMode(settings))
+
+        val custom = projectSettingsAfterCvThresholdModeSelection(settings, "custom")
+        assertEquals("custom", selectedCvThresholdMode(custom))
+        assertEquals("standard", custom.cvPolicy)
+        assertEquals(5, custom.cvPolicyOverrides?.shadowClipThreshold)
+        assertEquals(245, custom.cvPolicyOverrides?.highlightClipThreshold)
+
+        val strict = projectSettingsAfterCvThresholdModeSelection(custom, "strict")
+        assertEquals("strict", selectedCvThresholdMode(strict))
+        assertEquals("strict", strict.cvPolicy)
+        assertNull(strict.cvPolicyOverrides)
+    }
+
+    @Test
+    fun detailCarouselHeightGivesLandscapePhotosMoreViewingSpace() {
+        assertEquals(340.dp, detailCarouselHeight(null))
+        assertEquals(304.dp, detailCarouselHeight(1.5f))
+        assertEquals(520.dp, detailCarouselHeight(0.67f))
+    }
+
+    @Test
+    fun photoMetadataAspectRatioUsesExifRotationForPortraitCameraFiles() {
+        assertEquals(1.5f, photoMetadataDisplayAspectRatio("6048 x 4032", "正常")!!, 0.0001f)
+        assertEquals(4032f / 6048f, photoMetadataDisplayAspectRatio("6048 x 4032", "旋转 90°")!!, 0.0001f)
+        assertEquals(4032f / 6048f, photoMetadataDisplayAspectRatio("6048 x 4032", "旋转 270°")!!, 0.0001f)
+    }
+
+    @Test
+    fun projectStorageSegmentsSplitProjectBytesFromOtherUsedSpace() {
+        assertEquals(
+            StorageBarSegments(projectRatio = 0.10f, otherUsedRatio = 0.30f),
+            storageBarSegments(
+                storage = DeviceStorageSnapshot(totalBytes = 100, availableBytes = 60),
+                projectBytes = 10,
+            ),
+        )
+        assertEquals(
+            StorageBarSegments(projectRatio = 0.40f, otherUsedRatio = 0f),
+            storageBarSegments(
+                storage = DeviceStorageSnapshot(totalBytes = 100, availableBytes = 60),
+                projectBytes = 80,
+            ),
+        )
     }
 
     @Test
@@ -201,7 +262,7 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun projectWorkspaceNavigationPreservesPhotoListAcrossBottomTabs() {
+    fun projectWorkspaceNavigationPreservesPhotoListWhenReturningFromOtherTabs() {
         val openState = ProjectWorkspaceNavigationState(workspaceOpen = true)
         val closedState = ProjectWorkspaceNavigationState(workspaceOpen = false)
 
@@ -215,6 +276,13 @@ class ProjectUiModelsTest {
             projectWorkspaceStateAfterBottomDestinationClick(
                 current = openState,
                 destination = GlobalDestination.Projects,
+            ).workspaceOpen,
+        )
+        assertFalse(
+            projectWorkspaceStateAfterBottomDestinationClick(
+                current = openState,
+                destination = GlobalDestination.Projects,
+                collapseCurrentProjectWorkspace = true,
             ).workspaceOpen,
         )
         assertFalse(
@@ -242,17 +310,17 @@ class ProjectUiModelsTest {
     }
 
     @Test
-    fun selectingProjectModelProviderDoesNotImplicitlyRequirePromptProfile() {
+    fun selectingProjectModelProviderDoesNotImplicitlyRequirePromptPack() {
         val settings = ProjectEvaluationSettingsUi(
             projectId = "project-1",
             modelProviderSettingsId = null,
-            promptProfileId = null,
+            promptPackId = null,
         )
 
         val updated = projectSettingsAfterModelProviderSelection(settings, "provider-openai")
 
         assertEquals("provider-openai", updated.modelProviderSettingsId)
-        assertNull(updated.promptProfileId)
+        assertNull(updated.promptPackId)
     }
 
     @Test
@@ -299,6 +367,97 @@ class ProjectUiModelsTest {
         assertTrue(items.first().isBurstGroup)
         assertEquals("group-best", items.first().coverAsset.id)
         assertEquals(listOf("group-alt", "group-best"), items.first().members.map { it.id })
+    }
+
+    @Test
+    fun manualBurstMergeRequiresTwoDistinctMergeContainers() {
+        val burst = ProjectAssetBurst(
+            burstGroupId = "burst-1",
+            memberCount = 2,
+            recommendationStatus = "ready",
+            bestAssetGroupId = "group-a",
+            bestScore = 0.91,
+        )
+        val burstItems = projectPhotoGridItems(
+            listOf(
+                projectAsset(id = "group-a").copy(burst = burst),
+                projectAsset(id = "group-b").copy(burst = burst),
+            ),
+        )
+        val singleA = projectPhotoGridItems(listOf(projectAsset(id = "single-a"))).single()
+        val singleB = projectPhotoGridItems(listOf(projectAsset(id = "single-b"))).single()
+
+        assertNull(manualBurstMergeTarget(burstItems))
+        assertEquals(
+            listOf("single-a", "single-b"),
+            manualBurstMergeTarget(listOf(singleA, singleB))?.memberGroupIds,
+        )
+        assertEquals(
+            listOf("group-a", "group-b", "single-a"),
+            manualBurstMergeTarget(listOf(burstItems.single(), singleA))?.memberGroupIds,
+        )
+    }
+
+    @Test
+    fun manualBurstSplitTargetsExpandSelectedBurstGroupMembers() {
+        val burst = ProjectAssetBurst(
+            burstGroupId = "burst-1",
+            memberCount = 2,
+            recommendationStatus = "ready",
+            bestAssetGroupId = "group-a",
+            bestScore = 0.91,
+        )
+        val burstItem = projectPhotoGridItems(
+            listOf(
+                projectAsset(id = "group-a").copy(burst = burst),
+                projectAsset(id = "group-b").copy(burst = burst),
+            ),
+        ).single()
+        val singleItem = projectPhotoGridItems(listOf(projectAsset(id = "single"))).single()
+
+        assertTrue(manualBurstSplitTargets(listOf(singleItem)).isEmpty())
+        assertEquals(
+            listOf(
+                ManualBurstSplitTarget("burst-1", "group-a"),
+                ManualBurstSplitTarget("burst-1", "group-b"),
+            ),
+            manualBurstSplitTargets(listOf(burstItem)),
+        )
+    }
+
+    @Test
+    fun manualBurstMergeSupportsMultipleBurstContainers() {
+        val burstA = ProjectAssetBurst(
+            burstGroupId = "burst-a",
+            memberCount = 2,
+            recommendationStatus = "ready",
+            bestAssetGroupId = "a-1",
+            bestScore = 0.91,
+        )
+        val burstB = ProjectAssetBurst(
+            burstGroupId = "burst-b",
+            memberCount = 2,
+            recommendationStatus = "ready",
+            bestAssetGroupId = "b-1",
+            bestScore = 0.89,
+        )
+        val first = projectPhotoGridItems(
+            listOf(
+                projectAsset(id = "a-1").copy(burst = burstA),
+                projectAsset(id = "a-2").copy(burst = burstA),
+            ),
+        ).single()
+        val second = projectPhotoGridItems(
+            listOf(
+                projectAsset(id = "b-1").copy(burst = burstB),
+                projectAsset(id = "b-2").copy(burst = burstB),
+            ),
+        ).single()
+
+        assertEquals(
+            listOf("a-1", "a-2", "b-1", "b-2"),
+            manualBurstMergeTarget(listOf(first, second))?.memberGroupIds,
+        )
     }
 
     @Test
@@ -537,9 +696,9 @@ class ProjectUiModelsTest {
 
     @Test
     fun modelEvaluationLabelsAndPromptTagsAreChinese() {
-        assertEquals("通用 / 均衡", promptStyleTagsText(promptProfile(listOf("general", "balanced"))))
-        assertEquals("未命名提示词", promptProfile(name = "").let(::promptProfileDisplayName))
-        assertEquals("本地占位结果", modelEvaluationSourceLabel("local_stub"))
+        assertEquals("通用 / 均衡", promptStyleTagsText(promptPack(listOf("general", "balanced"))))
+        assertEquals("未命名提示词", promptPack(name = "").let(::promptPackDisplayName))
+        assertEquals("\u672c\u5730\u5206\u6790\u7ed3\u679c", modelEvaluationSourceLabel("local_stub"))
         assertEquals("导入结果", modelEvaluationSourceLabel("imported"))
         assertEquals("模型评价", modelEvaluationSourceLabel("llm_vlm"))
         assertEquals("\u5df2\u63a8\u8350", recommendationStatusLabel("ready"))
@@ -627,12 +786,12 @@ class ProjectUiModelsTest {
             canRestore = status.equals("Archived", ignoreCase = true),
         )
 
-    private fun promptProfile(
+    private fun promptPack(
         tags: List<String> = emptyList(),
         name: String = "General Default",
     ) =
-        com.cameraconnector.app.core.PromptProfileUi(
-            promptProfileId = "general-default",
+        com.cameraconnector.app.core.PromptPackUi(
+            promptPackId = "general-default",
             scope = "global",
             projectId = null,
             name = name,

@@ -55,8 +55,8 @@ pub use service::{
     SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
-    LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project, ProjectCapabilities,
-    ProjectKind, ProjectStatus, ProjectView, PublishQueueItem, PublishQueueSummary, PublishState,
-    PublishTransferMetadata, SqliteStore, StagedObject, StoredAsset, StoredAssetGroup,
-    StoredReceiverAccount,
+    GlobalAssetSummary, LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project,
+    ProjectCapabilities, ProjectKind, ProjectStatus, ProjectView, PublishQueueItem,
+    PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore, StagedObject,
+    StoredAsset, StoredAssetGroup, StoredReceiverAccount,
 };

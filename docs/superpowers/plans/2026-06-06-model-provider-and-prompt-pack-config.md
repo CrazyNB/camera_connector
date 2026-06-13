@@ -1,27 +1,30 @@
-﻿# Model Provider And Prompt Profile Config Implementation Plan
+﻿# Model Provider And Prompt Pack Config Implementation Plan
 
+> Status: completed and verified. Keep this file as implementation history, not
+> an active backlog.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** Move model provider management into a Settings secondary page and redesign prompt profiles around shared photographic preference plus locked task-specific model protocols.
+**Goal:** Move model provider management into a Settings secondary page and redesign prompt packs around shared photographic preference plus locked task-specific model protocols.
 
-**Architecture:** App-level model provider profiles remain in app-private JSON config; projects only select a provider profile id. Prompt profiles remain SQLite-backed and versioned, but the first implementation exposes only the shared user preference while core composes separate locked prompts for model evaluation, burst selection, and project selection. User-defined input/output fields are not exposed in this version; schema fields required by app parsing stay system-owned.
+**Architecture:** App-level model provider profiles remain in app-private JSON config; projects only select a provider profile id. Prompt packs are app-private, file-backed, package-grouped resources under `prompt-packs/<package>/<pack>/` with Markdown preference text in `Prompt.md`; built-in packs are read-only and user edits create user-owned copies. Projects select a prompt pack id while core composes separate locked prompts for model evaluation, burst selection, and project selection. User-defined input/output fields are not exposed in this version; schema fields required by app parsing stay system-owned.
 
-**Tech Stack:** Android Jetpack Compose, Kotlin gateway DTOs, JNI FFI, Rust core storage/service/model evaluation, SQLite, app-private JSON config, cargo tests, Android unit tests.
+**Tech Stack:** Android Jetpack Compose, Kotlin gateway DTOs, JNI FFI, Rust core storage/service/model evaluation, app-private JSON/file config, SQLite for project state, cargo tests, Android unit tests.
 
 ---
 
 ## File Structure
 
-- Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/SettingsScreen.kt`: split settings UI into model provider list/editor screen and prompt profile list/editor screen.
-- Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/CameraConnectorApp.kt`: add secondary navigation state for model provider config and prompt profile creation.
+- Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/SettingsScreen.kt`: split settings UI into model provider list/editor screen and prompt pack list/editor screen.
+- Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/CameraConnectorApp.kt`: add secondary navigation state for model provider config and prompt pack creation.
 - Modify `apps/android/app/src/main/java/com/cameraconnector/app/core/CoreGateway.kt`: add prompt creation DTO/methods for preview and real gateways.
 - Modify `apps/android/app/src/main/java/com/cameraconnector/app/core/NativeCoreGateway.kt`: map prompt creation/edit payloads and keep provider config mapping app-level.
 - Modify `apps/android/app/src/main/java/com/cameraconnector/app/core/NativeMobileCore.kt`: expose native prompt creation function if Rust FFI needs a dedicated call.
-- Modify `core/src/analysis/config.rs`: add structured prompt profile content types while preserving current versioned profile model.
+- Modify `core/src/analysis/config.rs`: keep locked task-specific prompt composition over a user-editable Markdown preference block.
 - Modify `core/src/analysis/model_eval.rs`: split prompt composition into evaluation, burst selection, and project selection composers.
-- Modify `core/src/service.rs`: create global prompt profiles without copying an existing built-in, and pass the correct prompt block into each model task.
-- Modify `core/src/storage/mod.rs`: persist the new prompt version payload without introducing compatibility branches for old development data.
-- Modify `core-ffi/src/lib.rs`: expose prompt create/save fields to Android JSON.
+- Modify `core/src/service.rs`: create/fork/save global prompt packs and pass the correct preference block into each model task.
+- Modify `core/src/storage/mod.rs`: keep prompt packs in app-private state files; do not add compatibility branches for discarded development data.
+- Modify `core-ffi/src/lib.rs`: expose prompt pack create/fork/save fields to Android JSON.
 - Test `core/tests/evaluation_config_tests.rs`, `core/tests/model_provider_http_tests.rs`, `core/tests/recommendation_tests.rs`, and Android UI/gateway tests under `apps/android/app/src/test/java`.
 
 ---
@@ -95,7 +98,7 @@ Expected: Android unit tests compile and pass.
 
 ---
 
-### Task 2: Prompt Profile New/Create Flow
+### Task 2: Prompt Pack New/Create Flow
 
 **Files:**
 - Modify: `apps/android/app/src/main/java/com/cameraconnector/app/ui/SettingsScreen.kt`
@@ -113,19 +116,19 @@ Add a test that calls a new service method:
 
 ```rust
 #[test]
-fn service_creates_global_prompt_profile_from_user_preference() {
+fn service_creates_global_prompt_pack_from_user_preference() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let service = CameraConnectorService::new(temp_dir.path()).expect("service should create");
 
     let profile = service
-        .create_global_prompt_profile(
+        .create_global_prompt_pack(
             "纪实偏好",
             vec!["纪实".to_string(), "人像".to_string()],
             SceneProfile::General,
             "偏纪实，优先情绪、主体清晰和自然肤色。",
             10_000,
         )
-        .expect("prompt profile should create");
+        .expect("prompt pack should create");
 
     assert_eq!(profile.scope, PromptScope::Global);
     assert!(!profile.built_in);
@@ -137,42 +140,42 @@ fn service_creates_global_prompt_profile_from_user_preference() {
 Run:
 
 ```powershell
-cargo test -p camera_connector_core --test evaluation_config_tests service_creates_global_prompt_profile_from_user_preference -- --nocapture
+cargo test -p camera_connector_core --test evaluation_config_tests service_creates_global_prompt_pack_from_user_preference -- --nocapture
 ```
 
-Expected: fail because `create_global_prompt_profile` does not exist.
+Expected: fail because `create_global_prompt_pack` does not exist.
 
 - [x] **Step 2: Implement core create method**
 
-Add `CameraConnectorService::create_global_prompt_profile(...)` in `core/src/service.rs`. It creates `PromptProfile` with `PromptScope::Global`, `built_in = false`, `enabled = true`, then creates the first `PromptProfileVersion`.
+Add `CameraConnectorService::create_global_prompt_pack(...)` in `core/src/service.rs`. It creates a user-owned prompt pack under the selected package folder, writes the editable preference text to `Prompt.md`, and returns the prompt pack metadata used by Android.
 
-Use the current output schema version constant and current `stable_prompt_hash`.
+Keep input/output protocol and task-specific instructions system-owned. Do not create SQLite prompt pack/version rows.
 
 - [x] **Step 3: Add FFI and Kotlin gateway method**
 
 Expose a native JSON function:
 
 ```kotlin
-fun createGlobalPromptProfile(name: String, styleTagsJson: String, sceneProfile: String, promptText: String): JSONObject
+fun createGlobalPromptPack(name: String, styleTagsJson: String, sceneProfile: String, promptText: String): JSONObject
 ```
 
 Add gateway API:
 
 ```kotlin
-suspend fun createGlobalPromptProfile(
+suspend fun createGlobalPromptPack(
     name: String,
     styleTags: List<String>,
     sceneProfile: String,
     promptText: String,
-): PromptProfileUi
+): PromptPackUi
 ```
 
 - [x] **Step 4: Add New button in prompt list**
 
-`PromptProfilesScreen` gets:
+`PromptPacksScreen` gets:
 
 ```kotlin
-onCreatePromptProfile: () -> Unit
+onCreatePromptPack: () -> Unit
 ```
 
 The header row shows "新建"; click opens editor with `profile = null` and create mode.
@@ -190,7 +193,7 @@ Expected: tests pass.
 
 ---
 
-### Task 3: Prompt Profile Content Model
+### Task 3: Prompt Pack Markdown Content
 
 **Files:**
 - Modify: `core/src/analysis/config.rs`
@@ -201,52 +204,30 @@ Expected: tests pass.
 - Modify: `apps/android/app/src/main/java/com/cameraconnector/app/core/CoreGateway.kt`
 - Test: `core/tests/evaluation_config_tests.rs`
 
-- [x] **Step 1: Define structured prompt content**
+- [x] **Step 1: Keep editable content as Markdown**
 
-Add a serializable model in `core/src/analysis/config.rs`:
+Use the user-editable `Prompt.md` text as the photographic preference block. The app may wrap it in an internal serialized state file for pack metadata, but the distributed and user-authored artifact remains Markdown:
 
-```rust
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PromptProfileContent {
-    pub shared_preference: String,
-    pub evaluation_instruction: Option<String>,
-    pub burst_selection_instruction: Option<String>,
-    pub project_selection_instruction: Option<String>,
-}
+```
+prompt-packs/<package>/<pack>/Prompt.md
 ```
 
-Keep existing `PromptProfileVersion.prompt_text` as the persisted string for this phase. Store `PromptProfileContent` as JSON text in `prompt_text`.
+System prompt text, task instructions, and input/output JSON schema are generated by core and are not user-editable in this phase.
 
-- [x] **Step 2: Store all seeded and saved prompts as structured JSON**
+- [x] **Step 2: Store all seeded and saved prompts as prompt packs**
 
-Implement:
-
-```rust
-pub fn prompt_profile_content_json(shared_preference: &str) -> Result<String> {
-    serde_json::to_string(&PromptProfileContent {
-        shared_preference: shared_preference.trim().to_string(),
-        evaluation_instruction: None,
-        burst_selection_instruction: None,
-        project_selection_instruction: None,
-    })
-    .map_err(|error| ImporterError::internal(error.to_string()))
-}
-```
-
-Update built-in prompt seeding and all prompt save paths to persist this JSON string. During development, old plain-text prompt rows can be reset with the rest of the app data; do not add migration branches.
+Update built-in prompt seeding and all prompt save paths to persist package metadata plus `Prompt.md`. During development, discarded prompt table data can be reset with the rest of the app data; do not add migration branches.
 
 - [x] **Step 3: Update UI DTO**
 
-Add nullable fields to `PromptProfileUi`:
+Keep `PromptPackUi.activePromptText` / `sharedPreference` mapped to the Markdown preference text so existing Android selection and preview screens can render or edit the same content:
 
 ```kotlin
-val sharedPreference: String? = null,
-val evaluationInstruction: String? = null,
-val burstSelectionInstruction: String? = null,
-val projectSelectionInstruction: String? = null,
+val activePromptText: String? = null
+val sharedPreference: String? = null
 ```
 
-Mapping reads structured JSON when present; otherwise maps `activePromptText` to `sharedPreference`.
+Mapping should not require users to see or edit JSON.
 
 - [x] **Step 4: Verify**
 
@@ -273,19 +254,19 @@ Expected: tests pass and existing plain prompts still compose correctly.
 
 Add HTTP provider tests asserting:
 
-- model evaluation request contains shared preference and evaluation instruction;
-- burst recommendation request contains shared preference and burst selection instruction;
-- project recommendation request contains shared preference and project selection instruction.
+- model evaluation request contains the prompt pack preference and locked evaluation instruction;
+- burst recommendation request contains the prompt pack preference and locked burst selection instruction;
+- project recommendation request contains the prompt pack preference and locked project selection instruction.
 
 Use captured request body assertions already present in `model_provider_http_tests.rs`.
 
-- [x] **Step 2: Replace `user_rubric: &str` with structured content**
+- [x] **Step 2: Replace `user_rubric: &str` with prompt pack preference input**
 
 Change function inputs:
 
 ```rust
-pub fn evaluate_asset_group_with_model_provider(..., prompt_content: &PromptProfileContent)
-pub fn recommend_selection_with_model_provider(..., prompt_content: &PromptProfileContent)
+pub fn evaluate_asset_group_with_model_provider(..., prompt_preference_markdown: &str)
+pub fn recommend_selection_with_model_provider(..., prompt_preference_markdown: &str)
 ```
 
 For selection, add an internal enum:
@@ -302,30 +283,30 @@ enum SelectionPromptTask {
 Evaluation prompt:
 
 ```text
-Shared photographic preference:
-{shared_preference}
+Photographic preference:
+{prompt_preference_markdown}
 
-Evaluation task instruction:
-{evaluation_instruction_or_default}
+Locked evaluation task instruction:
+{system_owned_evaluation_instruction}
 ```
 
 Burst selection prompt:
 
 ```text
-Shared photographic preference:
-{shared_preference}
+Photographic preference:
+{prompt_preference_markdown}
 
-Burst selection instruction:
+Locked burst selection instruction:
 Pick the best frame within a visually similar burst. Prioritize decisive moment, focus, expression, gesture, subject clarity, and avoid severe technical defects.
 ```
 
 Project selection prompt:
 
 ```text
-Shared photographic preference:
-{shared_preference}
+Photographic preference:
+{prompt_preference_markdown}
 
-Project selection instruction:
+Locked project selection instruction:
 Select a coherent project-level set. Prefer strong standalone images, diversity, representative coverage, and avoid near-duplicates unless they add clear value.
 ```
 
@@ -355,15 +336,12 @@ Expected: provider request tests show task-specific prompt content and recommend
 
 - [x] **Step 1: Replace one big prompt text box with first-version sections**
 
-In `PromptProfileEditorScreen`, show:
+In `PromptPackEditorScreen`, show:
 
 - name
 - style tags text field
 - scene profile chips
 - "我的摄影偏好" editable multiline field
-- collapsed read-only "系统评价规则"
-- collapsed read-only "连拍优选规则"
-- collapsed read-only "项目优选规则"
 - read-only "输入输出协议由系统锁定"
 
 - [x] **Step 2: Do not expose custom schema fields**
@@ -377,18 +355,15 @@ Show a short locked protocol card:
 
 No add-field UI is included in this version.
 
-- [x] **Step 3: Save structured content JSON**
+- [x] **Step 3: Save Markdown preference content**
 
-When saving, serialize the editor state into the core prompt content shape:
+When saving, write only the editable photography preference Markdown and pack metadata through the core prompt pack API:
 
-```json
-{
-  "shared_preference": "...",
-  "evaluation_instruction": null,
-  "burst_selection_instruction": null,
-  "project_selection_instruction": null
-}
+```text
+prompt-packs/<package>/<pack>/Prompt.md
 ```
+
+The locked system prompt, task instructions, and output schema remain generated by core at request time.
 
 - [x] **Step 4: Verify**
 
@@ -449,7 +424,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_emula
 ```
 
 Expected: current project-management shell, receiver launcher, Settings secondary
-pages, model provider URL/model/API key fields, prompt profile list/new editor,
+pages, model provider URL/model/API key fields, prompt pack list/new editor,
 localized default style tags, and diagnostics route are discoverable on the
 emulator.
 
@@ -462,12 +437,12 @@ In app:
 3. Create a provider with URL, model, and API key.
 4. Return to Settings.
 5. Open 提示词库.
-6. Create a prompt profile with shared preference.
+6. Create a prompt pack with shared preference.
 7. Open a project config page.
-8. Select provider and prompt profile.
+8. Select provider and prompt pack.
 9. Trigger model evaluation or project recommendation.
 
-Expected: project uses selected provider and selected prompt profile; missing API key disables model work but does not block upload or local CV.
+Expected: project uses selected provider and selected prompt pack; missing API key disables model work but does not block upload or local CV.
 
 Verified on emulator `emulator-5554` with project `Real Verify` after configuring
 provider `openai`:
