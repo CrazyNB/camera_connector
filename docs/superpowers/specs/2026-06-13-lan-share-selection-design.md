@@ -56,7 +56,9 @@ delete files.
 
 ## Core Responsibilities
 
-Core should own share semantics and storage:
+Core should own share semantics and storage. This layer must stay platform
+neutral so the same LAN share model can later be used by CLI, desktop, NAS, or
+another mobile shell:
 
 - Create and persist LAN share sessions.
 - Generate unguessable share tokens.
@@ -69,7 +71,10 @@ Core should not own Android-specific networking or storage stream behavior.
 
 ## Android Responsibilities
 
-Android should own LAN hosting and browser delivery:
+Android should own LAN hosting and browser delivery. The Android-specific
+customization should be limited to the adapter edges: socket listening,
+foreground/lifecycle behavior, Android storage streams, and Compose entry
+points:
 
 - Start and stop a local HTTP service bound to a LAN-reachable host and port.
 - Keep the share service alive while enabled.
@@ -79,6 +84,20 @@ Android should own LAN hosting and browser delivery:
   behavior.
 - Route guest mark API calls into core.
 - Surface active share state and guest results in the project photo screen.
+
+## Layering Rule
+
+Keep the interface and lower layers as reusable as possible:
+
+- Core defines the durable model, validation, token lookup, query behavior, and
+  guest mark semantics.
+- FFI/mobile gateway exposes platform-neutral JSON operations over that core
+  model.
+- The guest web API shape should not depend on Compose or Android UI state.
+- Android is the first host implementation, but its custom layer should mostly
+  be the local HTTP listener plus Android preview/file streaming.
+- If a future desktop or CLI host is added, it should reuse the same core and
+  gateway operations and only replace the HTTP/file-stream adapter.
 
 ## Data Model
 

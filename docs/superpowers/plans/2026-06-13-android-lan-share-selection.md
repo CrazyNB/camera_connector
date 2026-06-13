@@ -4,7 +4,7 @@
 
 **Goal:** Build Android-first LAN photo sharing where one tokenized local link lets one guest mark shared project photos with `favorite`, `marked`, or `reject`.
 
-**Architecture:** Core owns share sessions, token validation, saved asset queries, and guest marks. FFI exposes those operations to Android. Android owns the local HTTP server, image streaming, and UI controls for starting/stopping a share and showing guest result badges.
+**Architecture:** Core owns share sessions, token validation, saved asset queries, and guest marks. FFI exposes platform-neutral JSON operations over those concepts. Android is the first host implementation; its custom layer should stay limited to local HTTP listening, Android preview/file streaming, lifecycle glue, and Compose entry points.
 
 **Tech Stack:** Rust core with rusqlite/serde_json, Rust JNI FFI envelope, Android Kotlin/Compose, coroutine-backed `ServerSocket` HTTP adapter, existing Android preview bitmap loader.
 
@@ -30,6 +30,20 @@
 - Modify `apps/android/app/src/test/java/com/cameraconnector/app/ui/ProjectUiModelsTest.kt`: badge/no-badge tests.
 - Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/AssetUiModels.kt`: include guest result badge on tiles.
 - Modify `apps/android/app/src/main/java/com/cameraconnector/app/ui/ProjectAssetsScreen.kt`: start/stop/share URL UI.
+
+## Reuse Boundary
+
+Keep the interface and lower layers generic:
+
+- Do not put share query semantics, token validation, or guest mark rules inside
+  Android UI or HTTP router code.
+- Do not make core depend on Android concepts such as `content://`, Compose
+  state, `Context`, or `ServerSocket`.
+- Keep FFI method names and JSON payloads reusable by a future desktop/CLI host.
+- Treat Android's HTTP listener as an adapter over generic core share
+  operations.
+- Keep guest web API paths stable enough that another host can serve the same
+  paths later.
 
 ---
 
