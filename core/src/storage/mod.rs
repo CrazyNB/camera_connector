@@ -418,7 +418,8 @@ impl SqliteStore {
                             media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                             original_parent_path, final_location_payload, size_bytes, capture_at_ms,
                             received_at_ms, published_at_ms, source_identity, username, remote_addr,
-                            duplicate_index, duplicate_count
+                            source_status, source_modified_at_ms, last_seen_scan_id, duplicate_index,
+                            duplicate_count
                      FROM assets
                      WHERE project_id = ?1
                      ORDER BY published_at_ms ASC, asset_id ASC",
@@ -923,7 +924,8 @@ impl SqliteStore {
                         media_kind, format, original_filename, final_filename, normalized_stem, original_path,
                         original_parent_path, final_location_payload, size_bytes, capture_at_ms,
                         received_at_ms, published_at_ms, source_identity, username, remote_addr,
-                        duplicate_index, duplicate_count
+                        source_status, source_modified_at_ms, last_seen_scan_id, duplicate_index,
+                        duplicate_count
                  FROM assets
                  WHERE project_id = ?1 AND group_id = ?2
                  ORDER BY published_at_ms ASC, asset_id ASC",
