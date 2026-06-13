@@ -103,7 +103,7 @@ Persist:
 - model evaluations
 - selection recommendations
 - asset-group user marks
-- prompt profiles, project evaluation settings, provider capability metadata,
+- prompt packs, project evaluation settings, provider capability metadata,
   and evaluation run snapshots
 
 Do not persist:

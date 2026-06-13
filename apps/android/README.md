@@ -17,7 +17,7 @@ The Android source now has a native gateway boundary:
 - `NativeMobileCore` owns the native handle and JSON envelope parsing.
 - `NativeCoreGateway` adapts native dashboard JSON into the Compose-facing `CoreGateway`.
 - The gateway includes provider settings, project evaluation settings, prompt
-  profile list/fork/save, manual project recommendation, latest run status, and
+  pack list/fork/save/delete, manual project recommendation, latest run status, and
   portrait subject assessment APIs.
 - `CoreGatewayFactory` chooses the preview gateway or native gateway from `BuildConfig.USE_NATIVE_CORE`.
 - `CoreGatewayFactory` seeds only native receiver paths with app-private `filesDir/output` and `filesDir/state`.
@@ -37,7 +37,7 @@ The Android source now has a native gateway boundary:
 - Long-running receiver/account actions show a working card and disable related controls while the native gateway call is in flight.
 - Rust exports matching JNI symbols from `core-ffi`, including receiver start/stop.
 - Rust also exports provider-aware intelligence JNI calls for model provider
-  state, project evaluation settings, prompt profiles and versions, manual
+  state, project evaluation settings, prompt packs, manual
   project recommendation runs, latest run status, provider-aware drain/score
   gating, and subject assessment storage.
 - Model provider profiles are app-level config entries, not SQLite project
@@ -54,9 +54,10 @@ The Android source now has a native gateway boundary:
 - Project-level recommendation is manual-only. Upload/background drains do not
   create project-scope model recommendations, and global provider defaults do not
   silently rewrite existing project settings.
-- Prompt profiles are named, style-tagged, and versioned. Editing a built-in
-  prompt forks it for the project before saving a new prompt version, and runs
-  record prompt version/hash.
+- Prompt packs are package-grouped, Markdown-backed preference resources.
+  Editing a built-in pack creates a user-owned copy, while model request
+  schemas and task instructions remain system-owned. Runs record prompt pack
+  identity, version, and hash.
 - Portrait subject assessment is exposed as a Core/FFI contract for risk/gate
   context on portrait projects only; Android does not need a new ML dependency to
   honor the storage/API contract in this slice.

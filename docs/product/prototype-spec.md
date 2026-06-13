@@ -49,7 +49,7 @@ flowchart TD
   A --> G["Accounts"]
   G --> H["Configure camera credentials"]
   E --> I["Show camera-facing host, port, protocol, username"]
-  I --> J["User configures camera FTP/SFTP profile"]
+  I --> J["User configures camera FTP profile"]
   J --> K["Camera uploads files"]
   K --> L["Receiver stages bytes, then publishes completed files"]
   K --> M["SQLite stores project, transfer, asset, group, and publish state"]
@@ -99,8 +99,8 @@ Entry: expanded project receiver panel.
 
 Content:
 
-- Protocol: FTP or SFTP.
-- Bind host, defaulting to `0.0.0.0` for the native listener.
+- Protocol: FTP is the visible route in the current Android prototype. Future STC-style mode is shown as disabled until implemented. SFTP remains an engineering validation path and is not shown in the Android UI.
+- Native bind host defaults are owned by core/runtime configuration; the Android prototype does not expose bind-host tuning as a primary receiver control.
 - Unified camera-facing port.
 - Camera-facing IP shown to the camera, defaulting to a user-editable `192.168.50.1` style LAN address.
 - Read-only camera setup summary: server, port, passive mode, account, password configured state.
@@ -131,10 +131,10 @@ Content:
 - Video groups.
 - Photo grid with JPEG preview when available.
 - Tap preview to open group detail.
-- Long press to enter selection mode for bulk movement.
-- Format filters: All, JPG, RAW, Video.
-- Tag filters: source name, username, original path, transfer id, remote IP.
-- Virtual paths such as `Z5_2/BB/DSC_2552.NEF` or `IP-056/BB/DSC_2552.NEF`.
+- Long press to enter selection mode for bulk delete, model evaluation, burst split, and manual burst merge.
+- Collection filters: All, model-selected, favorite, marked, technical risk, pending analysis.
+- Optional expanded filters: file format and sort order.
+- Source name, username, original path, transfer id, and remote IP are detail/diagnostic metadata, not primary photo-list filters.
 - Duplicate index/count for repeated imports from the same account/source and original camera path.
 - Collection filters: All, Model Selects, Favorites, Marked, Technical Risk,
   Pending Analysis.
@@ -156,9 +156,10 @@ Content:
 - Enable/disable automatic model evaluation after upload.
 - Enable/disable automatic burst recommendation.
 - Keep project recommendation as a manual action.
-- Select scene profile: General, Portrait, Action, Landscape, Custom.
-- Select CV policy: Loose, Standard, Strict.
-- Select prompt profile/version.
+- Scene profile is a first-level project setting: General, Portrait, Action,
+  Landscape, Custom.
+- Select CV policy: Loose, Standard, Strict, or custom thresholds.
+- Select prompt pack.
 
 ### Model Provider Settings
 
@@ -174,7 +175,7 @@ Content:
   API key.
 - Configured/unconfigured state.
 
-### Prompt Profiles
+### Prompt Packs
 
 Purpose: manage the editable part of model prompts.
 
@@ -182,9 +183,10 @@ Entry: Settings secondary page.
 
 Content:
 
-- List prompt profiles with style tags.
-- Open profile detail.
-- Edit prompt body by creating a new version.
+- List prompt packs grouped by package.
+- Open prompt pack detail.
+- Edit user-owned Markdown preference text in `Prompt.md`; editing a built-in
+  pack creates a user-owned copy.
 - Built-in request/response protocol and output schema are locked by the app and
   are not edited in this screen.
 
@@ -197,7 +199,7 @@ Content:
 - Output directory selection.
 - Photo grid density.
 - Model provider profiles.
-- Prompt profile library.
+- Prompt pack library.
 - Diagnostics entry.
 - App/runtime preferences that are not project-owned.
 
@@ -240,4 +242,4 @@ Project actions map to `CameraConnectorService::create_project`, `set_active_pro
 
 ## 7. Deferred AP Mode
 
-AP mode keeps the original meaning: camera creates Wi-Fi and the device joins it. It is not part of the current prototype flow and should remain a future compatibility path until FTP/SFTP push import is stable.
+AP mode keeps the original meaning: camera creates Wi-Fi and the device joins it. It is not part of the current prototype flow and should remain a future compatibility path until the FTP push route and future STC route are stable enough to justify more network-mode work.

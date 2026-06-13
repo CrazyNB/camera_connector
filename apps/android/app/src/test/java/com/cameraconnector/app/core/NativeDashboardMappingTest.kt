@@ -268,7 +268,7 @@ class NativeDashboardMappingTest {
             autoEvaluateOnUpload = true,
             autoBurstRecommendationEnabled = false,
             projectRecommendationMode = "automatic",
-            promptProfileId = "prompt-portrait",
+            promptPackId = "prompt-portrait",
             sceneProfile = "portrait",
             cvPolicy = "strict",
             allowRiskyModelSelects = true,
@@ -373,8 +373,8 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun promptProfilesMapStyleTags() {
-        val profiles = mapPromptProfiles(
+    fun promptPacksMapStyleTags() {
+        val profiles = mapPromptPacks(
             org.json.JSONArray()
                 .put(
                     JSONObject()
@@ -392,8 +392,8 @@ class NativeDashboardMappingTest {
     }
 
     @Test
-    fun promptProfilesMapMarkdownPromptContent() {
-        val profiles = mapPromptProfiles(
+    fun promptPacksMapMarkdownPromptContent() {
+        val profiles = mapPromptPacks(
             org.json.JSONArray()
                 .put(
                     JSONObject()

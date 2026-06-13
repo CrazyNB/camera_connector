@@ -10,7 +10,8 @@ The main design move is to separate **receiver staging**, **final object publish
 
 The current core already has the right product rules:
 
-- FTP/SFTP receivers stream uploads through temporary files.
+- Push receivers stream uploads through temporary files. FTP is the current
+  Android product route; other push routes stay behind engineering validation.
 - Uploaded paths are flattened and sanitized.
 - Duplicate filenames are preserved.
 - Transfer records keep original camera paths and virtual display paths.
@@ -25,16 +26,16 @@ The original gap was that `LocalFileSink` acted as the real write path. That ass
 Adopt a staged import pipeline:
 
 ```text
-Camera FTP/SFTP
+Camera push upload
   -> StagingStore
-  -> PublishQueue
+  -> WriteQueue
   -> ObjectStore
   -> ProjectCatalog
   -> TransferLog + AssetIndex
   -> Dashboard/UI
 ```
 
-The receiver writes to `StagingStore`, which is always reliable local app-private storage for mobile and a local temporary directory for desktop/headless. After a complete upload, a publisher moves or copies the staged object into the configured `ObjectStore`. The final saved target is recorded as `StoredObjectLocation`.
+The receiver writes to `StagingStore`, which is always reliable local app-private storage for mobile and a local temporary directory for desktop/headless. After a complete upload, a write worker moves or copies the staged object into the configured `ObjectStore`. The final saved target is recorded as `StoredObjectLocation`.
 
 For desktop, the object store can still be a local folder. For Android, the object store can be SAF or MediaStore. For future iOS, it can map to Files or Photos identifiers.
 
@@ -63,20 +64,20 @@ Responsibilities:
 - Reserve a staged object id for each upload.
 - Create a temporary local file for streaming.
 - Support sequential FTP writes.
-- Support random-access SFTP writes.
+- Support random-access writes for any future push route that needs them.
 - Flush and mark a staged object as complete.
 - Clean stale incomplete temporary files on startup.
 
 Mobile implementations should use app-private files. This avoids SAF or MediaStore random-write limitations while keeping receiver behavior stable.
 
-### `PublishQueue`
+### `WriteQueue`
 
 Owns the transition from a completed staged object to final storage.
 
 Responsibilities:
 
 - Enqueue completed staged uploads.
-- Retry failed publishes without tight polling loops; failed rows carry `next_attempt_at_ms` so permission loss does not cause a worker to hammer the same item every poll.
+- Retry failed writes without tight polling loops; failed rows carry `next_attempt_at_ms` so permission loss does not cause a worker to hammer the same item every poll.
 - Keep enough metadata to recover after process death.
 - Report `staged`, `publishing`, `completed`, and `failed` states.
 - Leave staged bytes intact until the final object is durable.
@@ -143,10 +144,10 @@ Responsibilities:
 - Append transfer records.
 - Update connected-device metadata.
 - Update receiver runtime status.
-- Persist publish queue state.
+- Persist write-queue state.
 - Prevent concurrent read-modify-write corruption.
 
-The append-only `transfer-log.jsonl` can stay as an audit output, but mutable state should move behind a single SQLite-backed state boundary. The first implementation should use serialized writes through `StateStore` so transfer, device, receiver, project, and publish queue mutations cannot corrupt each other.
+The append-only `transfer-log.jsonl` can stay as an audit output, but mutable state should move behind a single SQLite-backed state boundary. The first implementation should use serialized writes through `StateStore` so transfer, device, receiver, project, and write-queue mutations cannot corrupt each other.
 
 ### `AssetIndex`
 
@@ -338,9 +339,9 @@ This milestone should land the durable architecture in one pass:
 
 - Treat the current development data as disposable; state and schema resets are allowed.
 - Introduce SQLite-backed `StateStore` and `AssetIndex`.
-- Add project tables and required project references on transfers, assets, asset groups, and publish queue rows.
-- Introduce `StagingStore`, `PublishQueue`, and `ObjectStore` abstractions.
-- Keep local folder publishing behavior aligned with current desktop smoke tests.
+- Add project tables and required project references on transfers, assets, asset groups, and write-queue rows.
+- Introduce `StagingStore`, `WriteQueue`, and `ObjectStore` abstractions.
+- Keep local folder write behavior aligned with current desktop smoke tests.
 - Continue writing `transfer-log.jsonl` as an audit log.
 - Record `final_location` for all new records, including local paths.
 - Add cleanup for stale incomplete temp files.
@@ -357,7 +358,7 @@ After the foundation schema exists, platform capabilities can be enabled behind 
 - Add SAF publisher first.
 - Keep MediaStore publisher deferred until real-device validation proves it is needed.
 - Add preview opening from `document_uri`; keep `media_uri` preview support as compatibility plumbing, not an Android MVP publishing requirement.
-- Add retry and recovery UI for failed publishes.
+- Add retry and recovery UI for failed writes.
 - Keep desktop local folder behavior unchanged.
 
 ### Analysis checkpoints
@@ -386,7 +387,8 @@ Unit tests:
 Integration tests:
 
 - FTP upload through staging then local object publish.
-- SFTP random writes through staging then local object publish.
+- Random-write push route through staging then local object publish, if such a
+  route is enabled in engineering validation.
 - Publish failure preserves staged bytes.
 - Restart recovers queued staged uploads.
 - Dashboard reads from transfer log or index with identical results.
@@ -426,7 +428,7 @@ The storage model optimization is accepted when:
 
 ## Non-Goals
 
-- Changing FTP/SFTP protocol behavior.
+- Changing push protocol behavior.
 - Mirroring camera-side folders into final storage.
 - Decoding RAW files.
 - Removing the transfer-log audit output.

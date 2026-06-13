@@ -237,6 +237,13 @@ pub struct PublishQueueSummary {
     pub failed_count: usize,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlobalAssetSummary {
+    pub photo_count: usize,
+    pub file_count: usize,
+    pub storage_bytes: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublishState {
     Staged,
@@ -389,6 +396,72 @@ impl SqliteStore {
             project_by_id(connection, project_id)?.ok_or_else(|| {
                 rusqlite::Error::InvalidParameterName("project not found".to_string())
             })
+        })
+    }
+
+    pub fn delete_project(&self, project_id: &str) -> Result<Option<Vec<StoredAsset>>> {
+        self.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            if project_by_id(&transaction, project_id)?.is_none() {
+                transaction.commit()?;
+                return Ok(None);
+            }
+
+            let assets = {
+                let mut statement = transaction.prepare(
+                    "SELECT asset_id, project_id, group_id, transfer_id, group_role,
+                            media_kind, format, original_filename, final_filename, normalized_stem, original_path,
+                            original_parent_path, final_location_payload, size_bytes, capture_at_ms,
+                            received_at_ms, published_at_ms, source_identity, username, remote_addr,
+                            duplicate_index, duplicate_count
+                     FROM assets
+                     WHERE project_id = ?1
+                     ORDER BY published_at_ms ASC, asset_id ASC",
+                )?;
+                let rows = statement.query_map(params![project_id], stored_asset_from_row)?;
+                collect_rows(rows)?
+            };
+
+            transaction.execute(
+                "DELETE FROM technical_assessments
+                 WHERE asset_group_id IN (
+                    SELECT group_id FROM asset_groups WHERE project_id = ?1
+                 )",
+                params![project_id],
+            )?;
+            transaction.execute(
+                "DELETE FROM burst_group_members
+                 WHERE burst_group_id IN (
+                    SELECT burst_group_id FROM burst_groups WHERE project_id = ?1
+                 )
+                    OR member_group_id IN (
+                    SELECT group_id FROM asset_groups WHERE project_id = ?1
+                 )",
+                params![project_id],
+            )?;
+            for table in [
+                "burst_member_manual_edits",
+                "asset_group_user_marks",
+                "subject_assessments",
+                "model_evaluations",
+                "selection_recommendations",
+                "background_jobs",
+                "publish_queue",
+                "evaluation_runs",
+                "assets",
+                "transfers",
+                "burst_groups",
+                "asset_groups",
+                "project_evaluation_settings",
+                "projects",
+            ] {
+                transaction.execute(
+                    &format!("DELETE FROM {table} WHERE project_id = ?1"),
+                    params![project_id],
+                )?;
+            }
+            transaction.commit()?;
+            Ok(Some(assets))
         })
     }
 
@@ -989,135 +1062,30 @@ impl SqliteStore {
         })
     }
 
-    pub fn move_asset_group(
-        &self,
-        source_project_id: &str,
-        group_id: &str,
-        target_project_id: &str,
-    ) -> Result<Option<StoredAssetGroup>> {
-        self.with_connection(|connection| {
-            let transaction = connection.unchecked_transaction()?;
-            ensure_project_exists(&transaction, source_project_id)?;
-            ensure_project_is_active(&transaction, target_project_id)?;
-            let Some(source_group) =
-                stored_asset_group_by_id(&transaction, source_project_id, group_id)?
-            else {
-                transaction.commit()?;
-                return Ok(None);
-            };
-            if source_project_id == target_project_id {
-                transaction.commit()?;
-                return Ok(Some(source_group));
-            }
-
-            let transfer_ids = transfer_ids_for_asset_group(
-                &transaction,
-                source_project_id,
-                &source_group.group_id,
-            )?;
-            if transfer_ids.is_empty() {
-                transaction.commit()?;
-                return Ok(Some(source_group));
-            }
-
-            let now = current_time_ms();
-            let source_marks =
-                user_marks_for_asset_group(&transaction, source_project_id, group_id)?;
-            let target_group_identity = asset_group_identity(
-                target_project_id,
-                source_group.source_identity.as_deref(),
-                source_group.original_parent_path.as_deref(),
-                &source_group.display_key,
-            );
-            let target_group_id = format!("group-{}", stable_key(&target_group_identity));
-            transaction.execute(
-                "INSERT INTO asset_groups (
-                    group_id, project_id, group_identity, display_key, source_identity,
-                    original_parent_path, created_at_ms, updated_at_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-                 ON CONFLICT(group_identity) DO UPDATE SET updated_at_ms = excluded.updated_at_ms",
-                params![
-                    target_group_id,
-                    target_project_id,
-                    target_group_identity,
-                    source_group.display_key,
-                    source_group.source_identity,
-                    source_group.original_parent_path,
-                    now,
-                ],
-            )?;
-            let target_group_id = transaction.query_row(
-                "SELECT group_id FROM asset_groups WHERE group_identity = ?1",
-                params![target_group_identity],
-                |row| row.get::<_, String>(0),
-            )?;
-
-            transaction.execute(
-                "UPDATE assets
-                 SET project_id = ?1, group_id = ?2
-                 WHERE project_id = ?3 AND group_id = ?4",
-                params![
-                    target_project_id,
-                    target_group_id,
-                    source_project_id,
-                    group_id
-                ],
-            )?;
-            for transfer_id in &transfer_ids {
-                transaction.execute(
-                    "UPDATE transfers SET project_id = ?1 WHERE transfer_id = ?2",
-                    params![target_project_id, transfer_id],
-                )?;
-                transaction.execute(
-                    "UPDATE publish_queue SET project_id = ?1 WHERE transfer_id = ?2",
-                    params![target_project_id, transfer_id],
-                )?;
-            }
-            if source_marks.favorite || source_marks.marked {
-                transaction.execute(
-                    "INSERT INTO asset_group_user_marks (
-                        project_id, group_id, favorite, marked, created_at_ms, updated_at_ms
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-                     ON CONFLICT(project_id, group_id) DO UPDATE SET
-                        favorite = excluded.favorite,
-                        marked = excluded.marked,
-                        updated_at_ms = excluded.updated_at_ms",
-                    params![
-                        target_project_id,
-                        target_group_id,
-                        source_marks.favorite,
-                        source_marks.marked,
-                        now,
-                    ],
-                )?;
-            }
-            transaction.execute(
-                "DELETE FROM asset_groups WHERE project_id = ?1 AND group_id = ?2",
-                params![source_project_id, group_id],
-            )?;
-            transaction.execute(
-                "UPDATE projects SET updated_at_ms = ?1 WHERE project_id IN (?2, ?3)",
-                params![now, source_project_id, target_project_id],
-            )?;
-
-            refresh_group_rollup(&transaction, &target_group_id)?;
-            refresh_duplicate_info(&transaction, source_project_id)?;
-            refresh_duplicate_info(&transaction, target_project_id)?;
-            let moved_group =
-                stored_asset_group_by_id(&transaction, target_project_id, &target_group_id)?
-                    .ok_or_else(|| {
-                        rusqlite::Error::InvalidParameterName(
-                            "moved asset group not found".to_string(),
-                        )
-                    })?;
-            transaction.commit()?;
-            Ok(Some(moved_group))
-        })
-    }
-
     pub fn stored_asset_groups(&self, project_id: &str) -> Result<Vec<StoredAssetGroup>> {
         self.with_read_connection(|connection| {
             stored_asset_groups_for_project(connection, project_id)
+        })
+    }
+
+    pub fn global_asset_summary(&self) -> Result<GlobalAssetSummary> {
+        self.with_read_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT
+                        (SELECT COUNT(*) FROM asset_groups),
+                        (SELECT COUNT(*) FROM assets),
+                        COALESCE((SELECT SUM(size_bytes) FROM assets), 0)",
+                    [],
+                    |row| {
+                        Ok(GlobalAssetSummary {
+                            photo_count: row.get::<_, i64>(0)?.max(0) as usize,
+                            file_count: row.get::<_, i64>(1)?.max(0) as usize,
+                            storage_bytes: row.get::<_, i64>(2)?.max(0) as u64,
+                        })
+                    },
+                )
+                .map_err(Into::into)
         })
     }
 
@@ -1228,17 +1196,17 @@ impl SqliteStore {
         })
     }
 
-    pub fn merge_burst_member(
+    pub fn create_manual_burst_group(
         &self,
-        target_burst_group_id: &str,
-        member_group_id: &str,
+        project_id: &str,
+        member_group_ids: &[String],
     ) -> Result<Option<BurstGroup>> {
         self.with_connection(|connection| {
             let transaction = connection.unchecked_transaction()?;
-            let result = merge_burst_member_for_connection(
+            let result = create_manual_burst_group_for_connection(
                 &transaction,
-                target_burst_group_id,
-                member_group_id,
+                project_id,
+                member_group_ids,
             )?;
             transaction.commit()?;
             Ok(result)
@@ -2602,121 +2570,123 @@ fn split_burst_member_for_connection(
     burst_group_by_id(connection, burst_group_id)
 }
 
-fn merge_burst_member_for_connection(
+fn create_manual_burst_group_for_connection(
     connection: &Connection,
-    target_burst_group_id: &str,
-    member_group_id: &str,
+    project_id: &str,
+    member_group_ids: &[String],
 ) -> std::result::Result<Option<BurstGroup>, rusqlite::Error> {
-    let Some(target_burst) = burst_group_by_id(connection, target_burst_group_id)? else {
-        return Ok(None);
-    };
-    let member_group_id = member_group_id.trim();
-    if member_group_id.is_empty() {
-        return Err(sqlite_data_error("member group id cannot be empty"));
-    }
-    if target_burst
-        .member_group_ids
-        .iter()
-        .any(|group_id| group_id == member_group_id)
-    {
-        return Ok(Some(target_burst));
-    }
-    if stored_asset_group_by_id(connection, &target_burst.project_id, member_group_id)?.is_none() {
-        return Err(sqlite_data_error(
-            "member group not found in target project",
-        ));
-    }
+    ensure_project_exists(connection, project_id)?;
 
-    let source_burst =
-        burst_group_for_member_group(connection, &target_burst.project_id, member_group_id)?;
-    if source_burst
-        .as_ref()
-        .is_some_and(|burst| burst.burst_group_id == target_burst.burst_group_id)
-    {
-        return Ok(Some(target_burst));
-    }
-
-    let mut merged_member_ids = Vec::new();
-    for group_id in target_burst.member_group_ids.iter() {
-        push_unique_string(&mut merged_member_ids, group_id.clone());
-    }
-    if let Some(source_burst) = source_burst.as_ref() {
-        for group_id in source_burst.member_group_ids.iter() {
-            push_unique_string(&mut merged_member_ids, group_id.clone());
+    let mut expanded_member_ids = Vec::new();
+    let mut affected_burst_ids = Vec::new();
+    let mut requested_container_ids = Vec::new();
+    for raw_member_group_id in member_group_ids {
+        let member_group_id = raw_member_group_id.trim();
+        if member_group_id.is_empty() {
+            continue;
         }
-    } else {
-        push_unique_string(&mut merged_member_ids, member_group_id.to_string());
+        if stored_asset_group_by_id(connection, project_id, member_group_id)?.is_none() {
+            return Err(sqlite_data_error(
+                "member group not found in target project",
+            ));
+        }
+        if let Some(source_burst) =
+            burst_group_for_member_group(connection, project_id, member_group_id)?
+        {
+            push_unique_string(
+                &mut requested_container_ids,
+                source_burst.burst_group_id.clone(),
+            );
+            push_unique_string(&mut affected_burst_ids, source_burst.burst_group_id.clone());
+            for source_member_group_id in source_burst.member_group_ids {
+                push_unique_string(&mut expanded_member_ids, source_member_group_id);
+            }
+        } else {
+            push_unique_string(&mut requested_container_ids, member_group_id.to_string());
+            push_unique_string(&mut expanded_member_ids, member_group_id.to_string());
+        }
     }
 
+    if requested_container_ids.len() < 2 || expanded_member_ids.len() < 2 {
+        return Ok(None);
+    }
+
+    let mut stable_member_ids = expanded_member_ids.clone();
+    stable_member_ids.sort();
+    let manual_burst_group_id = format!(
+        "manual-burst-{}",
+        stable_key(&format!("{project_id}\t{}", stable_member_ids.join(",")))
+    );
     let now = current_time_ms();
-    connection.execute(
-        "DELETE FROM selection_recommendations
-         WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
-        params![
-            target_burst.project_id,
-            SelectionRecommendationScope::BurstGroup.as_str(),
-            target_burst.burst_group_id
-        ],
-    )?;
-    if let Some(source_burst) = source_burst.as_ref() {
+
+    let mut cleanup_burst_ids = affected_burst_ids.clone();
+    push_unique_string(&mut cleanup_burst_ids, manual_burst_group_id.clone());
+    for burst_group_id in cleanup_burst_ids.iter() {
         connection.execute(
             "DELETE FROM selection_recommendations
              WHERE project_id = ?1 AND scope = ?2 AND subject_id = ?3",
             params![
-                source_burst.project_id,
+                project_id,
                 SelectionRecommendationScope::BurstGroup.as_str(),
-                source_burst.burst_group_id
+                burst_group_id,
             ],
         )?;
         connection.execute(
             "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
-            params![source_burst.burst_group_id],
+            params![burst_group_id],
         )?;
         connection.execute(
             "DELETE FROM burst_groups WHERE burst_group_id = ?1",
-            params![source_burst.burst_group_id],
-        )?;
-    }
-
-    connection.execute(
-        "DELETE FROM burst_group_members WHERE burst_group_id = ?1",
-        params![target_burst.burst_group_id],
-    )?;
-    for member_group_id in merged_member_ids.iter() {
-        connection.execute(
-            "INSERT INTO burst_group_members (burst_group_id, member_group_id)
-             VALUES (?1, ?2)",
-            params![target_burst.burst_group_id, member_group_id],
+            params![burst_group_id],
         )?;
     }
 
     let mut member_groups = Vec::new();
-    for member_group_id in merged_member_ids.iter() {
-        if let Some(group) =
-            stored_asset_group_by_id(connection, &target_burst.project_id, member_group_id)?
-        {
+    for member_group_id in expanded_member_ids.iter() {
+        if let Some(group) = stored_asset_group_by_id(connection, project_id, member_group_id)? {
             member_groups.push(group);
         }
         connection.execute(
             "DELETE FROM burst_member_manual_edits
              WHERE project_id = ?1 AND member_group_id = ?2
                AND action IN ('split_exclude', 'merge_include')",
-            params![target_burst.project_id, member_group_id],
+            params![project_id, member_group_id],
         )?;
         connection.execute(
             "INSERT INTO burst_member_manual_edits (
                 project_id, member_group_id, action, manual_group_id, created_at_ms
              ) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                target_burst.project_id,
+                project_id,
                 member_group_id,
                 "merge_include",
-                target_burst.burst_group_id,
+                manual_burst_group_id,
                 now,
             ],
         )?;
     }
 
+    member_groups.sort_by(|left, right| {
+        (
+            left.first_capture_at_ms
+                .or(left.first_received_at_ms)
+                .or(Some(left.created_at_ms)),
+            left.display_key.as_str(),
+            left.group_id.as_str(),
+        )
+            .cmp(&(
+                right
+                    .first_capture_at_ms
+                    .or(right.first_received_at_ms)
+                    .or(Some(right.created_at_ms)),
+                right.display_key.as_str(),
+                right.group_id.as_str(),
+            ))
+    });
+    let sorted_member_group_ids = member_groups
+        .iter()
+        .map(|group| group.group_id.clone())
+        .collect::<Vec<_>>();
     let started_at_ms = member_groups
         .iter()
         .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
@@ -2725,32 +2695,23 @@ fn merge_burst_member_for_connection(
         .iter()
         .filter_map(|group| group.first_capture_at_ms.or(group.first_received_at_ms))
         .max();
-    let source_identity =
-        common_burst_source_identity(connection, &target_burst.project_id, &member_groups)?;
-    connection.execute(
-        "UPDATE burst_groups
-         SET source_identity = ?1,
-             started_at_ms = ?2,
-             ended_at_ms = ?3,
-             member_count = ?4,
-             grouping_version = grouping_version + 1,
-             recommendation_status = ?5,
-             manual_grouping_state = ?6,
-             updated_at_ms = ?7
-         WHERE burst_group_id = ?8",
-        params![
-            source_identity,
-            started_at_ms,
-            ended_at_ms,
-            merged_member_ids.len() as i64,
-            SelectionRecommendationStatus::Pending.as_str(),
-            "merge",
-            now,
-            target_burst.burst_group_id,
-        ],
-    )?;
-
-    burst_group_by_id(connection, &target_burst.burst_group_id)
+    let source_identity = common_burst_source_identity(connection, project_id, &member_groups)?;
+    let burst = BurstGroup {
+        burst_group_id: manual_burst_group_id,
+        project_id: project_id.to_string(),
+        source_identity,
+        started_at_ms,
+        ended_at_ms,
+        member_count: sorted_member_group_ids.len(),
+        member_group_ids: sorted_member_group_ids,
+        grouping_version: 1,
+        recommendation_status: SelectionRecommendationStatus::Pending.as_str().to_string(),
+        manual_grouping_state: Some("merge".to_string()),
+        created_at_ms: now,
+        updated_at_ms: now,
+    };
+    insert_burst_group(connection, &burst)?;
+    Ok(Some(burst))
 }
 
 fn burst_group_for_member_group(
@@ -2924,28 +2885,6 @@ fn trailing_sequence_number(value: &str) -> Option<i64> {
         .ok()
 }
 
-fn transfer_ids_for_asset_group(
-    connection: &Connection,
-    project_id: &str,
-    group_id: &str,
-) -> std::result::Result<Vec<String>, rusqlite::Error> {
-    let mut statement = connection.prepare(
-        "SELECT transfer_id
-         FROM assets
-         WHERE project_id = ?1 AND group_id = ?2
-         ORDER BY CASE group_role
-                    WHEN 'jpeg' THEN 0
-                    WHEN 'raw' THEN 1
-                    WHEN 'video' THEN 2
-                    ELSE 3
-                  END ASC,
-                  published_at_ms ASC,
-                  asset_id ASC",
-    )?;
-    let rows = statement.query_map(params![project_id, group_id], |row| row.get(0))?;
-    collect_rows(rows)
-}
-
 fn received_assets_for_group(
     connection: &Connection,
     project_id: &str,
@@ -3005,7 +2944,6 @@ fn initialize_schema(
         PRAGMA wal_autocheckpoint = 1000;
         ",
     )?;
-    reset_incompatible_development_tables(connection)?;
     connection.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -3348,142 +3286,6 @@ fn ensure_wal_mode(
         .expect("sqlite WAL registry should not be poisoned")
         .insert(key);
     Ok(())
-}
-
-fn reset_incompatible_development_tables(
-    connection: &Connection,
-) -> std::result::Result<(), rusqlite::Error> {
-    connection.execute("DROP TABLE IF EXISTS prompt_pack_versions_removed", [])?;
-
-    reset_table_if_missing_columns(
-        connection,
-        "selection_recommendations",
-        &[
-            "recommendation_id",
-            "run_id",
-            "scope",
-            "project_id",
-            "subject_id",
-            "selected_asset_group_ids_json",
-            "candidate_asset_group_ids_json",
-            "rejected_asset_group_ids_json",
-            "source",
-            "status",
-            "confidence",
-            "reason",
-            "created_at_ms",
-            "updated_at_ms",
-        ],
-    )?;
-    reset_table_if_missing_columns(
-        connection,
-        "model_evaluations",
-        &[
-            "evaluation_id",
-            "run_id",
-            "project_id",
-            "asset_group_id",
-            "evaluator_kind",
-            "evaluator_version",
-            "status",
-            "score",
-            "tier",
-            "selectable",
-            "summary",
-            "strengths_json",
-            "weaknesses_json",
-            "technical_warnings_json",
-            "prompt_pack_id",
-            "prompt_pack_version",
-            "prompt_hash",
-            "created_at_ms",
-            "updated_at_ms",
-        ],
-    )?;
-    reset_table_if_missing_columns(
-        connection,
-        "technical_assessments",
-        &[
-            "asset_group_id",
-            "assessor_version",
-            "status",
-            "gate_status",
-            "defect_flags_json",
-            "preview_source",
-            "visual_signature",
-            "analyzed_at_ms",
-        ],
-    )?;
-    reset_table_if_missing_columns(
-        connection,
-        "evaluation_runs",
-        &[
-            "run_id",
-            "project_id",
-            "run_type",
-            "trigger",
-            "status",
-            "provider_kind",
-            "provider_model",
-            "prompt_pack_id",
-            "prompt_pack_version",
-            "prompt_hash",
-            "settings_snapshot_json",
-            "error_message",
-            "started_at_ms",
-            "completed_at_ms",
-            "created_at_ms",
-        ],
-    )?;
-    reset_table_if_missing_columns(
-        connection,
-        "project_evaluation_settings",
-        &[
-            "project_id",
-            "auto_evaluate_on_upload",
-            "auto_burst_recommendation_enabled",
-            "project_recommendation_mode",
-            "prompt_pack_id",
-            "model_provider_settings_id",
-            "scene_profile",
-            "cv_policy",
-            "cv_policy_overrides_json",
-            "allow_risky_model_selects",
-            "max_image_side",
-            "batch_size",
-            "updated_at_ms",
-        ],
-    )
-}
-
-fn reset_table_if_missing_columns(
-    connection: &Connection,
-    table_name: &str,
-    required_columns: &[&str],
-) -> std::result::Result<(), rusqlite::Error> {
-    let columns = table_columns(connection, table_name)?;
-    if columns.is_empty()
-        || required_columns
-            .iter()
-            .all(|column| columns.contains(*column))
-    {
-        return Ok(());
-    }
-    connection.execute(&format!("DROP TABLE IF EXISTS {table_name}"), [])?;
-    Ok(())
-}
-
-fn table_columns(
-    connection: &Connection,
-    table_name: &str,
-) -> std::result::Result<BTreeSet<String>, rusqlite::Error> {
-    let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    let mut columns = BTreeSet::new();
-    for row in rows {
-        columns.insert(row?);
-    }
-    Ok(columns)
 }
 
 fn project_evaluation_settings_for_project(

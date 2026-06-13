@@ -12,12 +12,12 @@ use crate::{
     recommend_selection_with_model_provider, scan_received_asset_groups, AnalysisEntityType,
     AnalysisJob, AnalysisJobType, AssetFormatRole, AssetUserMarks, BurstGroup,
     BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice, CvPolicy, EvaluationRun,
-    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ImportSource, ModelProviderKind,
-    ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob,
-    ObjectFormat, PreviewSample, ProjectEvaluationSettings, ProjectRecommendationMode,
-    ProjectStatus, PromptPack, PromptPackContent, PublishQueueItem, PublishQueueSummary,
-    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
-    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
+    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, ImportSource,
+    ModelProviderKind, ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode,
+    NewAnalysisJob, ObjectFormat, PreviewSample, ProjectEvaluationSettings,
+    ProjectRecommendationMode, ProjectStatus, PromptPack, PromptPackContent, PublishQueueItem,
+    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
+    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
     SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
     SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
     SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TransferRecord,
@@ -213,6 +213,7 @@ pub struct CameraConnectorDashboard {
     pub devices: Vec<ConnectedDeviceView>,
     pub transfers: TransferSummary,
     pub publish_queue: PublishQueueSummary,
+    pub global_assets: GlobalAssetSummary,
     pub recent_failures: Vec<TransferRecordView>,
     pub recent_publish_failures: Vec<PublishQueueFailureView>,
     pub assets: AssetGroupPage,
@@ -324,6 +325,38 @@ impl CameraConnectorService {
             self.save_config(&config)?;
         }
         Ok(archived)
+    }
+
+    pub fn delete_project(&self, project_id: &str) -> Result<bool> {
+        let store = self.storage_store()?;
+        let deleted_assets = store.delete_project(project_id)?;
+        let Some(deleted_assets) = deleted_assets else {
+            return Ok(false);
+        };
+        for asset in &deleted_assets {
+            if let Some(path) = asset
+                .final_location
+                .as_ref()
+                .and_then(StoredObjectLocation::as_local_path)
+            {
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(crate::ImporterError::internal(format!(
+                            "delete asset file failed: {error}"
+                        )));
+                    }
+                }
+            }
+        }
+
+        let mut config = self.load_config()?;
+        if config.active_project_id.as_deref() == Some(project_id) {
+            config.active_project_id = None;
+            self.save_config(&config)?;
+        }
+        Ok(true)
     }
 
     pub fn restore_project(&self, project_id: &str) -> Result<crate::Project> {
@@ -1228,13 +1261,13 @@ impl CameraConnectorService {
             .split_burst_member(burst_group_id, member_group_id)
     }
 
-    pub fn merge_burst_member(
+    pub fn create_manual_burst_group(
         &self,
-        target_burst_group_id: &str,
-        member_group_id: &str,
+        project_id: &str,
+        member_group_ids: &[String],
     ) -> Result<Option<BurstGroup>> {
         self.storage_store()?
-            .merge_burst_member(target_burst_group_id, member_group_id)
+            .create_manual_burst_group(project_id, member_group_ids)
     }
 
     fn provider_configured_for_model_work(&self) -> Result<bool> {
@@ -1444,16 +1477,6 @@ impl CameraConnectorService {
     ) -> Result<AssetUserMarks> {
         self.storage_store()?
             .set_asset_group_user_marks(project_id, group_id, favorite, marked)
-    }
-
-    pub fn move_project_asset_group(
-        &self,
-        source_project_id: &str,
-        group_id: &str,
-        target_project_id: &str,
-    ) -> Result<Option<crate::StoredAssetGroup>> {
-        self.storage_store()?
-            .move_asset_group(source_project_id, group_id, target_project_id)
     }
 
     pub fn delete_project_asset_group(&self, project_id: &str, group_id: &str) -> Result<bool> {
@@ -1705,6 +1728,7 @@ impl CameraConnectorService {
             devices,
             transfers,
             publish_queue: store.publish_queue_summary(project_id)?,
+            global_assets: store.global_asset_summary()?,
             recent_failures: self.project_recent_failed_transfers(project_id, transfer_query, 5)?,
             recent_publish_failures: self.project_recent_publish_failures(project_id, 5)?,
             assets: store.asset_group_page(project_id, asset_query, offset, limit)?,

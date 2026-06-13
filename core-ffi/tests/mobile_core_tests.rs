@@ -973,6 +973,17 @@ fn mobile_core_manages_projects_as_json() {
     let active_after_restore: Value =
         serde_json::from_str(&core.set_active_project_json(project_id.clone()).unwrap()).unwrap();
     assert_eq!(active_after_restore["project_id"], project_id);
+
+    let deleted_json = core.delete_project_json(project_id.clone()).unwrap();
+    let deleted: Value = serde_json::from_str(&deleted_json).unwrap();
+    assert_eq!(deleted["project_id"], project_id);
+    assert_eq!(deleted["deleted"], true);
+    let active_after_delete: Value =
+        serde_json::from_str(&core.active_project_json().unwrap()).unwrap();
+    assert!(active_after_delete.is_null());
+    let listed_after_delete: Value =
+        serde_json::from_str(&core.list_projects_json().unwrap()).unwrap();
+    assert!(listed_after_delete.as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -1051,6 +1062,8 @@ fn mobile_core_returns_project_dashboard_json() {
     let dashboard: Value = serde_json::from_str(&dashboard_json).unwrap();
     assert_eq!(dashboard["assets"]["total_groups"], 0);
     assert_eq!(dashboard["assets"]["limit"], 50);
+    assert_eq!(dashboard["global_assets"]["photo_count"], 0);
+    assert_eq!(dashboard["global_assets"]["storage_bytes"], 0);
     assert_eq!(dashboard["transfers"]["total_count"], 0);
     assert!(dashboard["paths"]["state_dir"]
         .as_str()
@@ -1253,65 +1266,6 @@ fn mobile_core_returns_project_group_assets_json() {
         .unwrap();
     let ambiguous: Value = serde_json::from_str(&ambiguous_json).unwrap();
     assert!(ambiguous.as_array().unwrap().is_empty());
-}
-
-#[test]
-fn mobile_core_moves_project_group_json() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let source_project = service.create_project("Wrong Mobile Project").unwrap();
-    let target_project = service.create_project("Correct Mobile Project").unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:mobile-move-jpg", "DCIM/100/IMG_6101.JPG", 20),
-        )
-        .unwrap();
-    service
-        .record_project_transfer(
-            &source_project.project_id,
-            completed_transfer("ftp:mobile-move-raw", "DCIM/100/IMG_6101.NEF", 21),
-        )
-        .unwrap();
-    let source_page = service
-        .project_asset_group_page_with_query(
-            &source_project.project_id,
-            AssetGroupQuery::default(),
-            0,
-            25,
-        )
-        .unwrap();
-    let group_id = source_page.groups[0].group_id.clone().unwrap();
-    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
-
-    let moved_json = core
-        .move_project_group_json(
-            source_project.project_id.clone(),
-            group_id.clone(),
-            target_project.project_id.clone(),
-        )
-        .unwrap();
-    let source_dashboard: Value = serde_json::from_str(
-        &core
-            .project_dashboard_json(source_project.project_id.clone(), 0, 25)
-            .unwrap(),
-    )
-    .unwrap();
-    let target_dashboard: Value = serde_json::from_str(
-        &core
-            .project_dashboard_json(target_project.project_id.clone(), 0, 25)
-            .unwrap(),
-    )
-    .unwrap();
-
-    let moved: Value = serde_json::from_str(&moved_json).unwrap();
-    assert_eq!(moved["project_id"], target_project.project_id);
-    assert_eq!(moved["display_key"], "IMG_6101");
-    assert_eq!(moved["member_count"], 2);
-    assert_eq!(source_dashboard["assets"]["total_groups"], 0);
-    assert_eq!(target_dashboard["assets"]["total_groups"], 1);
-    assert_eq!(target_dashboard["assets"]["summary"]["asset_count"], 2);
 }
 
 #[test]
@@ -1779,70 +1733,6 @@ fn mobile_core_splits_burst_member_json() {
     assert_eq!(updated["member_count"], 2);
     assert_eq!(updated["recommendation_status"], "pending");
     assert!(split_group.get("burst").is_none());
-}
-
-#[test]
-fn mobile_core_merges_burst_member_json() {
-    let temp = tempfile::tempdir().unwrap();
-    let config_path = temp.path().join("config.json");
-    let service = CameraConnectorService::new(Some(config_path.clone()));
-    let project = service.create_project("Mobile Merge Decision").unwrap();
-    for (transfer_id, path, completed_at_ms) in [
-        ("ftp:merge-a-1", "DCIM/240/IMG_8241.JPG", 1000),
-        ("ftp:merge-a-2", "DCIM/240/IMG_8242.JPG", 1100),
-        ("ftp:merge-b-1", "DCIM/241/IMG_9241.JPG", 5000),
-        ("ftp:merge-b-2", "DCIM/241/IMG_9242.JPG", 5100),
-    ] {
-        service
-            .record_project_transfer(
-                &project.project_id,
-                completed_transfer(transfer_id, path, completed_at_ms),
-            )
-            .unwrap();
-    }
-    let core = MobileCore::new(Some(config_path.to_string_lossy().into_owned()));
-    core.drain_analysis_jobs_json(10).unwrap();
-    let page: Value = serde_json::from_str(
-        &core
-            .project_asset_group_page_json(project.project_id.clone(), "{}".to_string(), 0, 25)
-            .unwrap(),
-    )
-    .unwrap();
-    let target = page["groups"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|group| {
-            group["primary"]["original_path"]
-                .as_str()
-                .map(|path| path.ends_with("IMG_8241.JPG"))
-                .unwrap_or(false)
-        })
-        .expect("target member should exist");
-    let source = page["groups"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|group| {
-            group["primary"]["original_path"]
-                .as_str()
-                .map(|path| path.ends_with("IMG_9241.JPG"))
-                .unwrap_or(false)
-        })
-        .expect("source member should exist");
-    let target_burst_id = target["burst"]["burst_group_id"].as_str().unwrap();
-    let source_group_id = source["group_id"].as_str().unwrap();
-
-    let merged: Value = serde_json::from_str(
-        &core
-            .merge_burst_member_json(target_burst_id.to_string(), source_group_id.to_string())
-            .unwrap(),
-    )
-    .unwrap();
-
-    assert_eq!(merged["member_count"], 4);
-    assert_eq!(merged["recommendation_status"], "pending");
-    assert_eq!(merged["manual_grouping_state"], "merge");
 }
 
 #[test]

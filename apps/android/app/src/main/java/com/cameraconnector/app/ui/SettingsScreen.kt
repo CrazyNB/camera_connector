@@ -4,8 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -66,7 +69,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -85,13 +87,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -114,7 +119,7 @@ import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetQuery
 import com.cameraconnector.app.core.ProjectAssetRole
 import com.cameraconnector.app.core.ModelProviderSettingsUi
-import com.cameraconnector.app.core.PromptProfileUi
+import com.cameraconnector.app.core.PromptPackUi
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
@@ -150,7 +155,7 @@ internal fun SettingsScreen(
     selectedOutputLabel: String?,
     onChooseOutputDirectory: () -> Unit,
     onOpenDiagnostics: () -> Unit,
-    onOpenPromptProfiles: () -> Unit,
+    onOpenPromptPacks: () -> Unit,
     onOpenModelProviders: () -> Unit,
     projectPhotoGridColumnCount: Int,
     onProjectPhotoGridColumnCountChange: (Int) -> Unit,
@@ -163,17 +168,14 @@ internal fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("系统设置", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(4.dp))
-            Text("接收、存储与通知权限", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CompactPageHeader(
+                title = "系统设置",
+                subtitle = "接收、存储与通知权限",
+            )
         }
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         item {
@@ -182,7 +184,7 @@ internal fun SettingsScreen(
         item {
             SettingsMenuRow(
                 title = "诊断日志",
-                subtitle = "\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u53d1\u5e03\u72b6\u6001",
+                subtitle = "\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u5199\u5165\u72b6\u6001",
                 trailing = ">",
                 onClick = onOpenDiagnostics,
             )
@@ -236,7 +238,7 @@ internal fun SettingsScreen(
                 title = "\u63d0\u793a\u8bcd\u914d\u7f6e",
                 subtitle = "评价偏好与风格标签",
                 trailing = ">",
-                onClick = onOpenPromptProfiles,
+                onClick = onOpenPromptPacks,
             )
         }
         if (notificationPermissionRequired && !notificationPermissionGranted) {
@@ -315,27 +317,15 @@ internal fun ModelProviderProfilesScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = ::closeEditorOrScreen) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = if (editorOpen) "返回模型服务列表" else "返回设置",
-                    )
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        when {
-                            creatingProvider -> "新建模型服务"
-                            editingProvider != null -> "编辑模型服务"
-                            else -> "模型服务"
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                }
-                if (!editorOpen) {
+            CompactBackHeader(
+                title = when {
+                    creatingProvider -> "新建模型服务"
+                    editingProvider != null -> "编辑模型服务"
+                    else -> "模型服务"
+                },
+                onBack = ::closeEditorOrScreen,
+                trailing = {
+                    if (!editorOpen) {
                     OutlinedButton(
                         onClick = { creatingProvider = true },
                         enabled = actionInFlight == null,
@@ -343,16 +333,13 @@ internal fun ModelProviderProfilesScreen(
                     ) {
                         Text("新建")
                     }
-                }
-            }
+                    }
+                },
+            )
         }
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         if (editorOpen) {
@@ -409,25 +396,25 @@ internal fun ModelProviderProfilesScreen(
 }
 
 @Composable
-internal fun PromptProfilesScreen(
-    promptProfiles: List<PromptProfileUi>,
+internal fun PromptPacksScreen(
+    promptPacks: List<PromptPackUi>,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onBack: () -> Unit,
     onCreatePromptPackage: () -> Unit,
-    onCreatePromptProfileInPackage: (String) -> Unit,
-    onOpenPromptProfile: (String) -> Unit,
+    onCreatePromptPackInPackage: (String) -> Unit,
+    onOpenPromptPack: (String) -> Unit,
     onDeletePromptPackage: (String) -> Unit,
-    onDeletePromptProfile: (String) -> Unit,
+    onDeletePromptPack: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var collapsedPackages by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    val promptPackages = promptProfiles
+    val promptPackages = promptPacks
         .groupBy { promptPackageFolder(it) }
         .toList()
         .sortedWith(
-            compareBy<Pair<String, List<PromptProfileUi>>> {
+            compareBy<Pair<String, List<PromptPackUi>>> {
                 when (it.first) {
                     "user" -> 0
                     "builtin" -> 2
@@ -442,18 +429,11 @@ internal fun PromptProfilesScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("\u63d0\u793a\u8bcd\u914d\u7f6e", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(4.dp))
-                    Text("按提示词包管理摄影评价偏好", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            CompactBackHeader(
+                title = "\u63d0\u793a\u8bcd\u914d\u7f6e",
+                subtitle = "按提示词包管理摄影评价偏好",
+                onBack = onBack,
+                trailing = {
                 OutlinedButton(
                     onClick = onCreatePromptPackage,
                     enabled = actionInFlight == null,
@@ -463,18 +443,15 @@ internal fun PromptProfilesScreen(
                     Spacer(Modifier.width(6.dp))
                     Text("新建提示词包")
                 }
-            }
+                },
+            )
         }
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
         }
 
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
-        }
-
-        if (promptProfiles.isEmpty()) {
+        if (promptPacks.isEmpty()) {
             item {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -485,12 +462,12 @@ internal fun PromptProfilesScreen(
                 }
             }
         } else {
-            promptPackages.forEach { (packageFolder, profilesInPackage) ->
+            promptPackages.forEach { (packageFolder, packsInPackage) ->
                 val expanded = packageFolder !in collapsedPackages
                 item(key = "package-$packageFolder") {
                     PromptPackageSection(
                         packageFolder = packageFolder,
-                        profiles = profilesInPackage.sortedBy { promptProfileDisplayName(it) },
+                        profiles = packsInPackage.sortedBy { promptPackDisplayName(it) },
                         expanded = expanded,
                         actionInFlight = actionInFlight,
                         onToggle = {
@@ -501,12 +478,12 @@ internal fun PromptProfilesScreen(
                             }
                         },
                         onCreate = {
-                            onCreatePromptProfileInPackage(packageFolder)
+                            onCreatePromptPackInPackage(packageFolder)
                             collapsedPackages = collapsedPackages - packageFolder
                         },
-                        onOpenPromptProfile = onOpenPromptProfile,
+                        onOpenPromptPack = onOpenPromptPack,
                         onDeletePackage = { onDeletePromptPackage(packageFolder) },
-                        onDeletePromptProfile = onDeletePromptProfile,
+                        onDeletePromptPack = onDeletePromptPack,
                     )
                 }
             }
@@ -517,14 +494,14 @@ internal fun PromptProfilesScreen(
 @Composable
 private fun PromptPackageSection(
     packageFolder: String,
-    profiles: List<PromptProfileUi>,
+    profiles: List<PromptPackUi>,
     expanded: Boolean,
     actionInFlight: String?,
     onToggle: () -> Unit,
     onCreate: () -> Unit,
-    onOpenPromptProfile: (String) -> Unit,
+    onOpenPromptPack: (String) -> Unit,
     onDeletePackage: () -> Unit,
-    onDeletePromptProfile: (String) -> Unit,
+    onDeletePromptPack: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isBuiltinPackage = packageFolder == "builtin"
@@ -590,10 +567,10 @@ private fun PromptPackageSection(
                 )
                 Column(Modifier.fillMaxWidth()) {
                     profiles.forEachIndexed { index, profile ->
-                        PromptProfileRow(
+                        PromptPackRow(
                             profile = profile,
-                            onClick = { onOpenPromptProfile(profile.promptProfileId) },
-                            onDelete = { onDeletePromptProfile(profile.promptProfileId) },
+                            onClick = { onOpenPromptPack(profile.promptPackId) },
+                            onDelete = { onDeletePromptPack(profile.promptPackId) },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         if (index != profiles.lastIndex) {
@@ -617,8 +594,8 @@ private fun PromptPackageSection(
 }
 
 @Composable
-private fun PromptProfileRow(
-    profile: PromptProfileUi,
+private fun PromptPackRow(
+    profile: PromptPackUi,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
@@ -632,13 +609,13 @@ private fun PromptProfileRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                promptProfileDisplayName(profile),
+                promptPackDisplayName(profile),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                promptProfileMetaText(profile),
+                promptPackMetaText(profile),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -674,7 +651,7 @@ private fun PromptProfileRow(
     }
 }
 
-private fun promptProfileMetaText(profile: PromptProfileUi): String =
+private fun promptPackMetaText(profile: PromptPackUi): String =
     listOf(
         promptStyleTagsText(profile),
         sceneProfileLabel(profile.sceneProfile),
@@ -682,30 +659,30 @@ private fun promptProfileMetaText(profile: PromptProfileUi): String =
     ).filter { it.isNotBlank() }.distinct().joinToString(" / ")
 
 @Composable
-internal fun PromptProfileEditorScreen(
-    profile: PromptProfileUi?,
+internal fun PromptPackEditorScreen(
+    profile: PromptPackUi?,
     initialDistributionFolder: String,
     actionError: String?,
     actionInFlight: String?,
     onClearActionError: () -> Unit,
     onBack: () -> Unit,
-    onSave: (PromptProfileUi, String, List<String>, String, String, String) -> Unit,
+    onSave: (PromptPackUi, String, List<String>, String, String, String) -> Unit,
     onCreate: (String, List<String>, String, String, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val createMode = profile == null
     val builtInProfile = profile?.builtIn == true
     val editableExistingProfile = !createMode && !builtInProfile
-    var name by remember(profile?.promptProfileId) {
+    var name by remember(profile?.promptPackId) {
         mutableStateOf(
             when {
                 createMode -> ""
-                builtInProfile -> profile.let(::promptProfileDisplayName).let { "自定义 $it" }
-                else -> profile.let(::promptProfileDisplayName)
+                builtInProfile -> profile.let(::promptPackDisplayName).let { "自定义 $it" }
+                else -> profile.let(::promptPackDisplayName)
             },
         )
     }
-    var styleTagsText by remember(profile?.promptProfileId) {
+    var styleTagsText by remember(profile?.promptPackId) {
         mutableStateOf(
             profile?.styleTags
                 ?.filter { it.isNotBlank() }
@@ -713,10 +690,10 @@ internal fun PromptProfileEditorScreen(
                 ?: "通用 均衡",
         )
     }
-    var sceneProfile by remember(profile?.promptProfileId) {
+    var sceneProfile by remember(profile?.promptPackId) {
         mutableStateOf(profile?.sceneProfile?.ifBlank { "general" } ?: "general")
     }
-    var distributionFolder by remember(profile?.promptProfileId, initialDistributionFolder) {
+    var distributionFolder by remember(profile?.promptPackId, initialDistributionFolder) {
         mutableStateOf(
             when {
                 createMode -> initialDistributionFolder
@@ -725,10 +702,10 @@ internal fun PromptProfileEditorScreen(
             },
         )
     }
-    var promptText by remember(profile?.promptProfileId, profile?.sharedPreference, profile?.activePromptText) {
+    var promptText by remember(profile?.promptPackId, profile?.sharedPreference, profile?.activePromptText) {
         mutableStateOf(profile?.sharedPreference ?: profile?.activePromptText.orEmpty())
     }
-    var promptTab by rememberSaveable(profile?.promptProfileId) { mutableStateOf("edit") }
+    var promptTab by rememberSaveable(profile?.promptPackId) { mutableStateOf("edit") }
     val cleanName = name.trim()
     val cleanPrompt = promptText.trim()
     val cleanPackage = distributionFolder.trim()
@@ -747,40 +724,22 @@ internal fun PromptProfileEditorScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "\u8fd4\u56de\u63d0\u793a\u8bcd\u5217\u8868")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        when {
-                            createMode -> "新建提示词"
-                            else -> profile.let(::promptProfileDisplayName)
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        when {
-                            createMode -> "选择提示词包，保存后进入编辑"
-                            builtInProfile -> "内置偏好会复制为全局自定义偏好"
-                            else -> "保存后成为这套全局偏好的新版本"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            CompactBackHeader(
+                title = when {
+                    createMode -> "新建提示词"
+                    else -> profile.let(::promptPackDisplayName)
+                },
+                subtitle = when {
+                    createMode -> "选择提示词包，保存后进入编辑"
+                    builtInProfile -> "内置偏好会复制为全局自定义偏好"
+                    else -> "保存后成为这套全局偏好的新版本"
+                },
+                onBack = onBack,
+            )
         }
 
         actionError?.let { message ->
             item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
         }
 
         if (createMode || builtInProfile || editableExistingProfile) {
@@ -849,7 +808,7 @@ internal fun PromptProfileEditorScreen(
             item {
                 OptionRow(
                     title = "适用场景",
-                    values = listOf("general", "portrait", "action", "landscape", "custom"),
+                    values = projectSceneProfileOptions(),
                     selected = sceneProfile,
                     enabled = actionsEnabled,
                     labelForValue = ::sceneProfileLabel,
@@ -1001,9 +960,11 @@ internal fun ProjectSettingsScreen(
     project: ProjectSummary?,
     providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
-    promptProfiles: List<PromptProfileUi>,
+    promptPacks: List<PromptPackUi>,
     actionError: String?,
     actionInFlight: String?,
+    selectedPanel: ProjectIntelligencePanel?,
+    onSelectedPanelChange: (ProjectIntelligencePanel?) -> Unit,
     onClearActionError: () -> Unit,
     onBack: () -> Unit,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
@@ -1013,37 +974,45 @@ internal fun ProjectSettingsScreen(
 ) {
     val projectSettings = settings ?: project?.let { ProjectEvaluationSettingsUi(projectId = it.id) }
 
+    if (projectSettings != null && selectedPanel != null) {
+        ProjectIntelligencePanelPage(
+            panel = selectedPanel,
+            projectSettings = projectSettings,
+            providerOptions = providerOptions,
+            promptPacks = promptPacks,
+            actionError = actionError,
+            actionInFlight = actionInFlight,
+            actionsEnabled = actionInFlight == null,
+            onClearActionError = onClearActionError,
+            onBack = { onSelectedPanelChange(null) },
+            onSaveSettings = onSaveSettings,
+            onConfigureModelProvider = onConfigureModelProvider,
+            modifier = modifier,
+        )
+        return
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回项目管理")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(project?.name ?: "项目配置", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(4.dp))
-                    Text("\u9879\u76ee\u667a\u80fd\u3001\u573a\u666f\u548c\u4f18\u9009\u7b56\u7565", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        item(key = "project-settings-header") {
+            CompactBackHeader(
+                title = project?.name ?: "项目配置",
+                subtitle = "\u9879\u76ee\u667a\u80fd\u3001\u573a\u666f\u548c\u4f18\u9009\u7b56\u7565",
+                onBack = onBack,
+            )
         }
 
         actionError?.let { message ->
-            item { ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError) }
-        }
-
-        actionInFlight?.let { action ->
-            item { ProcessingCard(action) }
+            item(key = "project-settings-error") {
+                ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError)
+            }
         }
 
         if (projectSettings == null) {
-            item {
+            item(key = "project-settings-missing") {
                 ElementCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         "项目不存在或已被移除",
@@ -1053,15 +1022,21 @@ internal fun ProjectSettingsScreen(
                 }
             }
         } else {
-            item {
+            item(key = "project-scene-settings") {
+                ProjectSceneQuickSettings(
+                    projectSettings = projectSettings,
+                    actionsEnabled = actionInFlight == null,
+                    onSaveSettings = onSaveSettings,
+                )
+            }
+            item(key = "project-intelligence-settings") {
                 ProjectIntelligenceSettingsCard(
                     providerOptions = providerOptions,
                     settings = projectSettings,
-                    promptProfiles = promptProfiles,
+                    promptPacks = promptPacks,
                     actionsEnabled = actionInFlight == null,
-                    onSaveSettings = onSaveSettings,
                     onGenerateProjectRecommendation = onGenerateProjectRecommendation,
-                    onConfigureModelProvider = onConfigureModelProvider,
+                    onOpenPanel = onSelectedPanelChange,
                 )
             }
         }
@@ -1280,9 +1255,9 @@ private fun modelProviderKindLabel(kind: String, fallback: String): String =
         "", "none" -> "\u672a\u914d\u7f6e"
         "openai" -> "OpenAI"
         "custom" -> "\u81ea\u5b9a\u4e49"
-        "mock", "local_stub" -> "本地占位"
+        "mock", "local_stub" -> "\u672c\u5730\u5206\u6790"
         else -> fallback
-            .takeUnless { it.equals("Model provider", ignoreCase = true) }
+            .takeUnless(::isPlaceholderModelProviderLabel)
             ?.ifBlank { kind }
             ?: "模型服务"
     }
@@ -1297,55 +1272,104 @@ private fun modelSendModeLabel(mode: String): String =
 private fun modelProviderOptionLabel(settings: ModelProviderSettingsUi): String =
     listOf(settings.providerLabel, settings.defaultModel)
         .map { it.trim() }
-        .filter { it.isNotBlank() && !it.equals("Model provider", ignoreCase = true) }
+        .filter { it.isNotBlank() && !isPlaceholderModelProviderLabel(it) }
         .joinToString(" · ")
         .ifBlank { settings.settingsId }
+
+private fun isPlaceholderModelProviderLabel(value: String): Boolean {
+    val normalized = value.trim()
+    return normalized.equals("Model provider", ignoreCase = true) || normalized == "模型服务"
+}
+
+@Composable
+private fun ProjectIntelligencePanelPage(
+    panel: ProjectIntelligencePanel,
+    projectSettings: ProjectEvaluationSettingsUi,
+    providerOptions: List<ModelProviderSettingsUi>,
+    promptPacks: List<PromptPackUi>,
+    actionError: String?,
+    actionInFlight: String?,
+    actionsEnabled: Boolean,
+    onClearActionError: () -> Unit,
+    onBack: () -> Unit,
+    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+    onConfigureModelProvider: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val modelOptions = providerOptions
+        .filter { it.configured && it.providerKind != "none" }
+        .distinctBy { it.settingsId }
+    val selectedProviderReady = modelProviderReadyForProject(projectSettings, modelOptions)
+    val selectablePromptPacks = promptPacks
+        .filter { it.enabled && (it.scope.equals("global", ignoreCase = true) || it.projectId == null) }
+        .ifEmpty { promptPacks.filter { it.enabled } }
+    val selectedPrompt = selectablePromptPacks.firstOrNull { it.promptPackId == projectSettings.promptPackId }
+        ?: selectablePromptPacks.firstOrNull()
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "project-intelligence-panel-header-${panel.name}") {
+            CompactBackHeader(
+                title = projectIntelligencePanelTitle(panel),
+                subtitle = projectIntelligencePanelSubtitle(panel),
+                onBack = onBack,
+            )
+        }
+        actionError?.let { message ->
+            item(key = "project-intelligence-panel-error-${panel.name}") {
+                ActionMessageCard(title = "操作失败", message = message, onClose = onClearActionError)
+            }
+        }
+        item(key = "project-intelligence-panel-content-${panel.name}") {
+            ElementCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ProjectIntelligencePanelContent(
+                        panel = panel,
+                        projectSettings = projectSettings,
+                        modelOptions = modelOptions,
+                        selectedProviderReady = selectedProviderReady,
+                        selectedPrompt = selectedPrompt,
+                        promptPacks = selectablePromptPacks,
+                        actionsEnabled = actionsEnabled,
+                        onSaveSettings = onSaveSettings,
+                        onConfigureModelProvider = onConfigureModelProvider,
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun ProjectIntelligenceSettingsCard(
     providerOptions: List<ModelProviderSettingsUi>,
     settings: ProjectEvaluationSettingsUi?,
-    promptProfiles: List<PromptProfileUi>,
+    promptPacks: List<PromptPackUi>,
     actionsEnabled: Boolean,
-    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
     onGenerateProjectRecommendation: () -> Unit,
-    onConfigureModelProvider: () -> Unit,
+    onOpenPanel: (ProjectIntelligencePanel) -> Unit,
 ) {
     val projectSettings = settings ?: ProjectEvaluationSettingsUi(projectId = "")
-    val selectedProviderId = projectSettings.modelProviderSettingsId
     val modelOptions = providerOptions
         .filter { it.configured && it.providerKind != "none" }
         .distinctBy { it.settingsId }
     val selectedProviderReady = modelProviderReadyForProject(projectSettings, modelOptions)
-    val selectablePromptProfiles = promptProfiles
+    val selectablePromptPacks = promptPacks
         .filter { it.enabled && (it.scope.equals("global", ignoreCase = true) || it.projectId == null) }
-        .ifEmpty { promptProfiles.filter { it.enabled } }
-    val selectedPrompt = selectablePromptProfiles.firstOrNull { it.promptProfileId == projectSettings.promptProfileId }
-        ?: selectablePromptProfiles.firstOrNull()
+        .ifEmpty { promptPacks.filter { it.enabled } }
+    val selectedPrompt = selectablePromptPacks.firstOrNull { it.promptPackId == projectSettings.promptPackId }
+        ?: selectablePromptPacks.firstOrNull()
     val recommendationAction = manualProjectRecommendationActionUi(
         providerConfigured = selectedProviderReady,
         settings = projectSettings,
         actionInFlight = !actionsEnabled,
     )
-    var selectedPanel by rememberSaveable(projectSettings.projectId) {
-        mutableStateOf<ProjectIntelligencePanel?>(null)
-    }
-
-    selectedPanel?.let { panel ->
-        ProjectIntelligencePanelCard(
-            panel = panel,
-            projectSettings = projectSettings,
-            modelOptions = modelOptions,
-            selectedProviderReady = selectedProviderReady,
-            selectedPrompt = selectedPrompt,
-            promptProfiles = selectablePromptProfiles,
-            actionsEnabled = actionsEnabled,
-            onBack = { selectedPanel = null },
-            onSaveSettings = onSaveSettings,
-            onConfigureModelProvider = onConfigureModelProvider,
-        )
-        return
-    }
 
     ProjectIntelligenceOverviewCard(
         projectSettings = projectSettings,
@@ -1354,12 +1378,12 @@ private fun ProjectIntelligenceSettingsCard(
         selectedPrompt = selectedPrompt,
         recommendationAction = recommendationAction,
         actionsEnabled = actionsEnabled,
-        onOpenPanel = { selectedPanel = it },
+        onOpenPanel = onOpenPanel,
         onGenerateProjectRecommendation = onGenerateProjectRecommendation,
     )
 }
 
-private enum class ProjectIntelligencePanel {
+internal enum class ProjectIntelligencePanel {
     Model,
     Workflow,
     Scene,
@@ -1371,7 +1395,7 @@ private fun ProjectIntelligenceOverviewCard(
     projectSettings: ProjectEvaluationSettingsUi,
     modelOptions: List<ModelProviderSettingsUi>,
     selectedProviderReady: Boolean,
-    selectedPrompt: PromptProfileUi?,
+    selectedPrompt: PromptPackUi?,
     recommendationAction: ManualProjectRecommendationActionUi,
     actionsEnabled: Boolean,
     onOpenPanel: (ProjectIntelligencePanel) -> Unit,
@@ -1396,13 +1420,13 @@ private fun ProjectIntelligenceOverviewCard(
                 onClick = { onOpenPanel(ProjectIntelligencePanel.Workflow) },
             )
             ProjectIntelligenceMenuRow(
-                title = "场景与技术风险",
-                subtitle = "${sceneProfileLabel(projectSettings.sceneProfile)} · ${cvPolicyLabel(projectSettings.cvPolicy)}",
+                title = "技术风险阈值",
+                subtitle = technicalRiskSummary(projectSettings),
                 onClick = { onOpenPanel(ProjectIntelligencePanel.Scene) },
             )
             ProjectIntelligenceMenuRow(
                 title = "评价提示词",
-                subtitle = selectedPrompt?.let(::promptProfileDisplayName) ?: "未选择",
+                subtitle = selectedPrompt?.let(::promptPackDisplayName) ?: "未选择",
                 warning = selectedPrompt == null,
                 onClick = { onOpenPanel(ProjectIntelligencePanel.Prompt) },
             )
@@ -1415,13 +1439,6 @@ private fun ProjectIntelligenceOverviewCard(
                 shape = elementShape,
             ) {
                 Text(recommendationAction.ctaLabel)
-            }
-            recommendationAction.disabledReason?.let {
-                Text(
-                    it,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
     }
@@ -1460,68 +1477,73 @@ private fun ProjectIntelligenceMenuRow(
 }
 
 @Composable
-private fun ProjectIntelligencePanelCard(
-    panel: ProjectIntelligencePanel,
+private fun ProjectSceneQuickSettings(
     projectSettings: ProjectEvaluationSettingsUi,
-    modelOptions: List<ModelProviderSettingsUi>,
-    selectedProviderReady: Boolean,
-    selectedPrompt: PromptProfileUi?,
-    promptProfiles: List<PromptProfileUi>,
     actionsEnabled: Boolean,
-    onBack: () -> Unit,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
-    onConfigureModelProvider: () -> Unit,
 ) {
     ElementCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回项目智能")
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(projectIntelligencePanelTitle(panel), style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        projectIntelligencePanelSubtitle(panel),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            when (panel) {
-                ProjectIntelligencePanel.Model -> ProjectModelPanel(
-                    projectSettings = projectSettings,
-                    modelOptions = modelOptions,
-                    selectedProviderReady = selectedProviderReady,
-                    actionsEnabled = actionsEnabled,
-                    onSaveSettings = onSaveSettings,
-                    onConfigureModelProvider = onConfigureModelProvider,
-                )
-                ProjectIntelligencePanel.Workflow -> ProjectWorkflowPanel(
-                    projectSettings = projectSettings,
-                    selectedProviderReady = selectedProviderReady,
-                    actionsEnabled = actionsEnabled,
-                    onSaveSettings = onSaveSettings,
-                )
-                ProjectIntelligencePanel.Scene -> ProjectScenePanel(
-                    projectSettings = projectSettings,
-                    actionsEnabled = actionsEnabled,
-                    onSaveSettings = onSaveSettings,
-                )
-                ProjectIntelligencePanel.Prompt -> ProjectPromptPanel(
-                    projectSettings = projectSettings,
-                    selectedPrompt = selectedPrompt,
-                    promptProfiles = promptProfiles,
-                    actionsEnabled = actionsEnabled,
-                    onSaveSettings = onSaveSettings,
-                )
-            }
+            OptionRow(
+                title = "项目场景",
+                values = projectSceneProfileOptions(),
+                selected = projectSettings.sceneProfile,
+                enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+                labelForValue = ::sceneProfileLabel,
+                onSelected = { onSaveSettings(projectSettings.copy(sceneProfile = it)) },
+            )
+            Text(
+                sceneProfileHint(projectSettings.sceneProfile),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
+    }
+}
+
+@Composable
+private fun ProjectIntelligencePanelContent(
+    panel: ProjectIntelligencePanel,
+    projectSettings: ProjectEvaluationSettingsUi,
+    modelOptions: List<ModelProviderSettingsUi>,
+    selectedProviderReady: Boolean,
+    selectedPrompt: PromptPackUi?,
+    promptPacks: List<PromptPackUi>,
+    actionsEnabled: Boolean,
+    onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+    onConfigureModelProvider: () -> Unit,
+) {
+    when (panel) {
+        ProjectIntelligencePanel.Model -> ProjectModelPanel(
+            projectSettings = projectSettings,
+            modelOptions = modelOptions,
+            selectedProviderReady = selectedProviderReady,
+            actionsEnabled = actionsEnabled,
+            onSaveSettings = onSaveSettings,
+            onConfigureModelProvider = onConfigureModelProvider,
+        )
+        ProjectIntelligencePanel.Workflow -> ProjectWorkflowPanel(
+            projectSettings = projectSettings,
+            selectedProviderReady = selectedProviderReady,
+            actionsEnabled = actionsEnabled,
+            onSaveSettings = onSaveSettings,
+            onConfigureModelProvider = onConfigureModelProvider,
+        )
+        ProjectIntelligencePanel.Scene -> ProjectScenePanel(
+            projectSettings = projectSettings,
+            actionsEnabled = actionsEnabled,
+            onSaveSettings = onSaveSettings,
+        )
+        ProjectIntelligencePanel.Prompt -> ProjectPromptPanel(
+            projectSettings = projectSettings,
+            selectedPrompt = selectedPrompt,
+            promptPacks = promptPacks,
+            actionsEnabled = actionsEnabled,
+            onSaveSettings = onSaveSettings,
+        )
     }
 }
 
@@ -1569,25 +1591,82 @@ private fun ProjectWorkflowPanel(
     selectedProviderReady: Boolean,
     actionsEnabled: Boolean,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
+    onConfigureModelProvider: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val showModelMissingMessage = {
+        Toast.makeText(context, "请先配置模型服务", Toast.LENGTH_SHORT).show()
+    }
+    if (!selectedProviderReady) {
+        MissingModelProviderNotice(
+            enabled = actionsEnabled,
+            onConfigureModelProvider = onConfigureModelProvider,
+        )
+    }
     SettingsSwitchRow(
         title = "上传后自动评价",
         checked = projectSettings.autoEvaluateOnUpload,
         enabled = actionsEnabled && selectedProviderReady,
+        onDisabledClick = if (actionsEnabled && !selectedProviderReady) showModelMissingMessage else null,
         onCheckedChange = { onSaveSettings(projectSettings.copy(autoEvaluateOnUpload = it)) },
     )
     SettingsSwitchRow(
         title = "连拍组自动优选",
         checked = projectSettings.autoBurstRecommendationEnabled,
         enabled = actionsEnabled && selectedProviderReady && projectSettings.projectId.isNotBlank(),
+        onDisabledClick = if (actionsEnabled && !selectedProviderReady) showModelMissingMessage else null,
         onCheckedChange = { onSaveSettings(projectSettings.copy(autoBurstRecommendationEnabled = it)) },
     )
     SettingsSwitchRow(
         title = "允许风险照片参与优选",
         checked = projectSettings.allowRiskyModelSelects,
-        enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
+        enabled = actionsEnabled && selectedProviderReady && projectSettings.projectId.isNotBlank(),
+        onDisabledClick = if (actionsEnabled && !selectedProviderReady) showModelMissingMessage else null,
         onCheckedChange = { onSaveSettings(projectSettings.copy(allowRiskyModelSelects = it)) },
     )
+}
+
+@Composable
+private fun MissingModelProviderNotice(
+    enabled: Boolean,
+    onConfigureModelProvider: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = ElementBlue.copy(alpha = 0.08f),
+        shape = elementShape,
+        border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    "需要先配置模型服务",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "自动评价和模型优选会使用当前项目选择的模型。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedButton(
+                onClick = onConfigureModelProvider,
+                enabled = enabled,
+                shape = elementShape,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            ) {
+                Text("去配置", fontSize = 13.sp)
+            }
+        }
+    }
 }
 
 @Composable
@@ -1596,24 +1675,21 @@ private fun ProjectScenePanel(
     actionsEnabled: Boolean,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
 ) {
+    val selectedThresholdMode = selectedCvThresholdMode(projectSettings)
     OptionRow(
-        title = "项目场景",
-        values = listOf("general", "portrait", "action", "landscape", "custom"),
-        selected = projectSettings.sceneProfile,
+        title = "风险阈值",
+        values = listOf("loose", "standard", "strict", "custom"),
+        selected = selectedThresholdMode,
         enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
-        labelForValue = ::sceneProfileLabel,
-        onSelected = { onSaveSettings(projectSettings.copy(sceneProfile = it)) },
-    )
-    OptionRow(
-        title = "技术风险阈值",
-        values = listOf("loose", "standard", "strict"),
-        selected = projectSettings.cvPolicy,
-        enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
-        labelForValue = ::cvPolicyLabel,
-        onSelected = { onSaveSettings(projectSettings.copy(cvPolicy = it)) },
+        labelForValue = ::cvThresholdModeLabel,
+        onSelected = { onSaveSettings(projectSettingsAfterCvThresholdModeSelection(projectSettings, it)) },
     )
     Text(
-        cvPolicyHint(projectSettings.cvPolicy),
+        if (selectedThresholdMode == "custom") {
+            "使用自定义阈值；切回预设会停用自定义值。"
+        } else {
+            cvPolicyHint(projectSettings.cvPolicy)
+        },
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall,
     )
@@ -1627,26 +1703,26 @@ private fun ProjectScenePanel(
 @Composable
 private fun ProjectPromptPanel(
     projectSettings: ProjectEvaluationSettingsUi,
-    selectedPrompt: PromptProfileUi?,
-    promptProfiles: List<PromptProfileUi>,
+    selectedPrompt: PromptPackUi?,
+    promptPacks: List<PromptPackUi>,
     actionsEnabled: Boolean,
     onSaveSettings: (ProjectEvaluationSettingsUi) -> Unit,
 ) {
-    if (promptProfiles.isEmpty()) {
+    if (promptPacks.isEmpty()) {
         Text("还没有可用提示词。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     var collapsedPackages by rememberSaveable(
         projectSettings.projectId,
-        promptProfiles.joinToString("|") { it.promptProfileId },
+        promptPacks.joinToString("|") { it.promptPackId },
     ) {
         mutableStateOf(emptyList<String>())
     }
-    val packages = promptProfiles
+    val packages = promptPacks
         .groupBy { promptPackageFolder(it) }
         .toList()
         .sortedWith(
-            compareBy<Pair<String, List<PromptProfileUi>>> {
+            compareBy<Pair<String, List<PromptPackUi>>> {
                 when (it.first) {
                     "user" -> 0
                     "builtin" -> 2
@@ -1655,11 +1731,11 @@ private fun ProjectPromptPanel(
             }.thenBy { promptPackageLabel(it.first) },
         )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        packages.forEach { (packageFolder, profilesInPackage) ->
+        packages.forEach { (packageFolder, packsInPackage) ->
             val expanded = packageFolder !in collapsedPackages
             PromptSelectionPackageSection(
                 packageFolder = packageFolder,
-                profiles = profilesInPackage.sortedBy { promptProfileDisplayName(it) },
+                profiles = packsInPackage.sortedBy { promptPackDisplayName(it) },
                 selectedPrompt = selectedPrompt,
                 expanded = expanded,
                 enabled = actionsEnabled && projectSettings.projectId.isNotBlank(),
@@ -1671,7 +1747,7 @@ private fun ProjectPromptPanel(
                     }
                 },
                 onSelected = { profile ->
-                    onSaveSettings(projectSettings.copy(promptProfileId = profile.promptProfileId))
+                    onSaveSettings(projectSettings.copy(promptPackId = profile.promptPackId))
                 },
             )
         }
@@ -1681,12 +1757,12 @@ private fun ProjectPromptPanel(
 @Composable
 private fun PromptSelectionPackageSection(
     packageFolder: String,
-    profiles: List<PromptProfileUi>,
-    selectedPrompt: PromptProfileUi?,
+    profiles: List<PromptPackUi>,
+    selectedPrompt: PromptPackUi?,
     expanded: Boolean,
     enabled: Boolean,
     onToggle: () -> Unit,
-    onSelected: (PromptProfileUi) -> Unit,
+    onSelected: (PromptPackUi) -> Unit,
 ) {
     Surface(
         color = ElementControlSurface,
@@ -1732,7 +1808,7 @@ private fun PromptSelectionPackageSection(
                 profiles.forEachIndexed { index, profile ->
                     PromptSelectionRow(
                         profile = profile,
-                        selected = profile.promptProfileId == selectedPrompt?.promptProfileId,
+                        selected = profile.promptPackId == selectedPrompt?.promptPackId,
                         enabled = enabled,
                         onClick = { onSelected(profile) },
                     )
@@ -1751,7 +1827,7 @@ private fun PromptSelectionPackageSection(
 
 @Composable
 private fun PromptSelectionRow(
-    profile: PromptProfileUi,
+    profile: PromptPackUi,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -1767,13 +1843,13 @@ private fun PromptSelectionRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                promptProfileDisplayName(profile),
+                promptPackDisplayName(profile),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                promptProfileMetaText(profile),
+                promptPackMetaText(profile),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1842,7 +1918,7 @@ private fun projectIntelligencePanelTitle(panel: ProjectIntelligencePanel): Stri
     when (panel) {
         ProjectIntelligencePanel.Model -> "模型服务"
         ProjectIntelligencePanel.Workflow -> "自动流程"
-        ProjectIntelligencePanel.Scene -> "场景与技术风险"
+        ProjectIntelligencePanel.Scene -> "技术风险阈值"
         ProjectIntelligencePanel.Prompt -> "评价提示词"
     }
 
@@ -1850,7 +1926,7 @@ private fun projectIntelligencePanelSubtitle(panel: ProjectIntelligencePanel): S
     when (panel) {
         ProjectIntelligencePanel.Model -> "选择当前项目使用的模型配置"
         ProjectIntelligencePanel.Workflow -> "控制上传后评价与连拍优选"
-        ProjectIntelligencePanel.Scene -> "设置项目场景和技术风险阈值"
+        ProjectIntelligencePanel.Scene -> "设置本项目的本地风险检测灵敏度"
         ProjectIntelligencePanel.Prompt -> "选择模型评价使用的摄影偏好"
     }
 
@@ -1861,14 +1937,63 @@ private fun projectWorkflowSummary(settings: ProjectEvaluationSettingsUi): Strin
         "风险参与${if (settings.allowRiskyModelSelects) "开" else "关"}",
     ).joinToString(" · ")
 
+private fun technicalRiskSummary(settings: ProjectEvaluationSettingsUi): String =
+    listOfNotNull(
+        cvPolicyLabel(settings.cvPolicy),
+        if (settings.cvPolicyOverrides != null) "自定义阈值" else null,
+    ).joinToString(" · ")
+
+private fun projectSceneProfileOptions(): List<String> =
+    listOf("general", "portrait", "action", "landscape")
+
+private fun sceneProfileHint(value: String): String =
+    when (value.trim().lowercase()) {
+        "portrait" -> "优先启用人像相关风险判断，并影响模型评价语境。"
+        "action" -> "适合运动、抓拍和动态主体。"
+        "landscape" -> "适合风光、建筑和环境类作品。"
+        else -> "通用摄影场景，适合大多数项目。"
+    }
+
+internal fun selectedCvThresholdMode(settings: ProjectEvaluationSettingsUi): String =
+    if (settings.cvPolicyOverrides != null) {
+        "custom"
+    } else {
+        settings.cvPolicy.ifBlank { "standard" }
+    }
+
+internal fun projectSettingsAfterCvThresholdModeSelection(
+    settings: ProjectEvaluationSettingsUi,
+    selectedMode: String,
+): ProjectEvaluationSettingsUi {
+    val mode = selectedMode.trim().lowercase()
+    if (mode == "custom") {
+        val baseMode = settings.cvPolicy.ifBlank { "standard" }
+        return settings.copy(
+            cvPolicy = baseMode,
+            cvPolicyOverrides = settings.cvPolicyOverrides ?: technicalPolicyForCvPolicy(baseMode),
+        )
+    }
+    val preset = when (mode) {
+        "loose", "standard", "strict" -> mode
+        else -> "standard"
+    }
+    return settings.copy(cvPolicy = preset, cvPolicyOverrides = null)
+}
+
+private fun cvThresholdModeLabel(value: String): String =
+    when (value.trim().lowercase()) {
+        "custom" -> "自定义"
+        else -> cvPolicyLabel(value)
+    }
+
 @Composable
-private fun PromptProfileSelector(
-    selectedPrompt: PromptProfileUi?,
-    promptProfiles: List<PromptProfileUi>,
+private fun PromptPackSelector(
+    selectedPrompt: PromptPackUi?,
+    promptPacks: List<PromptPackUi>,
     expanded: Boolean,
     enabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onSelected: (PromptProfileUi) -> Unit,
+    onSelected: (PromptPackUi) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("评价提示词", style = MaterialTheme.typography.labelLarge)
@@ -1890,13 +2015,13 @@ private fun PromptProfileSelector(
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
-                            selectedPrompt?.let(::promptProfileDisplayName) ?: "未选择提示词",
+                            selectedPrompt?.let(::promptPackDisplayName) ?: "未选择提示词",
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            selectedPrompt?.let(::promptProfileMetaText) ?: "用于模型评价、连拍优选和项目优选",
+                            selectedPrompt?.let(::promptPackMetaText) ?: "用于模型评价、连拍优选和项目优选",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1913,14 +2038,14 @@ private fun PromptProfileSelector(
                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                         thickness = 1.dp,
                     )
-                    promptProfiles.forEachIndexed { index, profile ->
-                        PromptProfileOptionRow(
+                    promptPacks.forEachIndexed { index, profile ->
+                        PromptPackOptionRow(
                             profile = profile,
-                            selected = profile.promptProfileId == selectedPrompt?.promptProfileId,
+                            selected = profile.promptPackId == selectedPrompt?.promptPackId,
                             enabled = enabled,
                             onClick = { onSelected(profile) },
                         )
-                        if (index != promptProfiles.lastIndex) {
+                        if (index != promptPacks.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(start = 14.dp),
                                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
@@ -1935,8 +2060,8 @@ private fun PromptProfileSelector(
 }
 
 @Composable
-private fun PromptProfileOptionRow(
-    profile: PromptProfileUi,
+private fun PromptPackOptionRow(
+    profile: PromptPackUi,
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
@@ -1951,14 +2076,14 @@ private fun PromptProfileOptionRow(
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                promptProfileDisplayName(profile),
+                promptPackDisplayName(profile),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                promptProfileMetaText(profile),
+                promptPackMetaText(profile),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1992,49 +2117,89 @@ private fun CvPolicyAdvancedControls(
     var draftPolicy by remember(projectSettings.projectId, projectSettings.cvPolicy, customPolicy) {
         mutableStateOf(customPolicy ?: basePolicy)
     }
-    SettingsSwitchRow(
-        title = "自定义技术阈值",
-        checked = customPolicy != null,
-        enabled = actionsEnabled,
-        onCheckedChange = { enabled ->
-            val nextPolicy = if (enabled) draftPolicy else null
-            onSaveSettings(projectSettings.copy(cvPolicyOverrides = nextPolicy))
-        },
-    )
+    val controls = cvThresholdControlSpecs(draftPolicy, sceneProfile = projectSettings.sceneProfile)
     if (customPolicy == null) {
         return
     }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            cvThresholdControlSpecs(draftPolicy, sceneProfile = projectSettings.sceneProfile).forEach { control ->
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = ElementControlSurface.copy(alpha = 0.78f),
+        shape = elementShape,
+        border = BorderStroke(1.dp, ElementBorder.copy(alpha = 0.85f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("风险触发灵敏度", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (projectSettings.sceneProfile.trim().equals("portrait", ignoreCase = true)) {
+                            "包含人像闭眼、面部曝光和面部偏色"
+                        } else {
+                            "包含失焦、死黑死白和偏色"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Surface(
+                    color = ElementBlue.copy(alpha = 0.14f),
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.5f)),
+                ) {
+                    Text(
+                        sceneProfileLabel(projectSettings.sceneProfile),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = ElementBlue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            controls.forEachIndexed { index, control ->
                 ThresholdSlider(
                     title = control.title,
                     value = control.sliderValue,
-                    displayPercent = control.displayPercent,
+                    displayLabel = control.displayLabel,
                     description = control.description,
                     enabled = actionsEnabled,
                     onValueChange = {
                         draftPolicy = updateCvThresholdControl(draftPolicy, control.key, it)
                     },
                 )
+                if (index != controls.lastIndex) {
+                    HorizontalDivider(color = ElementBorder.copy(alpha = 0.6f))
+                }
             }
-            CvPolicyCapabilityRows(sceneProfile = projectSettings.sceneProfile)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 OutlinedButton(
                     onClick = {
-                    draftPolicy = basePolicy
-                    onSaveSettings(projectSettings.copy(cvPolicyOverrides = basePolicy))
-                },
-                enabled = actionsEnabled,
-                shape = elementShape,
-            ) {
-                Text("重置")
-            }
-            Button(
-                onClick = { onSaveSettings(projectSettings.copy(cvPolicyOverrides = draftPolicy)) },
-                enabled = actionsEnabled && draftPolicy != customPolicy,
-                shape = elementShape,
-            ) {
-                Text("应用阈值")
+                        draftPolicy = basePolicy
+                        onSaveSettings(projectSettings.copy(cvPolicyOverrides = basePolicy))
+                    },
+                    enabled = actionsEnabled,
+                    modifier = Modifier.weight(1f),
+                    shape = elementShape,
+                ) {
+                    Text("重置预设")
+                }
+                Button(
+                    onClick = { onSaveSettings(projectSettings.copy(cvPolicyOverrides = draftPolicy)) },
+                    enabled = actionsEnabled && draftPolicy != customPolicy,
+                    modifier = Modifier.weight(1f),
+                    shape = elementShape,
+                ) {
+                    Text("应用阈值")
+                }
             }
         }
     }
@@ -2043,6 +2208,8 @@ private fun CvPolicyAdvancedControls(
 internal enum class CvThresholdControlKey {
     BlurHigh,
     Clipping,
+    ShadowClipThreshold,
+    HighlightClipThreshold,
     ColorCast,
     FaceEyes,
     FaceExposure,
@@ -2054,6 +2221,7 @@ internal data class CvThresholdControlSpec(
     val title: String,
     val sliderValue: Double,
     val displayPercent: Int,
+    val displayLabel: String,
     val description: String,
 )
 
@@ -2067,6 +2235,7 @@ internal fun cvThresholdControlSpecs(
             title = "失焦灵敏度",
             sliderValue = blurSensitivity(policy),
             displayPercent = percentLabel(blurSensitivity(policy)),
+            displayLabel = "${percentLabel(blurSensitivity(policy))}%",
             description = blurThresholdDescription(policy),
         ),
         CvThresholdControlSpec(
@@ -2074,13 +2243,31 @@ internal fun cvThresholdControlSpecs(
             title = "死黑/死白灵敏度",
             sliderValue = clippingSensitivity(policy),
             displayPercent = percentLabel(clippingSensitivity(policy)),
+            displayLabel = "${percentLabel(clippingSensitivity(policy))}%",
             description = clippingThresholdDescription(policy),
+        ),
+        CvThresholdControlSpec(
+            key = CvThresholdControlKey.ShadowClipThreshold,
+            title = "\u8fd1\u9ed1\u8fb9\u754c",
+            sliderValue = shadowClipThresholdValue(policy),
+            displayPercent = policy.shadowClipThreshold,
+            displayLabel = "<=${policy.shadowClipThreshold}",
+            description = "\u4eae\u5ea6\u5c0f\u4e8e\u7b49\u4e8e ${policy.shadowClipThreshold} \u7684\u50cf\u7d20\u8ba1\u5165\u6697\u90e8\u6b7b\u9ed1\u3002\u6570\u503c\u8d8a\u4f4e\uff0c\u8bef\u62a5\u8d8a\u5c11\u3002",
+        ),
+        CvThresholdControlSpec(
+            key = CvThresholdControlKey.HighlightClipThreshold,
+            title = "\u8fd1\u767d\u8fb9\u754c",
+            sliderValue = highlightClipThresholdValue(policy),
+            displayPercent = policy.highlightClipThreshold,
+            displayLabel = ">=${policy.highlightClipThreshold}",
+            description = "\u4eae\u5ea6\u5927\u4e8e\u7b49\u4e8e ${policy.highlightClipThreshold} \u7684\u50cf\u7d20\u8ba1\u5165\u9ad8\u5149\u6ea2\u51fa\u3002\u6570\u503c\u8d8a\u9ad8\uff0c\u5224\u5b9a\u8d8a\u4fdd\u5b88\u3002",
         ),
         CvThresholdControlSpec(
             key = CvThresholdControlKey.ColorCast,
             title = "偏色灵敏度",
             sliderValue = colorCastSensitivity(policy),
             displayPercent = percentLabel(colorCastSensitivity(policy)),
+            displayLabel = "${percentLabel(colorCastSensitivity(policy))}%",
             description = colorCastThresholdDescription(policy),
         ),
     )
@@ -2090,6 +2277,7 @@ internal fun cvThresholdControlSpecs(
             title = "闭眼灵敏度",
             sliderValue = faceEyesSensitivity(policy),
             displayPercent = percentLabel(faceEyesSensitivity(policy)),
+            displayLabel = "${percentLabel(faceEyesSensitivity(policy))}%",
             description = faceEyesThresholdDescription(policy),
         )
         controls += CvThresholdControlSpec(
@@ -2097,6 +2285,7 @@ internal fun cvThresholdControlSpecs(
             title = "面部死黑/死白灵敏度",
             sliderValue = faceExposureSensitivity(policy),
             displayPercent = percentLabel(faceExposureSensitivity(policy)),
+            displayLabel = "${percentLabel(faceExposureSensitivity(policy))}%",
             description = faceExposureThresholdDescription(policy),
         )
         controls += CvThresholdControlSpec(
@@ -2104,6 +2293,7 @@ internal fun cvThresholdControlSpecs(
             title = "面部偏色灵敏度",
             sliderValue = faceColorCastSensitivity(policy),
             displayPercent = percentLabel(faceColorCastSensitivity(policy)),
+            displayLabel = "${percentLabel(faceColorCastSensitivity(policy))}%",
             description = faceColorCastThresholdDescription(policy),
         )
     }
@@ -2146,6 +2336,24 @@ internal fun updateCvThresholdControl(
                 ),
             )
         }
+        CvThresholdControlKey.ShadowClipThreshold -> {
+            policy.copy(
+                shadowClipThreshold = denormalize(
+                    value,
+                    SHADOW_CLIP_THRESHOLD_MIN.toDouble(),
+                    SHADOW_CLIP_THRESHOLD_MAX.toDouble(),
+                ).roundToInt().coerceIn(SHADOW_CLIP_THRESHOLD_MIN, SHADOW_CLIP_THRESHOLD_MAX),
+            )
+        }
+        CvThresholdControlKey.HighlightClipThreshold -> {
+            policy.copy(
+                highlightClipThreshold = denormalize(
+                    value,
+                    HIGHLIGHT_CLIP_THRESHOLD_MIN.toDouble(),
+                    HIGHLIGHT_CLIP_THRESHOLD_MAX.toDouble(),
+                ).roundToInt().coerceIn(HIGHLIGHT_CLIP_THRESHOLD_MIN, HIGHLIGHT_CLIP_THRESHOLD_MAX),
+            )
+        }
         CvThresholdControlKey.ColorCast -> {
             val sensitivity = value.coerceIn(0.0, 1.0)
             policy.copy(
@@ -2179,61 +2387,113 @@ internal fun updateCvThresholdControl(
 private fun ThresholdSlider(
     title: String,
     value: Double,
-    displayPercent: Int,
+    displayLabel: String,
     description: String,
     enabled: Boolean,
     onValueChange: (Double) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$displayPercent%", fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Surface(
+                color = ElementBlue.copy(alpha = 0.12f),
+                shape = CircleShape,
+            ) {
+                Text(
+                    displayLabel,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    color = ElementBlue,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange(it.toDouble()) },
+        CompactThresholdSlider(
+            value = value,
             enabled = enabled,
-            valueRange = 0f..1f,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
         )
-        Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        Text(
+            description,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            lineHeight = 16.sp,
+        )
     }
 }
 
 @Composable
-private fun CvPolicyCapabilityRows(sceneProfile: String) {
-    if (sceneProfile.trim().lowercase() != "portrait") {
-        return
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        CapabilityStatusRow(title = "人像专项", status = "已启用人脸/闭眼")
-    }
-}
-
-@Composable
-private fun CapabilityStatusRow(title: String, status: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(
-            color = ElementControlSurface,
-            shape = CircleShape,
-            border = BorderStroke(1.dp, ElementBorder),
-        ) {
-            Text(
-                status,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+private fun CompactThresholdSlider(
+    value: Double,
+    enabled: Boolean,
+    onValueChange: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var widthPx by remember { mutableStateOf(0) }
+    val activeColor = if (enabled) ElementBlue else ElementBlue.copy(alpha = 0.35f)
+    val inactiveColor = ElementBorder.copy(alpha = if (enabled) 0.58f else 0.28f)
+    val thumbColor = if (enabled) ElementBlue else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+    val normalized = value.coerceIn(0.0, 1.0).toFloat()
+    val updateFromX: (Float) -> Unit = { x ->
+        if (enabled && widthPx > 0) {
+            onValueChange((x / widthPx.toFloat()).coerceIn(0f, 1f).toDouble())
         }
+    }
+
+    Canvas(
+        modifier = modifier
+            .height(24.dp)
+            .onSizeChanged { widthPx = it.width }
+            .pointerInput(enabled, widthPx) {
+                detectTapGestures { offset -> updateFromX(offset.x) }
+            }
+            .pointerInput(enabled, widthPx) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    updateFromX(change.position.x)
+                }
+            },
+    ) {
+        val horizontalPadding = 4.dp.toPx()
+        val startX = horizontalPadding
+        val endX = size.width - horizontalPadding
+        val centerY = size.height / 2f
+        val usableWidth = (endX - startX).coerceAtLeast(1f)
+        val activeEndX = startX + usableWidth * normalized
+        val trackStroke = 7.dp.toPx()
+        val thumbStroke = 3.dp.toPx()
+
+        drawLine(
+            color = inactiveColor,
+            start = Offset(startX, centerY),
+            end = Offset(endX, centerY),
+            strokeWidth = trackStroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = activeColor,
+            start = Offset(startX, centerY),
+            end = Offset(activeEndX, centerY),
+            strokeWidth = trackStroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = thumbColor,
+            start = Offset(activeEndX, centerY - 9.dp.toPx()),
+            end = Offset(activeEndX, centerY + 9.dp.toPx()),
+            strokeWidth = thumbStroke,
+            cap = StrokeCap.Round,
+        )
+        drawCircle(
+            color = activeColor,
+            radius = 2.dp.toPx(),
+            center = Offset(endX, centerY),
+        )
     }
 }
 
@@ -2245,6 +2505,10 @@ private const val CLIPPING_HIGH_CONNECTED_MIN = 0.04
 private const val CLIPPING_HIGH_CONNECTED_MAX = 0.30
 private const val CLIPPING_SEVERE_MIN = 0.35
 private const val CLIPPING_SEVERE_MAX = 0.75
+private const val SHADOW_CLIP_THRESHOLD_MIN = 0
+private const val SHADOW_CLIP_THRESHOLD_MAX = 15
+private const val HIGHLIGHT_CLIP_THRESHOLD_MIN = 235
+private const val HIGHLIGHT_CLIP_THRESHOLD_MAX = 255
 private const val COLOR_CAST_HIGH_MIN = 0.28
 private const val COLOR_CAST_HIGH_MAX = 0.65
 private const val COLOR_CAST_SEVERE_MIN = 0.50
@@ -2269,6 +2533,20 @@ private fun clippingSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
         ),
         inverseNormalize(policy.clippingSevereRatio, CLIPPING_SEVERE_MIN, CLIPPING_SEVERE_MAX),
     ).average().coerceIn(0.0, 1.0)
+
+private fun shadowClipThresholdValue(policy: TechnicalAssessmentPolicyUi): Double =
+    normalize(
+        policy.shadowClipThreshold.toDouble(),
+        SHADOW_CLIP_THRESHOLD_MIN.toDouble(),
+        SHADOW_CLIP_THRESHOLD_MAX.toDouble(),
+    )
+
+private fun highlightClipThresholdValue(policy: TechnicalAssessmentPolicyUi): Double =
+    normalize(
+        policy.highlightClipThreshold.toDouble(),
+        HIGHLIGHT_CLIP_THRESHOLD_MIN.toDouble(),
+        HIGHLIGHT_CLIP_THRESHOLD_MAX.toDouble(),
+    )
 
 private fun colorCastSensitivity(policy: TechnicalAssessmentPolicyUi): Double =
     listOf(
@@ -2336,7 +2614,7 @@ private fun technicalPolicyForCvPolicy(value: String): TechnicalAssessmentPolicy
             blurHighEdgeThreshold = 0.09,
             blurHighFrequencyThreshold = 0.09,
             highlightClipThreshold = 250,
-            shadowClipThreshold = 5,
+            shadowClipThreshold = 2,
             clippingHighRatio = 0.18,
             clippingHighConnectedRatio = 0.25,
             clippingSevereRatio = 0.65,
@@ -2353,7 +2631,7 @@ private fun technicalPolicyForCvPolicy(value: String): TechnicalAssessmentPolicy
             blurHighEdgeThreshold = 0.16,
             blurHighFrequencyThreshold = 0.16,
             highlightClipThreshold = 242,
-            shadowClipThreshold = 13,
+            shadowClipThreshold = 8,
             clippingHighRatio = 0.08,
             clippingHighConnectedRatio = 0.12,
             clippingSevereRatio = 0.40,
@@ -2370,7 +2648,7 @@ private fun technicalPolicyForCvPolicy(value: String): TechnicalAssessmentPolicy
             blurHighEdgeThreshold = 0.12,
             blurHighFrequencyThreshold = 0.12,
             highlightClipThreshold = 245,
-            shadowClipThreshold = 10,
+            shadowClipThreshold = 5,
             clippingHighRatio = 0.12,
             clippingHighConnectedRatio = 0.18,
             clippingSevereRatio = 0.50,
@@ -2421,14 +2699,31 @@ private fun SettingsSwitchRow(
     title: String,
     checked: Boolean,
     enabled: Boolean,
+    onDisabledClick: (() -> Unit)? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val rowClickEnabled = enabled || onDisabledClick != null
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = rowClickEnabled) {
+                if (enabled) {
+                    onCheckedChange(!checked)
+                } else {
+                    onDisabledClick?.invoke()
+                }
+            },
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title)
+        Text(
+            title,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }

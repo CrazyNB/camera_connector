@@ -142,11 +142,13 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Proje
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "AccountFilterBar"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "OriginalPathFilterBar"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "SelectedAssetsActionBar"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "MoveSelectedGroupsDialog"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "manualBurstMergeTarget"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "manualBurstSplitTargets"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "coreGateway\.deleteProjectGroup"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "combinedClickable"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "LaunchedEffect\(projectState\.activeProjectId, assetQuery, selectedPhotoCollection\)"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onMoveProjectGroup"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectUiModels.kt" "groupMoveTargets"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onSplitBurstMembers"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "onCreateManualBurstGroup"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" (U @(0x5168,0x90E8,0x8D26,0x53F7))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" (U @(0x5168,0x90E8,0x8DEF,0x5F84))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "SourceFilterBar"
@@ -159,7 +161,8 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Camer
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "compactFallback"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "BackHandler"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "stateDescription"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" ("contentDescription = `"" + (U @(0x7167,0x7247)))
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "contentDescription = listOf"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "\$\{asset\.filename\(\)\}"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\SettingsScreen.kt" (U @(0x0032,0x5217))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\SettingsScreen.kt" (U @(0x0033,0x5217))
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\CameraConnectorApp.kt" "PhotoInfoCard"
@@ -196,7 +199,8 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Photo
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\media\CameraPreviewMedia.kt" "TAG_PHOTOGRAPHIC_SENSITIVITY"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "rememberScrollState"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "verticalScroll"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" (U @(0x52A0,0x8F7D,0x4E2D))
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "previewQuality != PreviewQuality\.Thumbnail && bitmap == null"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "loadCachedPreviewBitmap\(context, previewLocation, PreviewQuality\.Thumbnail\)"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" ("RAW " + (U @(0x9884,0x89C8,0x6682,0x4E0D,0x53EF,0x7528)))
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\media\CameraPreviewMedia.kt" "decodeLargestEmbeddedJpeg"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\media\CameraPreviewMedia.kt" "findEmbeddedJpegRanges"
@@ -225,7 +229,8 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\Accou
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\SettingsScreen.kt" "SettingsScreen"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\ReceiverDefaults.kt" "192\.168\.50\.1"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\ui\ProjectAssetsScreen.kt" "AccountFilterBar"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "DetailLine"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "CompactDetailGrid"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\ui\PhotoDetailScreen.kt" "CompactDetailCell"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "rawPath"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "jpegPath"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "previewLocation"
@@ -262,9 +267,12 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Cor
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "authMode"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "accountCount"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "renameProject"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "moveProjectGroup"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "deleteProjectGroup"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "splitBurstMember"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "createManualBurstGroup"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "ProjectEvaluationSettingsUi"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "ModelProviderSettingsUi"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "PromptPackUi"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGateway.kt" "project-preview|Preview Project|camera01"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "BuildConfig\.USE_NATIVE_CORE"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\CoreGatewayFactory.kt" "NativeCoreGateway"
@@ -277,7 +285,10 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Nat
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" '"state_dir"'
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" '"defer_publish"'
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "renameProjectJson"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "moveProjectGroupJson"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "deleteProjectGroupJson"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "splitBurstMemberJson"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "createManualBurstGroupJson"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "promptPacksForProject"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "modelProviderSettingsJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "projectEvaluationSettingsJson"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeMobileCore.kt" "startReceiverJson"
@@ -285,7 +296,9 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\Nat
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "class NativeCoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "CoreGateway"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.renameProject"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.moveProjectGroup"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.deleteProjectGroup"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.splitBurstMember"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.createManualBurstGroup"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "nativeCore.setAssetGroupUserMarks"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "splitHostAndPort"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\core\NativeCoreGateway.kt" "pollDashboard"
@@ -318,10 +331,10 @@ Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "CameraConnectorReceiver"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "Log\.i"
 Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "Log\.e"
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x76F8,0x673A,0x8FDE,0x63A5,0x5668))
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x6B63,0x5728,0x542F,0x52A8,0x63A5,0x6536,0x670D,0x52A1))
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x505C,0x6B62))
-Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" (U @(0x63A5,0x6536,0x670D,0x52A1,0x72B6,0x6001))
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "setContentTitle"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "setContentText"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "openAppPendingIntent"
+Assert-Contains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" "setOngoing\(true\)"
 Assert-NotContains "apps\android\app\src\main\java\com\cameraconnector\app\service\ReceiverForegroundService.kt" '"Starting receiver"'
 Assert-Contains "apps\android\app\src\main\AndroidManifest.xml" "@string/app_name"
 Assert-Contains "scripts\install_android_debug.ps1" "verify_android_build\.ps1"

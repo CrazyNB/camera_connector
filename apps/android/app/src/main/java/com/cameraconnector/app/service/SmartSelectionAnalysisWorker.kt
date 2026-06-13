@@ -314,7 +314,7 @@ internal fun subjectAssessmentPolicyFromProjectSettings(projectSettings: JSONObj
     val policyJson = projectSettings.optJSONObject("cv_policy_overrides")
         ?: presetTechnicalPolicy(projectSettings.optString("cv_policy").ifBlank { "standard" })
     return SubjectAssessmentPolicy(
-        shadowClipThreshold = policyJson.optInt("shadow_clip_threshold", 10),
+        shadowClipThreshold = policyJson.optInt("shadow_clip_threshold", 5),
         highlightClipThreshold = policyJson.optInt("highlight_clip_threshold", 245),
         eyeOpenWarnThreshold = policyJson.optDouble("face_eye_open_warn_threshold", 0.35),
         faceExposureWarnRatio = policyJson.optDouble("face_exposure_warn_ratio", 0.25),
@@ -325,19 +325,19 @@ internal fun subjectAssessmentPolicyFromProjectSettings(projectSettings: JSONObj
 private fun presetTechnicalPolicy(cvPolicy: String): JSONObject =
     when (cvPolicy.trim().lowercase()) {
         "loose" -> JSONObject()
-            .put("shadow_clip_threshold", 5)
+            .put("shadow_clip_threshold", 2)
             .put("highlight_clip_threshold", 250)
             .put("face_eye_open_warn_threshold", 0.25)
             .put("face_exposure_warn_ratio", 0.35)
             .put("face_color_cast_warn_threshold", 0.55)
         "strict" -> JSONObject()
-            .put("shadow_clip_threshold", 13)
+            .put("shadow_clip_threshold", 8)
             .put("highlight_clip_threshold", 242)
             .put("face_eye_open_warn_threshold", 0.45)
             .put("face_exposure_warn_ratio", 0.16)
             .put("face_color_cast_warn_threshold", 0.32)
         else -> JSONObject()
-            .put("shadow_clip_threshold", 10)
+            .put("shadow_clip_threshold", 5)
             .put("highlight_clip_threshold", 245)
             .put("face_eye_open_warn_threshold", 0.35)
             .put("face_exposure_warn_ratio", 0.25)

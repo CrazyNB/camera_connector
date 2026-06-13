@@ -172,15 +172,11 @@ internal fun DiagnosticsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回设置")
-                }
-                Spacer(Modifier.width(4.dp))
-                Text("诊断日志", style = MaterialTheme.typography.headlineMedium)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text("\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u53d1\u5e03\u72b6\u6001", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CompactBackHeader(
+                title = "诊断日志",
+                subtitle = "\u8fde\u63a5\u3001\u4f20\u8f93\u548c\u5199\u5165\u72b6\u6001",
+                onBack = onBack,
+            )
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

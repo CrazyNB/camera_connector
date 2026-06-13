@@ -220,18 +220,90 @@ internal fun HeaderWithBack(
     subtitle: String,
     onBack: () -> Unit,
 ) {
+    CompactBackHeader(
+        title = title,
+        subtitle = subtitle,
+        onBack = onBack,
+    )
+}
+
+@Composable
+internal fun CompactBackHeader(
+    title: String,
+    subtitle: String? = null,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回")
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Outlined.ArrowBack,
+                contentDescription = "返回",
+                modifier = Modifier.size(22.dp),
+            )
         }
-        Column {
-            Text(title, style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 22.sp,
+                lineHeight = 25.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            subtitle?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                )
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+@Composable
+internal fun CompactPageHeader(
+    title: String,
+    subtitle: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            title,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            fontSize = 24.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        subtitle?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+            )
         }
     }
 }
@@ -251,36 +323,6 @@ internal fun ActionMessageCard(
             Button(onClick = onClose) {
                 Text("关闭")
             }
-        }
-    }
-}
-
-@Composable
-internal fun ProcessingCard(action: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = ElementControlSurface.copy(alpha = 0.9f),
-        contentColor = ElementText,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, ElementBlue.copy(alpha = 0.24f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                color = ElementBlue,
-                strokeWidth = 2.dp,
-            )
-            Text(
-                action,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

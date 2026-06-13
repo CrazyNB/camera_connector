@@ -25,14 +25,14 @@ class DisplayFormattersTest {
             ),
         )
 
-        assertEquals("发布失败 2", label)
+        assertEquals("写入失败 2", label)
     }
 
     @Test
-    fun publishQueueAttentionLabelShowsPendingPublishes() {
+    fun publishQueueAttentionLabelShowsPendingWrites() {
         val label = publishQueueAttentionLabel(PublishQueueState(pendingCount = 2))
 
-        assertEquals("待发布 2", label)
+        assertEquals("待写入 2", label)
     }
 
     @Test

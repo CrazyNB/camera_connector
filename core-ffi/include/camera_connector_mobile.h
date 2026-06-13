@@ -56,6 +56,11 @@ char *camera_connector_mobile_core_archive_project_json(
     const char *project_id
 );
 
+char *camera_connector_mobile_core_delete_project_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id
+);
+
 char *camera_connector_mobile_core_restore_project_json(
     const CameraConnectorMobileCore *core,
     const char *project_id
@@ -82,13 +87,6 @@ char *camera_connector_mobile_core_project_group_assets_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,
     const char *group_id
-);
-
-char *camera_connector_mobile_core_move_project_group_json(
-    const CameraConnectorMobileCore *core,
-    const char *source_project_id,
-    const char *group_id,
-    const char *target_project_id
 );
 
 char *camera_connector_mobile_core_set_asset_group_user_marks_json(
@@ -173,10 +171,9 @@ char *camera_connector_mobile_core_split_burst_member_json(
     const char *member_group_id
 );
 
-char *camera_connector_mobile_core_merge_burst_member_json(
+char *camera_connector_mobile_core_create_manual_burst_group_json(
     const CameraConnectorMobileCore *core,
-    const char *target_burst_group_id,
-    const char *member_group_id
+    const char *request_json
 );
 
 char *camera_connector_mobile_core_model_provider_settings_json(

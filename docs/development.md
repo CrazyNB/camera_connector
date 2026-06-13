@@ -90,7 +90,7 @@ The `devices` output reads current receiver metadata. After the camera logs in a
 Move a RAW/JPEG/video group to another project without touching the published files:
 
 ```powershell
-target\debug\camera-connector.exe project move-group --from project-wrong --group-id group-abc123 --to project-correct
+target\debug\camera-connector.exe project group-assets --project-id project-client --group-id group-abc123
 ```
 
 Validate local ingest without a camera:
@@ -163,7 +163,7 @@ Read the project-scoped dashboard model in one command:
 target\debug\camera-connector.exe dashboard --config C:\Users\hxn\AppData\Roaming\CameraConnector\config.json --project-id project-... --username z5 --limit 50
 ```
 
-Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, project transfer health counts, publish queue health counts, recent failed project transfers, connected devices, asset summary, and paged assets. `dashboard` requires `--project-id`; transfers, publish queue state, and assets always come from the SQLite project model in the configured state directory.
+Dashboard output includes receiver status, config/state/output paths, safe account summaries with current connection state, project transfer health counts, write-queue health counts, recent failed project transfers, connected devices, asset summary, and paged assets. `dashboard` requires `--project-id`; transfers, write-queue state, and assets always come from the SQLite project model in the configured state directory.
 
 Use JSON output for UI shells or automation:
 
@@ -175,7 +175,7 @@ The completed file folder remains flat for predictable export paths. If a camera
 
 Transfer records also expose a virtual display path. With an account device name it looks like `Z5_2/DCIM/100CANON/IMG_1234.CR3`; without a device name the display falls back to the last IP octet, such as `IP-056/DCIM/100CANON/IMG_1234.CR3`. The full IP is still retained in the transfer log for diagnostics.
 
-Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The config file stores receiver defaults such as protocol, bind host, FTP/SFTP ports, optional output/state directories, advertised host, and source name. Camera accounts are stored in the SQLite state database. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `project`, `dashboard`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
+Default CLI config is stored at `%APPDATA%\CameraConnector\config.json` on Windows. The config file stores receiver defaults such as protocol, bind host, FTP port, engineering SFTP validation port, optional output/state directories, advertised host, and source name. Camera accounts are stored in the SQLite state database. If `--state` is not provided, receiver state defaults to a `state` directory beside the config file. Use `--config C:\path\to\config.json` on `account`, `project`, `dashboard`, `receiver-config`, `serve-ftp`, `serve-sftp`, `devices`, and `transfers` to test with an alternate config file.
 
 The CLI is intentionally a thin adapter. Receiver behavior, account configuration, password hashing, config file persistence, receiver lifecycle, transfer logs, connected devices, flat completed-file handling, and asset grouping live in `camera_connector_core`. CLI commands should parse arguments, call `CameraConnectorService`, `CameraConnectorRuntime`, or lower-level core APIs, and print results.
 
