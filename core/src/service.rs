@@ -442,6 +442,7 @@ impl CameraConnectorService {
                 current_time_ms(),
             )?;
             let index = store.record_desktop_scan_files(scan_id, &files, current_time_ms())?;
+            self.rebuild_desktop_scan_bursts(&store, &scan.project_id, &index.group_ids)?;
             self.enqueue_desktop_scan_analysis_jobs(&scan.project_id, &index.group_ids)?;
             let completed = store.update_desktop_scan_run(
                 scan_id,
@@ -1395,6 +1396,20 @@ impl CameraConnectorService {
             }
         }
         Ok(enqueued)
+    }
+
+    fn rebuild_desktop_scan_bursts(
+        &self,
+        store: &SqliteStore,
+        project_id: &str,
+        group_ids: &[String],
+    ) -> Result<()> {
+        let Some(group_id) = group_ids.first() else {
+            return Ok(());
+        };
+        let profile = default_burst_grouping_profile(store)?;
+        let _ = store.detect_bursts_for_asset_group(project_id, group_id, &profile)?;
+        Ok(())
     }
 
     fn provider_configured_for_model_work(&self) -> Result<bool> {

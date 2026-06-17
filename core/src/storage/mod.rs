@@ -5694,7 +5694,7 @@ fn group_role(format: ObjectFormat) -> &'static str {
 fn media_kind(format: ObjectFormat) -> &'static str {
     if format.is_video() {
         "video"
-    } else if format.is_supported_media() {
+    } else if format.is_photo() {
         "photo"
     } else {
         "unknown"

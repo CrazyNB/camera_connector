@@ -18,6 +18,7 @@ $packageName = "com.cameraconnector.app"
 $configPath = Join-Path $root "target\android-emulator-ftp-config.json"
 $seedConfigPath = Join-Path $root "target\android-emulator-ftp-seed-config.json"
 $seedState = Join-Path $root "target\android-emulator-ftp-seed-state"
+$cliExe = Join-Path $root "target\debug\camera-connector.exe"
 $controlForward = "tcp:$HostControlPort"
 $deviceControl = "tcp:2121"
 $androidConfig = "/data/user/0/$packageName/files/camera-connector.json"
@@ -768,7 +769,13 @@ if (Test-Path -LiteralPath $configPath) {
     Remove-Item -LiteralPath $configPath -Force
 }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-settings `
+& cargo build -p camera-connector-cli
+if ($LASTEXITCODE -ne 0) { throw "Failed to build current camera-connector CLI." }
+if (-not (Test-Path -LiteralPath $cliExe -PathType Leaf)) {
+    throw "camera-connector CLI was not built: $cliExe"
+}
+
+& $cliExe receiver-settings `
     --config $seedConfigPath `
     --protocol ftp `
     --bind-host "0.0.0.0" `
@@ -780,10 +787,10 @@ if (Test-Path -LiteralPath $configPath) {
     --source-name $DeviceName | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier seed receiver config." }
 
-& (Join-Path $root "target\debug\camera-connector.exe") account --config $seedConfigPath set --username $Username --password $Password --device-name $DeviceName | Out-Host
+& $cliExe account --config $seedConfigPath set --username $Username --password $Password --device-name $DeviceName | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier account state." }
 
-& (Join-Path $root "target\debug\camera-connector.exe") project --config $seedConfigPath create --name "Real Verify" | Out-Host
+& $cliExe project --config $seedConfigPath create --name "Real Verify" | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "Failed to create verifier project state." }
 
 $seedDatabase = Join-Path $seedState "camera-connector.sqlite3"
@@ -791,7 +798,7 @@ if (-not (Test-Path -LiteralPath $seedDatabase -PathType Leaf)) {
     throw "Verifier seed database was not created: $seedDatabase"
 }
 
-& (Join-Path $root "target\debug\camera-connector.exe") receiver-settings `
+& $cliExe receiver-settings `
     --config $configPath `
     --protocol ftp `
     --bind-host "0.0.0.0" `

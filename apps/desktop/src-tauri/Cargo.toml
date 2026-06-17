@@ -19,7 +19,10 @@ tauri-build.workspace = true
 
 [dependencies]
 camera_connector_core = { path = "../../../core" }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+pico-detect = "0.7.0"
+rawloader = "0.37.1"
 serde.workspace = true
 serde_json.workspace = true
-tauri.workspace = true
+tauri = { workspace = true, features = ["protocol-asset"] }
 tauri-plugin-dialog.workspace = true

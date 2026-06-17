@@ -100,6 +100,55 @@ fn service_scans_folder_and_groups_raw_jpeg_video_by_stem() {
 }
 
 #[test]
+fn service_deletes_desktop_scanned_group_files_and_records() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let config_path = temp_dir.path().join("config.json");
+    let root = temp_dir.path().join("photos");
+    std::fs::create_dir_all(&root).expect("photo root should create");
+    let jpeg = root.join("IMG_2100.JPG");
+    let raw = root.join("IMG_2100.NEF");
+    std::fs::write(&jpeg, [1_u8]).expect("jpeg should write");
+    std::fs::write(&raw, [2_u8]).expect("raw should write");
+
+    let service = CameraConnectorService::new(Some(config_path));
+    let project = service
+        .create_project("Delete Desktop Group")
+        .expect("project should create");
+    let scan = service
+        .create_desktop_project_scan(&project.project_id, &root)
+        .expect("scan should queue");
+    service
+        .run_desktop_project_scan(&scan.scan_id)
+        .expect("scan should complete");
+    let group_id = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("asset page should query")
+        .groups
+        .into_iter()
+        .find(|group| group.group_key == "IMG_2100")
+        .and_then(|group| group.group_id)
+        .expect("group id should exist");
+
+    assert!(service
+        .delete_project_asset_group(&project.project_id, &group_id)
+        .expect("group should delete"));
+
+    assert!(!jpeg.exists());
+    assert!(!raw.exists());
+    assert!(service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("asset page should reload")
+        .groups
+        .is_empty());
+    assert!(service
+        .storage_store()
+        .expect("store should open")
+        .transfer_records(&project.project_id)
+        .expect("transfers should reload")
+        .is_empty());
+}
+
+#[test]
 fn service_flattens_desktop_scan_subfolders_when_grouping_by_stem() {
     let temp_dir = tempfile::tempdir().expect("temp dir should create");
     let config_path = temp_dir.path().join("config.json");
@@ -128,6 +177,40 @@ fn service_flattens_desktop_scan_subfolders_when_grouping_by_stem() {
     assert_eq!(page.groups[0].group_key, "DSC_2125");
     assert!(page.groups[0].jpeg.is_some());
     assert!(page.groups[0].raw.is_some());
+}
+
+#[test]
+fn service_desktop_scan_populates_burst_summaries() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let config_path = temp_dir.path().join("config.json");
+    let root = temp_dir.path().join("photos");
+    std::fs::create_dir_all(&root).expect("photo root should create");
+    std::fs::write(root.join("IMG_5001.JPG"), [1_u8]).expect("first should write");
+    std::fs::write(root.join("IMG_5002.JPG"), [2_u8]).expect("second should write");
+    std::fs::write(root.join("IMG_5003.JPG"), [3_u8]).expect("third should write");
+
+    let service = CameraConnectorService::new(Some(config_path));
+    let project = service
+        .create_project("Desktop Burst Scan")
+        .expect("project should create");
+    let scan = service
+        .create_desktop_project_scan(&project.project_id, &root)
+        .expect("scan should queue");
+    service
+        .run_desktop_project_scan(&scan.scan_id)
+        .expect("scan should run");
+
+    let page = service
+        .project_asset_group_page_with_query(&project.project_id, AssetGroupQuery::default(), 0, 25)
+        .expect("assets should query");
+    let burst_count = page
+        .groups
+        .iter()
+        .filter_map(|group| group.burst.as_ref().map(|burst| burst.member_count))
+        .collect::<Vec<_>>();
+
+    assert_eq!(page.total_groups, 3);
+    assert_eq!(burst_count, vec![3, 3, 3]);
 }
 
 #[test]

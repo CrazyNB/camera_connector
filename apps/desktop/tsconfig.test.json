@@ -7,5 +7,5 @@
     "outDir": ".tmp-test",
     "rootDir": "."
   },
-  "include": ["src/workflow.ts", "test/**/*.ts"]
+  "include": ["src/workflow.ts", "src/virtualGrid.ts", "src/thumbnailScheduler.ts", "src/previewStatus.ts", "src/intelligence.ts", "test/**/*.ts"]
 }

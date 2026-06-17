@@ -1,22 +1,55 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveWorkbenchStage } from "../src/workflow.js";
+import { scanStartBlocker, scanTransferDisplay } from "../src/workflow.js";
 
-test("deriveWorkbenchStage guides the desktop review flow", () => {
+test("scanStartBlocker allows scanning after a folder is selected", () => {
   assert.equal(
-    deriveWorkbenchStage({ hasProject: false, hasRootPath: false, scanPhase: null, groupCount: 0 }),
-    "project",
+    scanStartBlocker({
+      hasProject: true,
+      hasRootPath: true,
+      busy: false,
+      scanPhase: null,
+    }),
+    null,
   );
   assert.equal(
-    deriveWorkbenchStage({ hasProject: true, hasRootPath: false, scanPhase: null, groupCount: 0 }),
-    "folder",
+    scanStartBlocker({
+      hasProject: true,
+      hasRootPath: true,
+      busy: false,
+      scanPhase: "completed",
+    }),
+    null,
   );
   assert.equal(
-    deriveWorkbenchStage({ hasProject: true, hasRootPath: true, scanPhase: "scanning", groupCount: 0 }),
-    "scan",
+    scanStartBlocker({
+      hasProject: true,
+      hasRootPath: true,
+      busy: false,
+      scanPhase: "scanning",
+    }),
+    "active_scan",
   );
-  assert.equal(
-    deriveWorkbenchStage({ hasProject: true, hasRootPath: true, scanPhase: "completed", groupCount: 2 }),
-    "review",
+});
+
+test("scanTransferDisplay keeps current index visible after a failed rescan", () => {
+  assert.deepEqual(
+    scanTransferDisplay({
+      scanPhase: "failed",
+      scanFilesSeen: 0,
+      scanAssetsIndexed: 0,
+      scanGroupsUpdated: 0,
+      scanError: "provider failed",
+      indexedAssetCount: 56,
+      indexedGroupCount: 28,
+    }),
+    {
+      label: "已索引",
+      health: "ready",
+      files: 56,
+      groups: 28,
+      assets: 56,
+      note: "上次重新扫描失败，现有索引仍可使用。",
+    },
   );
 });
