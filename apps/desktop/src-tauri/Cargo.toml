@@ -20,6 +20,7 @@ tauri-build.workspace = true
 [dependencies]
 camera_connector_core = { path = "../../../core" }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
+local-ip-address.workspace = true
 pico-detect = "0.7.0"
 rawloader = "0.37.1"
 reqwest.workspace = true

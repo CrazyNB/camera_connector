@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::net::{Ipv4Addr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::thread;
 use std::time::Duration;
 
@@ -113,9 +113,24 @@ fn discover_one(
 }
 
 fn default_candidate_base_urls() -> Vec<String> {
+    let mut addresses = local_ipv4_addresses();
+    if addresses.is_empty() {
+        if let Some(address) = primary_ipv4_address() {
+            addresses.push(address);
+        }
+    }
+    candidate_base_urls_for_ipv4_addresses(addresses)
+}
+
+fn candidate_base_urls_for_ipv4_addresses(
+    addresses: impl IntoIterator<Item = Ipv4Addr>,
+) -> Vec<String> {
     let mut hosts = BTreeSet::new();
     hosts.insert(Ipv4Addr::LOCALHOST);
-    if let Some(address) = primary_ipv4_address() {
+    for address in addresses {
+        if address.is_loopback() || address.is_unspecified() {
+            continue;
+        }
         let octets = address.octets();
         for host in 1..=254 {
             hosts.insert(Ipv4Addr::new(octets[0], octets[1], octets[2], host));
@@ -125,6 +140,22 @@ fn default_candidate_base_urls() -> Vec<String> {
         .into_iter()
         .map(|host| format!("http://{host}:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"))
         .collect()
+}
+
+fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
+    local_ip_address::list_afinet_netifas()
+        .map(|interfaces| {
+            interfaces
+                .into_iter()
+                .filter_map(|(_, address)| match address {
+                    IpAddr::V4(address) if !address.is_loopback() && !address.is_unspecified() => {
+                        Some(address)
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn primary_ipv4_address() -> Option<Ipv4Addr> {
@@ -165,6 +196,30 @@ mod tests {
         assert!(sources[0]
             .snapshot_url
             .ends_with("/api/s/token-1/project-snapshot"));
+    }
+
+    #[test]
+    fn candidate_base_urls_cover_each_local_ipv4_subnet() {
+        let urls = candidate_base_urls_for_ipv4_addresses([
+            Ipv4Addr::new(192, 168, 1, 12),
+            Ipv4Addr::new(10, 0, 3, 24),
+        ]);
+
+        assert!(urls.contains(&format!(
+            "http://192.168.1.1:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"
+        )));
+        assert!(urls.contains(&format!(
+            "http://192.168.1.254:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"
+        )));
+        assert!(urls.contains(&format!(
+            "http://10.0.3.1:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"
+        )));
+        assert!(urls.contains(&format!(
+            "http://10.0.3.254:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"
+        )));
+        assert!(urls.contains(&format!(
+            "http://127.0.0.1:{LAN_PROJECT_SYNC_DISCOVERY_PORT}"
+        )));
     }
 
     fn serve_discovery_once(body: &'static str) -> String {
