@@ -19,6 +19,8 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
+const val LAN_PROJECT_SYNC_DISCOVERY_PORT = 48217
+
 interface LanShareGateway {
     suspend fun loadAssets(token: String, offset: Int = 0, limit: Int = 2_000): List<ProjectAsset>
     suspend fun setGuestMark(token: String, groupId: String, guestMark: GuestMark?): GuestMark?
@@ -33,6 +35,13 @@ class CoreLanShareGateway(private val coreGateway: CoreGateway) : LanShareGatewa
 }
 
 typealias LanSharePreviewLoader = suspend (token: String, groupId: String, fullQuality: Boolean) -> ByteArray?
+
+data class LanShareDiscoveryInfo(
+    val token: String,
+    val projectName: String,
+    val deviceLabel: String = "Android LAN Share",
+    val platform: String = "android",
+)
 
 data class LanShareRequest(
     val method: String,
@@ -57,6 +66,8 @@ data class LanShareResponse(
 class LanShareRouter(
     private val gateway: LanShareGateway,
     private val previewLoader: LanSharePreviewLoader,
+    private val discoveryInfo: LanShareDiscoveryInfo? = null,
+    private val projectSnapshotLoader: (suspend (token: String) -> List<ProjectAsset>)? = null,
 ) {
     suspend fun handle(request: LanShareRequest): LanShareResponse {
         val segments = request.path.substringBefore('?')
@@ -66,6 +77,13 @@ class LanShareRouter(
         return when {
             request.method == "GET" && segments.size == 2 && segments[0] == "s" ->
                 guestPage(segments[1])
+
+            request.method == "GET" &&
+                segments.size == 3 &&
+                segments[0] == "api" &&
+                segments[1] == "project-sync" &&
+                segments[2] == "discovery" ->
+                discovery()
 
             request.method == "GET" &&
                 segments.size == 4 &&
@@ -540,6 +558,19 @@ class LanShareRouter(
             """.trimIndent(),
         )
 
+    private fun discovery(): LanShareResponse {
+        val info = discoveryInfo
+            ?: return LanShareResponse.json(404, JSONObject().put("error", "discovery_not_available"))
+        return LanShareResponse.json(
+            200,
+            JSONObject()
+                .put("device_label", info.deviceLabel)
+                .put("platform", info.platform)
+                .put("project_name", info.projectName)
+                .put("snapshot_path", "/api/s/${encodePathPart(info.token)}/project-snapshot"),
+        )
+    }
+
     private suspend fun assetList(token: String): LanShareResponse {
         val assets = gateway.loadAssets(token)
         return LanShareResponse.json(
@@ -554,7 +585,7 @@ class LanShareRouter(
     }
 
     private suspend fun projectSnapshot(token: String): LanShareResponse {
-        val assets = gateway.loadAssets(token)
+        val assets = projectSnapshotLoader?.invoke(token) ?: gateway.loadAssets(token)
         return LanShareResponse.json(
             200,
             assets.toProjectSyncSnapshotJson(token, System.currentTimeMillis()),

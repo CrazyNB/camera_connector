@@ -143,6 +143,8 @@ import com.cameraconnector.app.media.loadPhotoMetadata
 import com.cameraconnector.app.media.loadPreviewBitmap
 import com.cameraconnector.app.media.loadPreviewSampleJson
 import com.cameraconnector.app.share.CoreLanShareGateway
+import com.cameraconnector.app.share.LAN_PROJECT_SYNC_DISCOVERY_PORT
+import com.cameraconnector.app.share.LanShareDiscoveryInfo
 import com.cameraconnector.app.share.LanShareHttpServer
 import com.cameraconnector.app.share.LanShareRouter
 import com.cameraconnector.app.storage.AndroidStorageGateway
@@ -385,10 +387,18 @@ internal fun ProjectAssetsScreen(
                                 ?.toJpegBytes(jpegQuality)
                         }
                     },
+                    discoveryInfo = LanShareDiscoveryInfo(
+                        token = session.token,
+                        projectName = activeProject?.name ?: "Android LAN Share",
+                    ),
+                    projectSnapshotLoader = {
+                        coreGateway.loadProjectAssets(ProjectAssetQuery())
+                    },
                 )
                 val server = LanShareHttpServer(router)
                 createdServer = server
-                val port = server.start(0)
+                val port = runCatching { server.start(LAN_PROJECT_SYNC_DISCOVERY_PORT) }
+                    .getOrElse { server.start(0) }
                 Triple(session, server, port)
             }.onSuccess { (session, server, port) ->
                 lanShareServer?.close()

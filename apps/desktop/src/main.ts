@@ -174,6 +174,26 @@ type OriginalPreviewResponse = {
 type ThumbnailQuality = "fast" | "full";
 type PreviewImageQuality = ThumbnailQuality | "original";
 
+type SyncProjectSnapshotResponse = {
+  matched_assets: number;
+  matched_groups: number;
+  applied_user_marks: number;
+  applied_model_evaluations: number;
+  applied_selection_recommendations: number;
+  unresolved_records: number;
+  ambiguous_records: number;
+};
+
+type LanProjectSnapshotSource = {
+  device_label: string;
+  platform: string;
+  project_name: string;
+  snapshot_url: string;
+  base_url: string;
+};
+
+type LanSyncPhase = "idle" | "discovering" | "syncing" | "done" | "failed";
+
 type PreviewImageOptions = {
   maxEdge?: number;
   original?: boolean;
@@ -330,6 +350,10 @@ type AppState = {
   busy: string | null;
   status: string;
   error: string | null;
+  lanSyncPhase: LanSyncPhase;
+  lanSyncSources: LanProjectSnapshotSource[];
+  lanSyncSummary: SyncProjectSnapshotResponse | null;
+  lanSyncError: string | null;
   boardScrollTop: number;
   boardWidth: number;
   assetPageLoading: boolean;
@@ -368,6 +392,10 @@ const state: AppState = {
   busy: null,
   status: "就绪",
   error: null,
+  lanSyncPhase: "idle",
+  lanSyncSources: [],
+  lanSyncSummary: null,
+  lanSyncError: null,
   boardScrollTop: 0,
   boardWidth: 0,
   assetPageLoading: false,
@@ -544,6 +572,12 @@ const api = {
   generateProjectRecommendation(projectId: string): Promise<SelectionRecommendation> {
     return invoke("generate_project_recommendation", { projectId });
   },
+  discoverLanProjectSnapshots(): Promise<LanProjectSnapshotSource[]> {
+    return invoke("discover_lan_project_snapshots", { request: {} });
+  },
+  syncProjectSnapshotFromUrl(projectId: string, snapshotUrl: string): Promise<SyncProjectSnapshotResponse> {
+    return invoke("sync_project_snapshot_from_url", { request: { project_id: projectId, snapshot_url: snapshotUrl } });
+  },
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -562,6 +596,9 @@ async function bootstrap() {
   await listen<boolean>("desktop-scan-finished", async (event) => {
     setStatus(event.payload ? "扫描完成" : "扫描失败");
     await refreshCurrentProject(false);
+    if (event.payload) {
+      await syncLanProjectContextAfterScan();
+    }
   });
   window.addEventListener("resize", () => {
     lastVirtualSignature = "";
@@ -641,6 +678,43 @@ async function refreshCurrentProject(showLoadedStatus = true) {
     state.status = "项目已载入";
   }
   render();
+}
+
+async function syncLanProjectContextAfterScan() {
+  const projectId = state.selectedProjectId;
+  if (!projectId) return;
+  state.lanSyncPhase = "discovering";
+  state.lanSyncError = null;
+  render();
+  try {
+    const sources = await api.discoverLanProjectSnapshots();
+    state.lanSyncSources = sources;
+    const source = sources[0];
+    if (!source) {
+      state.lanSyncPhase = "idle";
+      render();
+      return;
+    }
+
+    state.lanSyncPhase = "syncing";
+    render();
+    const summary = await api.syncProjectSnapshotFromUrl(projectId, source.snapshot_url);
+    state.lanSyncSummary = summary;
+    state.lanSyncPhase = "done";
+    state.status = `project-sync ${summary.matched_groups} groups`;
+    await refreshCurrentProject(false);
+  } catch (error) {
+    state.lanSyncPhase = "failed";
+    state.lanSyncError = errorMessage(error);
+    render();
+  }
+}
+
+function clearLanSyncState() {
+  state.lanSyncPhase = "idle";
+  state.lanSyncSources = [];
+  state.lanSyncSummary = null;
+  state.lanSyncError = null;
 }
 
 async function loadSubjectAssessmentsForGroups(groups: ReceivedAssetGroup[]) {
@@ -781,6 +855,7 @@ async function selectProject(projectId: string) {
     state.groupDetail = [];
     state.providerDraft = null;
     state.promptDraft = null;
+    clearLanSyncState();
     resetBoardViewport();
     await refreshCurrentProject(false);
   });
@@ -824,6 +899,7 @@ async function startScan() {
   const scan = await withBusy("开始扫描", () => api.startProjectScan(projectId, state.rootPath));
   if (scan) {
     state.scan = scan;
+    clearLanSyncState();
     state.selectedGroupId = null;
     state.selectedGroup = null;
     state.groupDetail = [];
@@ -1353,6 +1429,13 @@ function renderPreviewProgressPill() {
 function scanProgressDisplay() {
   const scan = state.scan;
   const summary = state.assetPage?.summary;
+  if (state.lanSyncPhase === "discovering" || state.lanSyncPhase === "syncing") {
+    return {
+      label: state.lanSyncPhase === "discovering" ? "project-sync discovery" : "project-sync match",
+      title: "Matching LAN project context to the current scan index",
+      tone: "working",
+    };
+  }
   if (!scan && !summary?.asset_count) {
     return { label: "扫描待开始", title: "绑定文件夹后开始扫描", tone: "idle" };
   }
@@ -1958,8 +2041,22 @@ function renderTransferPanel() {
     compactMetric("照片组", String(transfer.groups)),
     compactMetric("照片文件", String(transfer.assets)),
   );
+  if (state.lanSyncPhase !== "idle" || state.lanSyncSummary) {
+    append(
+      box,
+      append(
+        el("div", "transfer-title"),
+        el("strong", "", "project-sync"),
+        statusDot(lanSyncTransferDot()),
+        el("span", "", lanSyncTransferLabel()),
+      ),
+    );
+  }
   if (transfer.note) {
     append(box, append(el("div", "transfer-note"), statusDot("missing"), el("span", "", transfer.note)));
+  }
+  if (state.lanSyncError) {
+    append(box, append(el("div", "transfer-note"), statusDot("missing"), el("span", "", compactError(state.lanSyncError) ?? "")));
   }
   return box;
 }
@@ -4242,6 +4339,33 @@ function scanTransferDot(health: string) {
     default:
       return "neutral";
   }
+}
+
+function lanSyncTransferDot() {
+  switch (state.lanSyncPhase) {
+    case "done":
+      return "available";
+    case "discovering":
+    case "syncing":
+      return "changed";
+    case "failed":
+      return "missing";
+    default:
+      return "neutral";
+  }
+}
+
+function lanSyncTransferLabel() {
+  if (state.lanSyncPhase === "discovering") return "discovering";
+  if (state.lanSyncPhase === "syncing") return "matching";
+  if (state.lanSyncPhase === "failed") return "failed";
+  const summary = state.lanSyncSummary;
+  if (!summary) return state.lanSyncSources.length ? `${state.lanSyncSources.length} source` : "no source";
+  const applied =
+    summary.applied_user_marks +
+    summary.applied_model_evaluations +
+    summary.applied_selection_recommendations;
+  return `${summary.matched_groups} matched / ${applied} applied / ${summary.unresolved_records} unresolved`;
 }
 
 function evaluationDot(group: ReceivedAssetGroup) {

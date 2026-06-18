@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
 
+use crate::lan_discovery::{
+    discover_lan_project_snapshot_sources, LanProjectSnapshotDiscoveryRequest,
+    LanProjectSnapshotSource,
+};
 use camera_connector_core::service::AnalysisDrainSummary;
 use camera_connector_core::{
     AssetGroupPage, AssetGroupQuery, BurstGroup, CameraConnectorDashboard, CameraConnectorService,
@@ -1311,6 +1315,17 @@ pub async fn sync_project_snapshot_from_url(
     })
     .await
     .map_err(|error| project_sync_error(format!("project snapshot sync task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn discover_lan_project_snapshots(
+    request: LanProjectSnapshotDiscoveryRequest,
+) -> Result<Vec<LanProjectSnapshotSource>, DesktopError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        discover_lan_project_snapshot_sources(request).map_err(project_sync_error)
+    })
+    .await
+    .map_err(|error| project_sync_error(format!("LAN project discovery task failed: {error}")))?
 }
 
 #[tauri::command]

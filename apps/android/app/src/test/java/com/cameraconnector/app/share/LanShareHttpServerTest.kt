@@ -143,6 +143,69 @@ class LanShareHttpServerTest {
     }
 
     @Test
+    fun discoveryRouteReturnsSnapshotPathForActiveShare() = runBlocking {
+        val router = LanShareRouter(
+            gateway = RecordingShareGateway(),
+            previewLoader = { _, _, _ -> null },
+            discoveryInfo = LanShareDiscoveryInfo(
+                token = "token-1",
+                projectName = "Wedding Selects",
+                deviceLabel = "Android Field Kit",
+            ),
+        )
+
+        val response = router.handle(
+            LanShareRequest(method = "GET", path = "/api/project-sync/discovery"),
+        )
+        val body = JSONObject(response.body.toString(Charsets.UTF_8))
+
+        assertEquals(200, response.status)
+        assertEquals("Android Field Kit", body.getString("device_label"))
+        assertEquals("android", body.getString("platform"))
+        assertEquals("Wedding Selects", body.getString("project_name"))
+        assertEquals("/api/s/token-1/project-snapshot", body.getString("snapshot_path"))
+    }
+
+    @Test
+    fun projectSnapshotRouteCanUseProjectLevelLoaderInsteadOfShareSubset() = runBlocking {
+        val gateway = RecordingShareGateway(
+            assets = listOf(
+                ProjectAsset(
+                    id = "share-only",
+                    displayPath = "SHARE_ONLY.JPG",
+                    format = "Jpeg",
+                    receivedAt = "10",
+                ),
+            ),
+        )
+        val router = LanShareRouter(
+            gateway = gateway,
+            previewLoader = { _, _, _ -> null },
+            projectSnapshotLoader = {
+                listOf(
+                    ProjectAsset(
+                        id = "project-wide",
+                        displayPath = "PROJECT_WIDE.JPG",
+                        format = "Jpeg",
+                        receivedAt = "11",
+                    ),
+                )
+            },
+        )
+
+        val response = router.handle(
+            LanShareRequest(method = "GET", path = "/api/s/token-1/project-snapshot"),
+        )
+        val asset = JSONObject(response.body.toString(Charsets.UTF_8))
+            .getJSONArray("assets")
+            .getJSONObject(0)
+
+        assertEquals(200, response.status)
+        assertEquals("project-wide", asset.getString("group_id"))
+        assertEquals("PROJECT_WIDE.JPG", asset.getString("original_filename"))
+    }
+
+    @Test
     fun guestPageIncludesRunnableClientApp() = runBlocking {
         val router = LanShareRouter(
             gateway = RecordingShareGateway(),
