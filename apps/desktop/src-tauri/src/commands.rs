@@ -245,6 +245,12 @@ pub struct SyncProjectSnapshotRequest {
     pub snapshot_path: PathBuf,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncProjectSnapshotUrlRequest {
+    pub project_id: String,
+    pub snapshot_url: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncProjectSnapshotResponse {
     pub matched_assets: usize,
@@ -286,6 +292,13 @@ fn desktop_error(error: camera_connector_core::ImporterError) -> DesktopError {
 fn thumbnail_error(message: impl Into<String>) -> DesktopError {
     DesktopError {
         code: "thumbnail".to_string(),
+        message: message.into(),
+    }
+}
+
+fn project_sync_error(message: impl Into<String>) -> DesktopError {
+    DesktopError {
+        code: "project_sync".to_string(),
         message: message.into(),
     }
 }
@@ -1251,6 +1264,29 @@ fn sync_project_snapshot_from_path_blocking(
         .map_err(desktop_error)
 }
 
+fn sync_project_snapshot_from_url_blocking(
+    service: &CameraConnectorService,
+    request: SyncProjectSnapshotUrlRequest,
+) -> Result<SyncProjectSnapshotResponse, DesktopError> {
+    let response = reqwest::blocking::get(&request.snapshot_url)
+        .map_err(|error| project_sync_error(format!("project snapshot request failed: {error}")))?;
+    if !response.status().is_success() {
+        return Err(project_sync_error(format!(
+            "project snapshot request returned HTTP {}",
+            response.status()
+        )));
+    }
+    let raw = response.text().map_err(|error| {
+        project_sync_error(format!("project snapshot body could not be read: {error}"))
+    })?;
+    let snapshot =
+        camera_connector_core::parse_project_sync_snapshot_json(&raw).map_err(desktop_error)?;
+    service
+        .sync_project_snapshot(&request.project_id, &snapshot)
+        .map(SyncProjectSnapshotResponse::from)
+        .map_err(desktop_error)
+}
+
 #[tauri::command]
 pub async fn sync_project_snapshot_from_path(
     state: State<'_, DesktopState>,
@@ -1262,6 +1298,19 @@ pub async fn sync_project_snapshot_from_path(
     })
     .await
     .map_err(|error| thumbnail_error(format!("project snapshot sync task failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn sync_project_snapshot_from_url(
+    state: State<'_, DesktopState>,
+    request: SyncProjectSnapshotUrlRequest,
+) -> Result<SyncProjectSnapshotResponse, DesktopError> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sync_project_snapshot_from_url_blocking(&service, request)
+    })
+    .await
+    .map_err(|error| project_sync_error(format!("project snapshot sync task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -2512,6 +2561,79 @@ mod tests {
     }
 
     #[test]
+    fn sync_project_snapshot_from_url_fetches_snapshot_and_returns_compact_counts() {
+        let temp_dir = unique_temp_dir("desktop-project-sync-snapshot-url");
+        fs::create_dir_all(&temp_dir).expect("temp dir should create");
+        let root = temp_dir.join("photos");
+        fs::create_dir_all(&root).expect("photo root should create");
+        fs::write(root.join("IMG_5200.JPG"), [1_u8, 2, 3, 4]).expect("jpeg should write");
+
+        let service = CameraConnectorService::new(Some(temp_dir.join("config.json")));
+        let project = service
+            .create_project("Desktop Snapshot URL Sync")
+            .expect("project should create");
+        let scan = service
+            .create_desktop_project_scan(&project.project_id, &root)
+            .expect("scan should queue");
+        service
+            .run_desktop_project_scan(&scan.scan_id)
+            .expect("scan should complete");
+
+        let snapshot = r#"{
+          "schema_version": 1,
+          "source_device": {"device_id": "phone", "device_label": "Phone", "platform": "android"},
+          "project": {"project_id": "phone-project", "name": "Phone Project", "exported_at_ms": 1781800000000},
+          "assets": [{
+            "asset_id": "remote-asset",
+            "group_id": "remote-group",
+            "original_filename": "IMG_5200.JPG",
+            "final_filename": "IMG_5200.JPG",
+            "normalized_stem": "IMG_5200",
+            "original_path": "Android/DCIM/IMG_5200.JPG",
+            "original_parent_path": "Android/DCIM",
+            "format": "jpeg",
+            "size_bytes": 4,
+            "capture_at_ms": null,
+            "received_at_ms": null,
+            "source_identity": null
+          }],
+          "groups": [{
+            "group_id": "remote-group",
+            "display_key": "IMG_5200",
+            "source_identity": null,
+            "original_parent_path": "Android/DCIM",
+            "member_asset_ids": ["remote-asset"],
+            "primary_asset_id": "remote-asset",
+            "preview_asset_id": "remote-asset",
+            "has_raw": false,
+            "has_jpeg": true,
+            "has_video": false
+          }],
+          "model_evaluations": [],
+          "selection_recommendations": [],
+          "user_marks": [{"group_id": "remote-group", "favorite": true, "marked": null}]
+        }"#;
+        let url = serve_once(snapshot);
+
+        let response = sync_project_snapshot_from_url_blocking(
+            &service,
+            SyncProjectSnapshotUrlRequest {
+                project_id: project.project_id,
+                snapshot_url: url,
+            },
+        )
+        .expect("snapshot URL sync should return counts");
+
+        assert_eq!(response.matched_assets, 1);
+        assert_eq!(response.matched_groups, 1);
+        assert_eq!(response.applied_user_marks, 1);
+        assert_eq!(response.unresolved_records, 0);
+        assert_eq!(response.ambiguous_records, 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     fn analyze_face_region_uses_project_clip_thresholds() {
         let image = ImageBuffer::from_fn(2, 1, |x, _y| {
             if x == 0 {
@@ -2688,6 +2810,26 @@ mod tests {
 
     fn unique_temp_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("{name}-{}", current_time_ms()))
+    }
+
+    fn serve_once(body: &'static str) -> String {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("test HTTP listener should bind");
+        let url = format!("http://{}/project-snapshot", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("test HTTP request should arrive");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("test HTTP response should write");
+        });
+        url
     }
 
     fn stored_cv_asset(

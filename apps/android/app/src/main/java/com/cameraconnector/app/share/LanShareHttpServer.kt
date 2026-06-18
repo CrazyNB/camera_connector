@@ -75,6 +75,13 @@ class LanShareRouter(
                 assetList(segments[2])
 
             request.method == "GET" &&
+                segments.size == 4 &&
+                segments[0] == "api" &&
+                segments[1] == "s" &&
+                segments[3] == "project-snapshot" ->
+                projectSnapshot(segments[2])
+
+            request.method == "GET" &&
                 segments.size == 5 &&
                 segments[0] == "api" &&
                 segments[1] == "s" &&
@@ -546,6 +553,14 @@ class LanShareRouter(
         )
     }
 
+    private suspend fun projectSnapshot(token: String): LanShareResponse {
+        val assets = gateway.loadAssets(token)
+        return LanShareResponse.json(
+            200,
+            assets.toProjectSyncSnapshotJson(token, System.currentTimeMillis()),
+        )
+    }
+
     private suspend fun preview(token: String, groupId: String, fullQuality: Boolean): LanShareResponse {
         val bytes = previewLoader(token, groupId, fullQuality)
             ?: return LanShareResponse.json(404, JSONObject().put("error", "preview_not_found"))
@@ -632,6 +647,143 @@ private fun ProjectAsset.toLanShareJson(token: String): JSONObject =
                 .put("marked", userMarks.marked),
         )
     }
+
+private fun List<ProjectAsset>.toProjectSyncSnapshotJson(token: String, exportedAtMs: Long): JSONObject {
+    val snapshotAssets = JSONArray()
+    val snapshotGroups = JSONArray()
+    val userMarks = JSONArray()
+    val modelEvaluations = JSONArray()
+    val candidateGroupIds = JSONArray()
+    val selectedGroupIds = JSONArray()
+
+    forEach { asset ->
+        val groupId = asset.id.ifBlank { asset.groupKey.ifBlank { asset.displayPath } }
+        val assetId = "$groupId:primary"
+        val path = asset.originalPath?.takeIf { it.isNotBlank() } ?: asset.displayPath
+        val filename = lastPathPart(path).ifBlank { lastPathPart(asset.displayPath).ifBlank { groupId } }
+        val normalizedStem = normalizedStem(filename).ifBlank { normalizedStem(groupId) }
+        val receivedAtMs = asset.receivedAt.toLongOrNull()
+        val sourceIdentity = asset.displaySource ?: asset.username
+
+        snapshotAssets.put(
+            JSONObject()
+                .put("asset_id", assetId)
+                .put("group_id", groupId)
+                .put("original_filename", filename)
+                .put("final_filename", lastPathPart(asset.displayPath).ifBlank { filename })
+                .put("normalized_stem", normalizedStem)
+                .put("original_path", path)
+                .put("original_parent_path", parentPath(path))
+                .put("format", asset.format.lowercase())
+                .put("size_bytes", asset.sizeBytes ?: 0L)
+                .put("capture_at_ms", JSONObject.NULL)
+                .put("received_at_ms", receivedAtMs ?: JSONObject.NULL)
+                .put("source_identity", sourceIdentity ?: JSONObject.NULL),
+        )
+        snapshotGroups.put(
+            JSONObject()
+                .put("group_id", groupId)
+                .put("display_key", asset.groupKey.ifBlank { normalizedStem })
+                .put("source_identity", sourceIdentity ?: JSONObject.NULL)
+                .put("original_parent_path", parentPath(path))
+                .put("member_asset_ids", JSONArray().put(assetId))
+                .put("primary_asset_id", assetId)
+                .put("preview_asset_id", assetId)
+                .put("has_raw", asset.hasRaw)
+                .put("has_jpeg", asset.hasJpeg)
+                .put("has_video", asset.hasVideo),
+        )
+
+        if (asset.userMarks.favorite || asset.userMarks.marked) {
+            userMarks.put(
+                JSONObject()
+                    .put("group_id", groupId)
+                    .put("favorite", asset.userMarks.favorite)
+                    .put("marked", asset.userMarks.marked),
+            )
+        }
+
+        if (asset.modelScore != null) {
+            modelEvaluations.put(
+                JSONObject()
+                    .put("evaluation_id", "lan-share:$groupId")
+                    .put("group_id", groupId)
+                    .put("evaluator_version", asset.modelEvaluatorKind ?: "android-lan-share")
+                    .put("status", asset.modelStatus ?: "ready")
+                    .put("score", asset.modelScore)
+                    .put("tier", asset.modelTier ?: "")
+                    .put("selectable", asset.isModelSelect)
+                    .put("summary", asset.modelSummary ?: "")
+                    .put("strengths", JSONArray())
+                    .put("weaknesses", JSONArray())
+                    .put("technical_warnings", JSONArray())
+                    .put("prompt_pack_id", JSONObject.NULL)
+                    .put("prompt_pack_version", JSONObject.NULL)
+                    .put("prompt_hash", JSONObject.NULL)
+                    .put("created_at_ms", receivedAtMs ?: exportedAtMs)
+                    .put("updated_at_ms", receivedAtMs ?: exportedAtMs),
+            )
+        }
+
+        candidateGroupIds.put(groupId)
+        if (asset.isModelSelect) {
+            selectedGroupIds.put(groupId)
+        }
+    }
+
+    val recommendations = if (selectedGroupIds.length() > 0) {
+        JSONArray().put(
+            JSONObject()
+                .put("recommendation_id", "lan-share:model-select")
+                .put("scope", "project")
+                .put("subject_group_id", JSONObject.NULL)
+                .put("selected_group_ids", selectedGroupIds)
+                .put("candidate_group_ids", candidateGroupIds)
+                .put("rejected_group_ids", JSONArray())
+                .put("status", "ready")
+                .put("confidence", 1.0)
+                .put("reason", "Imported Android model selections")
+                .put("created_at_ms", exportedAtMs)
+                .put("updated_at_ms", exportedAtMs),
+        )
+    } else {
+        JSONArray()
+    }
+
+    return JSONObject()
+        .put("schema_version", 1)
+        .put(
+            "source_device",
+            JSONObject()
+                .put("device_id", "lan-share:$token")
+                .put("device_label", "Android LAN Share")
+                .put("platform", "android"),
+        )
+        .put(
+            "project",
+            JSONObject()
+                .put("project_id", "lan-share:$token")
+                .put("name", "Android LAN Share")
+                .put("exported_at_ms", exportedAtMs),
+        )
+        .put("assets", snapshotAssets)
+        .put("groups", snapshotGroups)
+        .put("model_evaluations", modelEvaluations)
+        .put("selection_recommendations", recommendations)
+        .put("user_marks", userMarks)
+}
+
+private fun lastPathPart(value: String): String =
+    value.trim().replace('\\', '/').substringAfterLast('/')
+
+private fun parentPath(value: String): Any {
+    val normalized = value.trim().replace('\\', '/')
+    val parent = normalized.substringBeforeLast('/', missingDelimiterValue = "")
+    return parent.takeIf { it.isNotBlank() } ?: JSONObject.NULL
+}
+
+private fun normalizedStem(value: String): String =
+    lastPathPart(value).substringBeforeLast('.', missingDelimiterValue = lastPathPart(value)).lowercase()
 
 private fun guestMarkFromWire(value: String): GuestMark? =
     when (value.trim().lowercase()) {

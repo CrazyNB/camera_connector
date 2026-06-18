@@ -25,6 +25,7 @@ pub fn run() {
             commands::delete_project_asset_group,
             commands::save_group_user_marks,
             commands::sync_project_snapshot_from_path,
+            commands::sync_project_snapshot_from_url,
             commands::get_model_provider_settings_list,
             commands::save_model_provider_settings,
             commands::delete_model_provider_settings,

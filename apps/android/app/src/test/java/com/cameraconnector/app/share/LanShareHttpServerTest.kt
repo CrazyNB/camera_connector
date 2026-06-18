@@ -84,6 +84,65 @@ class LanShareHttpServerTest {
     }
 
     @Test
+    fun projectSnapshotRouteReturnsPathIndependentSyncIndex() = runBlocking {
+        val gateway = RecordingShareGateway(
+            assets = listOf(
+                ProjectAsset(
+                    id = "group-1",
+                    groupKey = "IMG_1001",
+                    displayPath = "Pictures/exports/IMG_1001.JPG",
+                    format = "Jpeg",
+                    receivedAt = "1781000001000",
+                    displaySource = "phone-a",
+                    originalPath = "content://media/external/images/media/1001/IMG_1001.JPG",
+                    sizeBytes = 4,
+                    hasJpeg = true,
+                    modelStatus = "ready",
+                    modelScore = 88,
+                    modelTier = "excellent",
+                    modelEvaluatorKind = "android-model-v1",
+                    modelSummary = "sharp subject",
+                    isModelSelect = true,
+                    userMarks = ProjectAssetUserMarks(favorite = true, marked = true),
+                ),
+            ),
+        )
+        val router = LanShareRouter(
+            gateway = gateway,
+            previewLoader = { _, _, _ -> null },
+        )
+
+        val response = router.handle(
+            LanShareRequest(method = "GET", path = "/api/s/token-1/project-snapshot"),
+        )
+        val body = JSONObject(response.body.toString(Charsets.UTF_8))
+        val asset = body.getJSONArray("assets").getJSONObject(0)
+        val group = body.getJSONArray("groups").getJSONObject(0)
+        val evaluation = body.getJSONArray("model_evaluations").getJSONObject(0)
+        val recommendation = body.getJSONArray("selection_recommendations").getJSONObject(0)
+        val marks = body.getJSONArray("user_marks").getJSONObject(0)
+
+        assertEquals(200, response.status)
+        assertEquals(1, body.getInt("schema_version"))
+        assertEquals("android", body.getJSONObject("source_device").getString("platform"))
+        assertEquals("lan-share:token-1", body.getJSONObject("project").getString("project_id"))
+        assertEquals("group-1:primary", asset.getString("asset_id"))
+        assertEquals("group-1", asset.getString("group_id"))
+        assertEquals("IMG_1001.JPG", asset.getString("original_filename"))
+        assertEquals("img_1001", asset.getString("normalized_stem"))
+        assertEquals("jpeg", asset.getString("format"))
+        assertEquals(4L, asset.getLong("size_bytes"))
+        assertEquals("phone-a", asset.getString("source_identity"))
+        assertEquals("IMG_1001", group.getString("display_key"))
+        assertEquals("group-1:primary", group.getJSONArray("member_asset_ids").getString(0))
+        assertEquals(true, marks.getBoolean("favorite"))
+        assertEquals(true, marks.getBoolean("marked"))
+        assertEquals(88, evaluation.getInt("score"))
+        assertEquals("android-model-v1", evaluation.getString("evaluator_version"))
+        assertEquals("group-1", recommendation.getJSONArray("selected_group_ids").getString(0))
+    }
+
+    @Test
     fun guestPageIncludesRunnableClientApp() = runBlocking {
         val router = LanShareRouter(
             gateway = RecordingShareGateway(),
