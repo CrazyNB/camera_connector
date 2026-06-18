@@ -20,6 +20,10 @@ export function shouldRequestFullPreview(format: string, original: boolean) {
   return FULL_THUMBNAIL_FORMATS.has(token) || (original && RAW_THUMBNAIL_FORMATS.has(token));
 }
 
+export function shouldRequestOriginalPreview(format: string) {
+  return RAW_THUMBNAIL_FORMATS.has(mediaFormatToken(format));
+}
+
 function mediaFormatToken(format: string) {
   return format.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }

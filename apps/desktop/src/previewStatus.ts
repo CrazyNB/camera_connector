@@ -2,7 +2,7 @@ export type PreviewStage = "idle" | "queued" | "loading" | "fast" | "full" | "or
 
 export type PreviewBadge = {
   label: string;
-  tone: "waiting" | "working" | "low" | "high" | "failed" | "empty";
+  tone: "waiting" | "working" | "low" | "high" | "original" | "failed" | "empty";
   title: string;
 };
 
@@ -26,7 +26,7 @@ export function previewBadge(stage: PreviewStage): PreviewBadge {
     case "full":
       return { label: "高清", tone: "high", title: "高清预览已就绪" };
     case "original":
-      return { label: "原图", tone: "high", title: "正在使用原图预览" };
+      return { label: "原图", tone: "original", title: "正在使用原图预览" };
     case "failed":
       return { label: "失败", tone: "failed", title: "预览生成失败" };
     case "idle":

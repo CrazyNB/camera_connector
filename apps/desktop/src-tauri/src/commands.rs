@@ -49,6 +49,11 @@ pub struct ThumbnailRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct OriginalPreviewRequest {
+    pub source_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ThumbnailBatchRequest {
     pub source_paths: Vec<String>,
     pub max_edge: Option<u32>,
@@ -82,6 +87,13 @@ pub struct ThumbnailResponse {
     pub path: String,
     pub cached: bool,
     pub quality: ThumbnailQuality,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OriginalPreviewResponse {
+    pub path: String,
+    pub cached: bool,
+    pub direct_source: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -450,6 +462,19 @@ pub async fn get_asset_thumbnail(
 }
 
 #[tauri::command]
+pub async fn get_asset_original_preview(
+    state: State<'_, DesktopState>,
+    request: OriginalPreviewRequest,
+) -> Result<OriginalPreviewResponse, DesktopError> {
+    let state_dir = state.service.storage_state_dir().map_err(desktop_error)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        get_asset_original_preview_blocking(state_dir, request)
+    })
+    .await
+    .map_err(|error| thumbnail_error(format!("original preview task failed: {error}")))?
+}
+
+#[tauri::command]
 pub async fn get_asset_thumbnails(
     state: State<'_, DesktopState>,
     request: ThumbnailBatchRequest,
@@ -499,7 +524,7 @@ fn get_asset_thumbnail_blocking(
         return Err(thumbnail_error("source image is not a file"));
     }
 
-    let max_edge = request.max_edge.unwrap_or(512).clamp(160, 1024);
+    let max_edge = request.max_edge.unwrap_or(512).clamp(160, 1280);
     let quality = request.quality.unwrap_or_default();
     let cache_dir = state_dir
         .join("thumb-cache")
@@ -523,6 +548,52 @@ fn get_asset_thumbnail_blocking(
         path: output_path.to_string_lossy().into_owned(),
         cached: false,
         quality,
+    })
+}
+
+fn get_asset_original_preview_blocking(
+    state_dir: PathBuf,
+    request: OriginalPreviewRequest,
+) -> Result<OriginalPreviewResponse, DesktopError> {
+    let source_path = PathBuf::from(request.source_path);
+    let metadata = fs::metadata(&source_path)
+        .map_err(|error| thumbnail_error(format!("source image is not readable: {error}")))?;
+    if !metadata.is_file() {
+        return Err(thumbnail_error("source image is not a file"));
+    }
+
+    if is_browser_original_extension(&source_path) {
+        return Ok(OriginalPreviewResponse {
+            path: source_path.to_string_lossy().into_owned(),
+            cached: true,
+            direct_source: true,
+        });
+    }
+
+    let cache_dir = state_dir.join("preview-cache").join("v1").join("original");
+    fs::create_dir_all(&cache_dir).map_err(|error| {
+        thumbnail_error(format!("original preview cache could not be created: {error}"))
+    })?;
+    let cache_key = original_preview_cache_key(&source_path, &metadata);
+    let output_path = cache_dir.join(format!("{cache_key}.jpg"));
+    if output_path.is_file() {
+        return Ok(OriginalPreviewResponse {
+            path: output_path.to_string_lossy().into_owned(),
+            cached: true,
+            direct_source: false,
+        });
+    }
+
+    let mut image = if is_raw_extension(&source_path) {
+        raw_thumbnail_image_from_file(&source_path)?
+    } else {
+        decoded_image_from_file(&source_path)?
+    };
+    write_original_preview_image(&mut image, &output_path)?;
+    Ok(OriginalPreviewResponse {
+        path: output_path.to_string_lossy().into_owned(),
+        cached: false,
+        direct_source: false,
     })
 }
 
@@ -1383,6 +1454,24 @@ fn thumbnail_cache_key(source_path: &Path, metadata: &fs::Metadata, max_edge: u3
     format!("{:016x}", hasher.finish())
 }
 
+fn original_preview_cache_key(source_path: &Path, metadata: &fs::Metadata) -> String {
+    let canonical_path = source_path
+        .canonicalize()
+        .unwrap_or_else(|_| source_path.to_path_buf());
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let mut hasher = DefaultHasher::new();
+    canonical_path.to_string_lossy().hash(&mut hasher);
+    metadata.len().hash(&mut hasher);
+    modified_at.hash(&mut hasher);
+    "original-preview-v1".hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 fn write_thumbnail_with_quality(
     source_path: &Path,
     output_path: &Path,
@@ -1401,6 +1490,11 @@ fn write_thumbnail_with_quality(
         }
     }
 
+    let mut image = decoded_image_from_file(source_path)?;
+    write_thumbnail_image(&mut image, output_path, max_edge)
+}
+
+fn decoded_image_from_file(source_path: &Path) -> Result<DynamicImage, DesktopError> {
     let mut decoder = ImageReader::open(source_path)
         .map_err(|error| thumbnail_error(format!("source image could not be opened: {error}")))?
         .with_guessed_format()
@@ -1416,16 +1510,10 @@ fn write_thumbnail_with_quality(
             "source image orientation could not be read: {error}"
         ))
     })?;
-    let mut image = match quality {
-        ThumbnailQuality::Fast => DynamicImage::from_decoder(decoder).map_err(|error| {
-            thumbnail_error(format!("source image could not be decoded: {error}"))
-        })?,
-        ThumbnailQuality::Full => DynamicImage::from_decoder(decoder).map_err(|error| {
-            thumbnail_error(format!("source image could not be decoded: {error}"))
-        })?,
-    };
+    let mut image = DynamicImage::from_decoder(decoder)
+        .map_err(|error| thumbnail_error(format!("source image could not be decoded: {error}")))?;
     image.apply_orientation(orientation);
-    write_thumbnail_image(&mut image, output_path, max_edge)
+    Ok(image)
 }
 
 fn write_thumbnail_image(
@@ -1453,6 +1541,37 @@ fn write_thumbnail_image(
             fs::copy(&temporary_path, output_path).map_err(|copy_error| {
                 thumbnail_error(format!(
                     "thumbnail file could not be stored: {copy_error}; rename failed with {rename_error}"
+                ))
+            })?;
+            let _ = fs::remove_file(&temporary_path);
+            Ok(())
+        }
+    }
+}
+
+fn write_original_preview_image(
+    image: &mut DynamicImage,
+    output_path: &Path,
+) -> Result<(), DesktopError> {
+    let temporary_path = output_path.with_extension(format!("jpg.{}.tmp", current_time_ms()));
+    let file = File::create(&temporary_path).map_err(|error| {
+        thumbnail_error(format!("original preview file could not be created: {error}"))
+    })?;
+    let mut writer = BufWriter::new(file);
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 90);
+    encoder
+        .encode_image(image)
+        .map_err(|error| thumbnail_error(format!("original preview could not be encoded: {error}")))?;
+    writer.flush().map_err(|error| {
+        thumbnail_error(format!("original preview file could not be flushed: {error}"))
+    })?;
+    drop(writer);
+    match fs::rename(&temporary_path, output_path) {
+        Ok(()) => Ok(()),
+        Err(rename_error) => {
+            fs::copy(&temporary_path, output_path).map_err(|copy_error| {
+                thumbnail_error(format!(
+                    "original preview file could not be stored: {copy_error}; rename failed with {rename_error}"
                 ))
             })?;
             let _ = fs::remove_file(&temporary_path);
@@ -1714,6 +1833,17 @@ fn is_raw_extension(source_path: &Path) -> bool {
             .map(|extension| extension.to_ascii_lowercase())
             .as_deref(),
         Some("nef" | "nrw" | "cr2" | "cr3" | "arw" | "raf" | "rw2" | "orf" | "pef" | "dng")
+    )
+}
+
+fn is_browser_original_extension(source_path: &Path) -> bool {
+    matches!(
+        source_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+            .as_deref(),
+        Some("jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp")
     )
 }
 
@@ -2060,6 +2190,65 @@ mod tests {
             center[0] > center[2],
             "full thumbnail should be generated from the red source image, got rgb {center:?}"
         );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn thumbnail_request_allows_1280_edge() {
+        let temp_dir = unique_temp_dir("desktop-thumbnail-1280-edge");
+        fs::create_dir_all(&temp_dir).expect("temp dir should create");
+        let source_path = temp_dir.join("source.jpg");
+        fs::write(&source_path, encode_solid_jpeg(1600, 900, [220, 12, 8]))
+            .expect("source should write");
+
+        let response = get_asset_thumbnail_blocking(
+            temp_dir.clone(),
+            ThumbnailRequest {
+                source_path: source_path.to_string_lossy().into_owned(),
+                max_edge: Some(1280),
+                quality: Some(ThumbnailQuality::Full),
+            },
+        )
+        .expect("thumbnail should write");
+
+        let thumbnail = image::open(response.path).expect("thumbnail should decode");
+        assert_eq!(thumbnail.dimensions(), (1280, 720));
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn original_preview_reuses_browser_decodable_source() {
+        let temp_dir = unique_temp_dir("desktop-original-preview-source");
+        fs::create_dir_all(&temp_dir).expect("temp dir should create");
+        let source_path = temp_dir.join("source.jpg");
+        fs::write(&source_path, encode_solid_jpeg(80, 60, [220, 12, 8]))
+            .expect("source should write");
+
+        let response = get_asset_original_preview_blocking(
+            temp_dir.clone(),
+            OriginalPreviewRequest {
+                source_path: source_path.to_string_lossy().into_owned(),
+            },
+        )
+        .expect("browser original should return source path");
+
+        assert_eq!(PathBuf::from(response.path), source_path);
+        assert!(response.direct_source);
+        assert!(response.cached);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn write_original_preview_image_does_not_apply_thumbnail_clamp() {
+        let temp_dir = unique_temp_dir("desktop-original-preview-large");
+        fs::create_dir_all(&temp_dir).expect("temp dir should create");
+        let output_path = temp_dir.join("original.jpg");
+        let mut image = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(1600, 900, Rgb([10, 20, 30])));
+
+        write_original_preview_image(&mut image, &output_path).expect("original preview should write");
+
+        let output = image::open(&output_path).expect("original preview should decode");
+        assert_eq!(output.dimensions(), (1600, 900));
         let _ = fs::remove_dir_all(temp_dir);
     }
 

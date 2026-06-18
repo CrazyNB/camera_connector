@@ -17,6 +17,7 @@ pub fn run() {
             commands::get_scan_status,
             commands::get_project_asset_page,
             commands::get_asset_thumbnail,
+            commands::get_asset_original_preview,
             commands::get_asset_thumbnails,
             commands::get_project_group_detail,
             commands::run_desktop_cv_assessment,

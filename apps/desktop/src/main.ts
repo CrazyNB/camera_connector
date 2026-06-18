@@ -10,12 +10,28 @@ import { collapseBurstGroups } from "./burstDisplay";
 import {
   isBrowserPreviewFormat,
   isPreviewableFormat,
+  shouldRequestOriginalPreview,
   shouldRequestFullPreview,
   supportsFullThumbnailFormat,
 } from "./mediaPreview";
 import { fullThumbnailConcurrency } from "./thumbnailScheduler";
+import { shouldApplyPreviewSync, type PreviewSyncQuality } from "./previewSync";
 import { visibleGridWindow, type VisibleGridWindow } from "./virtualGrid";
-import { adjacentViewerGroup, viewerCurrentGroup, viewerGroupIdentity, viewerQueueWindow } from "./viewerMode";
+import {
+  adjacentViewerGroup,
+  dragViewerTransform,
+  resetViewerTransform,
+  shouldPreserveViewerTransformForSelection,
+  toggleViewerDoubleClickZoom,
+  type ViewerTransform,
+  viewerBurstWarmWindow,
+  viewerCarryoverSource,
+  viewerCurrentGroup,
+  viewerGroupIdentity,
+  viewerQueueWindow,
+  zoomViewerTransformAtPoint,
+} from "./viewerMode";
+import { containedImageRect, normalizedContainedImagePoint } from "./imageViewport";
 import {
   intelligenceSetupState,
   intelligenceStatusLabel,
@@ -149,12 +165,23 @@ type ThumbnailResponse = {
   quality?: ThumbnailQuality;
 };
 
+type OriginalPreviewResponse = {
+  path: string;
+  cached: boolean;
+  direct_source: boolean;
+};
+
 type ThumbnailQuality = "fast" | "full";
+type PreviewImageQuality = ThumbnailQuality | "original";
 
 type PreviewImageOptions = {
   maxEdge?: number;
   original?: boolean;
   eager?: boolean;
+};
+
+type SelectGroupOptions = {
+  preserveViewerTransform?: boolean;
 };
 
 type ThumbnailBatchItem = {
@@ -266,6 +293,10 @@ type LoupeState = {
   startedAtMs: number;
 };
 
+type ViewerCarryoverImage = {
+  url: string;
+};
+
 type AppState = {
   projects: Project[];
   selectedProjectId: string | null;
@@ -291,6 +322,8 @@ type AppState = {
   viewFilter: ViewFilter;
   layoutMode: LayoutMode;
   thumbSize: number;
+  viewerTransform: ViewerTransform;
+  viewerCarryoverImage: ViewerCarryoverImage | null;
   viewerInspectorOpen: boolean;
   viewerFilmstripCollapsed: boolean;
   loupe: LoupeState | null;
@@ -327,6 +360,8 @@ const state: AppState = {
   viewFilter: "light-table",
   layoutMode: "grid",
   thumbSize: 320,
+  viewerTransform: resetViewerTransform(),
+  viewerCarryoverImage: null,
   viewerInspectorOpen: false,
   viewerFilmstripCollapsed: false,
   loupe: null,
@@ -343,10 +378,11 @@ const LOUPE_SHOW_DELAY_MS = 1000;
 const LOUPE_EDGE_PAD = 0.12;
 const GRID_GAP = 12;
 const VIRTUAL_OVERSCAN_ROWS = 2;
-const THUMBNAIL_MIN_EDGE = 320;
-const THUMBNAIL_MAX_EDGE = 640;
-const VIEWER_PREVIEW_MAX_EDGE = 1024;
+const THUMBNAIL_MIN_EDGE = 640;
+const THUMBNAIL_MAX_EDGE = 1280;
+const VIEWER_PREVIEW_MAX_EDGE = 1280;
 const THUMBNAIL_CONCURRENCY = 3;
+const ORIGINAL_PREVIEW_CONCURRENCY = 4;
 const THUMBNAIL_PREFETCH_ROWS = 3;
 const THUMBNAIL_INITIAL_WARMUP_LIMIT = 48;
 const THUMBNAIL_PAGE_WARMUP_LIMIT = 24;
@@ -367,6 +403,8 @@ let previewProgressFrame: number | null = null;
 const thumbnailUrlCache = new Map<string, string>();
 const thumbnailPending = new Map<string, Promise<string | null>>();
 const originalImageWarmCache = new Set<string>();
+const originalPreviewUrlCache = new Map<string, string>();
+const originalPreviewPending = new Map<string, Promise<string | null>>();
 type ThumbnailPriority = "visible" | "upgrade" | "prefetch";
 type ThumbnailQueueItem = {
   key: string;
@@ -376,13 +414,25 @@ type ThumbnailQueueItem = {
   priority: ThumbnailPriority;
   resolve: (url: string | null) => void;
 };
+type OriginalPreviewQueueItem = {
+  key: string;
+  localPath: string;
+  priority: ThumbnailPriority;
+  resolve: (url: string | null) => void;
+};
 const thumbnailQueue: ThumbnailQueueItem[] = [];
 const thumbnailQueued = new Map<string, ThumbnailQueueItem>();
 const thumbnailBatchPending = new Set<string>();
 const thumbnailActiveKeys = new Set<string>();
 const thumbnailFailedKeys = new Set<string>();
+const originalPreviewQueue: OriginalPreviewQueueItem[] = [];
+const originalPreviewQueued = new Map<string, OriginalPreviewQueueItem>();
+const originalPreviewActiveKeys = new Set<string>();
+const originalPreviewFailedKeys = new Set<string>();
 let thumbnailActiveCount = 0;
 let thumbnailFullActiveCount = 0;
+let originalPreviewActiveCount = 0;
+let viewerDragState: { x: number; y: number } | null = null;
 
 const api = {
   createProject(name: string): Promise<Project> {
@@ -416,6 +466,9 @@ const api = {
     quality: ThumbnailQuality = "fast",
   ): Promise<ThumbnailBatchResponse> {
     return invoke("get_asset_thumbnails", { request: { source_paths: sourcePaths, max_edge: maxEdge, quality } });
+  },
+  getAssetOriginalPreview(sourcePath: string): Promise<OriginalPreviewResponse> {
+    return invoke("get_asset_original_preview", { request: { source_path: sourcePath } });
   },
   getGroupDetail(projectId: string, groupId: string): Promise<StoredAsset[]> {
     return invoke("get_project_group_detail", { projectId, groupId });
@@ -780,11 +833,24 @@ async function startScan() {
   }
 }
 
-async function selectGroup(group: ReceivedAssetGroup) {
+async function selectGroup(group: ReceivedAssetGroup, options: SelectGroupOptions = {}) {
+  const keepViewerTransform = shouldPreserveViewerTransformForSelection(
+    state.selectedGroup,
+    group,
+    Boolean(options.preserveViewerTransform),
+  );
+  const carryoverImage = keepViewerTransform ? currentViewerMainImageCarryover() : null;
   state.selectedGroupId = group.group_id ?? null;
   state.selectedGroup = group;
   state.groupDetail = [];
   state.loupe = null;
+  if (!keepViewerTransform) {
+    state.viewerTransform = resetViewerTransform();
+    state.viewerCarryoverImage = null;
+  } else {
+    state.viewerCarryoverImage = carryoverImage;
+  }
+  viewerDragState = null;
   render();
   const projectId = state.selectedProjectId;
   if (projectId && group.group_id) {
@@ -803,6 +869,27 @@ async function selectGroup(group: ReceivedAssetGroup) {
     };
     render();
   }
+}
+
+function currentViewerMainImageCarryover(): ViewerCarryoverImage | null {
+  const preview = document.querySelector<HTMLElement>(".viewer-main-preview");
+  if (!preview) {
+    return state.viewerCarryoverImage;
+  }
+  const candidates = [
+    ...Array.from(preview.querySelectorAll<HTMLImageElement>(":scope > img.viewer-carryover-image")).map((image) => ({
+      url: image.currentSrc || image.src,
+      loaded: image.complete && image.naturalWidth > 0,
+      role: "carryover" as const,
+    })),
+    ...Array.from(preview.querySelectorAll<HTMLImageElement>(":scope > img.preview-image")).map((image) => ({
+      url: image.currentSrc || image.src,
+      loaded: image.complete && image.naturalWidth > 0,
+      role: "preview" as const,
+    })),
+  ];
+  const url = viewerCarryoverSource(candidates, state.viewerCarryoverImage?.url ?? null);
+  return url ? { url } : null;
 }
 
 async function toggleFavorite(targetGroup = state.selectedGroup) {
@@ -2043,6 +2130,8 @@ function renderLightTableToolbar() {
       commandButton("查看器", `tool-toggle${state.layoutMode === "viewer" ? " is-active" : ""}`, () => {
         state.layoutMode = "viewer";
         state.loupe = null;
+        state.viewerTransform = resetViewerTransform();
+        viewerDragState = null;
         render();
       }),
       state.layoutMode === "grid"
@@ -2139,8 +2228,10 @@ function renderViewerMode() {
   }
 
   const queue = viewerQueueWindow(groups, current, 10);
-  warmThumbnailsForGroups(queue);
-  warmOriginalsForGroups(queue);
+  const burstWarmQueue = viewerBurstWarmWindow(allGroups(), current);
+  const warmQueue = uniqueGroupsByIdentity([...burstWarmQueue, ...queue]);
+  warmThumbnailsForGroups(warmQueue);
+  warmOriginalsForGroups(warmQueue);
   append(
     viewer,
     renderViewerStage(current, groups),
@@ -2240,9 +2331,12 @@ function renderViewerBurstSummary(group: ReceivedAssetGroup) {
   }
   const frames = el("div", "viewer-inspector-burst");
   members.slice(0, 8).forEach((member, index) => {
-    const frame = commandButton("", "viewer-inspector-frame", () => void selectGroup(member));
+    const frame = commandButton("", "viewer-inspector-frame", () =>
+      void selectGroup(member, { preserveViewerTransform: true }),
+    );
+    frame.title = previewTooltipForGroup(member);
     appendPreviewImage(frame, member, { maxEdge: currentThumbnailMaxEdge() });
-    append(frame, renderPreviewStatusBadge(member), el("span", "viewer-frame-index", String(index + 1)));
+    append(frame, el("span", "viewer-frame-index", String(index + 1)));
     if (groupIdentity(member) === groupIdentity(group)) {
       frame.classList.add("is-current");
     }
@@ -2266,20 +2360,16 @@ function renderViewerBurstQueue(group: ReceivedAssetGroup) {
     return null;
   }
   const strip = el("section", "viewer-burst-strip");
-  const currentIndex = Math.max(0, members.findIndex((member) => groupIdentity(member) === groupIdentity(group)));
-  append(
-    strip,
-    append(
-      el("div", "viewer-section-label"),
-      el("strong", "", "连拍序列"),
-      el("span", "", `${currentIndex + 1} / ${members.length}`),
-    ),
-  );
+  strip.title = `连拍 ${selectedBurstIndex(group, members)} / ${members.length}`;
   const frames = el("div", "viewer-burst-frames");
   members.forEach((member, index) => {
-    const frame = commandButton("", "viewer-burst-frame", () => void selectGroup(member));
-    appendPreviewImage(frame, member, { maxEdge: currentThumbnailMaxEdge() });
-    append(frame, renderPreviewStatusBadge(member), el("span", "viewer-frame-index", String(index + 1)));
+    const frame = commandButton("", "viewer-burst-frame", () =>
+      void selectGroup(member, { preserveViewerTransform: true }),
+    );
+    frame.title = previewTooltipForGroup(member);
+    const media = el("span", "viewer-burst-media");
+    appendPreviewImage(media, member, { maxEdge: currentThumbnailMaxEdge() });
+    append(frame, media, el("span", "viewer-frame-index", String(index + 1)));
     if (groupIdentity(member) === groupIdentity(group)) {
       frame.classList.add("is-current");
     }
@@ -2294,13 +2384,20 @@ function renderViewerStage(group: ReceivedAssetGroup, groups: ReceivedAssetGroup
   const previous = adjacentViewerGroup(groups, group, -1);
   const next = adjacentViewerGroup(groups, group, 1);
   const preview = el("div", "viewer-main-preview");
+  if (state.viewerTransform.zoom > 1) {
+    preview.classList.add("is-zoomed");
+  }
   appendPreviewImage(preview, group, { maxEdge: VIEWER_PREVIEW_MAX_EDGE, original: true, eager: true });
+  appendViewerCarryoverImage(preview);
   append(preview, renderPreviewStatusBadge(group, VIEWER_PREVIEW_MAX_EDGE, true), renderFaceRiskOverlay(group));
-  preview.addEventListener("pointermove", (event) => updateLoupeFromPointer(event, group, VIEWER_PREVIEW_MAX_EDGE, true));
-  preview.addEventListener("pointerleave", () => clearLoupeIfFloating());
-  preview.addEventListener("wheel", (event) => handleLoupeWheel(event, group, VIEWER_PREVIEW_MAX_EDGE, true), {
-    passive: false,
-  });
+  preview.addEventListener("wheel", (event) => handleViewerWheel(event, preview), { passive: false });
+  preview.addEventListener("dblclick", (event) => handleViewerDoubleClick(event, preview));
+  preview.addEventListener("pointerdown", (event) => handleViewerPointerDown(event, preview));
+  preview.addEventListener("pointermove", (event) => handleViewerPointerMove(event, preview));
+  preview.addEventListener("pointerup", (event) => endViewerDrag(preview, event));
+  preview.addEventListener("pointercancel", (event) => endViewerDrag(preview, event));
+  preview.addEventListener("pointerleave", (event) => endViewerDrag(preview, event));
+  window.requestAnimationFrame(() => applyViewerTransformToNode(preview));
   append(
     preview,
     append(
@@ -2315,6 +2412,194 @@ function renderViewerStage(group: ReceivedAssetGroup, groups: ReceivedAssetGroup
   );
   append(stage, preview);
   return stage;
+}
+
+function appendViewerCarryoverImage(preview: HTMLElement) {
+  const carryover = state.viewerCarryoverImage;
+  if (!carryover?.url) {
+    return;
+  }
+  const image = el("img", "viewer-carryover-image") as HTMLImageElement;
+  image.src = carryover.url;
+  image.alt = "";
+  image.decoding = "async";
+  image.draggable = false;
+  append(preview, image);
+}
+
+function clearViewerCarryover(preview: HTMLElement) {
+  state.viewerCarryoverImage = null;
+  preview.querySelectorAll(":scope > img.viewer-carryover-image").forEach((image) => image.remove());
+}
+
+function handleViewerWheel(event: WheelEvent, preview: HTMLElement) {
+  const point = viewerImagePointFromEvent(event, preview);
+  if (!point) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const multiplier = event.deltaY < 0 ? 1.18 : 1 / 1.18;
+  state.viewerTransform = zoomViewerTransformAtPoint(
+    state.viewerTransform,
+    point,
+    state.viewerTransform.zoom * multiplier,
+  );
+  applyViewerTransformToNode(preview);
+}
+
+function handleViewerDoubleClick(event: MouseEvent, preview: HTMLElement) {
+  const point = viewerImagePointFromEvent(event, preview);
+  if (!point && state.viewerTransform.zoom <= 1) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  state.viewerTransform = toggleViewerDoubleClickZoom(
+    state.viewerTransform,
+    point ?? { x: 0, y: 0 },
+  );
+  viewerDragState = null;
+  applyViewerTransformToNode(preview);
+}
+
+function handleViewerPointerDown(event: PointerEvent, preview: HTMLElement) {
+  if (event.button !== 0 || state.viewerTransform.zoom <= 1 || isViewerChromeTarget(event.target)) {
+    return;
+  }
+  event.preventDefault();
+  preview.setPointerCapture?.(event.pointerId);
+  viewerDragState = { x: event.clientX, y: event.clientY };
+  preview.classList.add("is-dragging");
+  applyViewerTransformToNode(preview);
+}
+
+function isViewerChromeTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest("button, input, select, textarea"));
+}
+
+function handleViewerPointerMove(event: PointerEvent, preview: HTMLElement) {
+  if (!viewerDragState) {
+    return;
+  }
+  event.preventDefault();
+  const delta = {
+    x: event.clientX - viewerDragState.x,
+    y: event.clientY - viewerDragState.y,
+  };
+  viewerDragState = { x: event.clientX, y: event.clientY };
+  state.viewerTransform = dragViewerTransform(state.viewerTransform, delta);
+  applyViewerTransformToNode(preview);
+}
+
+function endViewerDrag(preview: HTMLElement, event?: PointerEvent) {
+  if (event && preview.hasPointerCapture?.(event.pointerId)) {
+    preview.releasePointerCapture?.(event.pointerId);
+  }
+  viewerDragState = null;
+  preview.classList.remove("is-dragging");
+  applyViewerTransformToNode(preview);
+}
+
+function viewerImagePointFromEvent(event: MouseEvent, preview: HTMLElement) {
+  const image = preview.querySelector<HTMLImageElement>(":scope > img.preview-image");
+  if (!image) {
+    return null;
+  }
+  const previewRect = preview.getBoundingClientRect();
+  const naturalSize = {
+    width: image.naturalWidth || previewRect.width || 1,
+    height: image.naturalHeight || previewRect.height || 1,
+  };
+  const fit = containedImageRect(
+    { left: previewRect.left, top: previewRect.top, width: previewRect.width, height: previewRect.height },
+    naturalSize,
+  );
+  const point = normalizedContainedImagePoint(
+    {
+      left: previewRect.left,
+      top: previewRect.top,
+      width: previewRect.width,
+      height: previewRect.height,
+    },
+    naturalSize,
+    { x: event.clientX, y: event.clientY },
+  );
+  if (!point.inside && state.viewerTransform.zoom <= 1) {
+    return null;
+  }
+  const x = clamp(event.clientX - fit.left, 0, fit.width);
+  const y = clamp(event.clientY - fit.top, 0, fit.height);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return {
+    x: clamp(x, 0, fit.width),
+    y: clamp(y, 0, fit.height),
+  };
+}
+
+function applyViewerTransformToNode(preview: HTMLElement) {
+  const image = preview.querySelector<HTMLImageElement>(":scope > img.preview-image");
+  if (!image) {
+    return;
+  }
+  const previewRect = preview.getBoundingClientRect();
+  const naturalSize = {
+    width: image.naturalWidth || previewRect.width || 1,
+    height: image.naturalHeight || previewRect.height || 1,
+  };
+  const fit = containedImageRect(
+    { left: 0, top: 0, width: previewRect.width, height: previewRect.height },
+    naturalSize,
+  );
+  const transform = `translate3d(${state.viewerTransform.panX}px, ${state.viewerTransform.panY}px, 0) scale(${state.viewerTransform.zoom})`;
+
+  image.style.left = `${fit.left}px`;
+  image.style.top = `${fit.top}px`;
+  image.style.right = "auto";
+  image.style.bottom = "auto";
+  image.style.width = `${fit.width}px`;
+  image.style.height = `${fit.height}px`;
+  image.style.objectFit = "fill";
+  image.style.transformOrigin = "0 0";
+  image.style.transform = transform;
+  image.style.cursor = viewerDragState ? "grabbing" : "";
+  preview.style.cursor = viewerDragState ? "grabbing" : "";
+
+  preview.querySelectorAll<HTMLImageElement>(":scope > img.viewer-carryover-image").forEach((carryoverImage) => {
+    const carryoverSize = {
+      width: carryoverImage.naturalWidth || naturalSize.width,
+      height: carryoverImage.naturalHeight || naturalSize.height,
+    };
+    const carryoverFit = containedImageRect(
+      { left: 0, top: 0, width: previewRect.width, height: previewRect.height },
+      carryoverSize,
+    );
+    carryoverImage.style.left = `${carryoverFit.left}px`;
+    carryoverImage.style.top = `${carryoverFit.top}px`;
+    carryoverImage.style.right = "auto";
+    carryoverImage.style.bottom = "auto";
+    carryoverImage.style.width = `${carryoverFit.width}px`;
+    carryoverImage.style.height = `${carryoverFit.height}px`;
+    carryoverImage.style.objectFit = "fill";
+    carryoverImage.style.transformOrigin = "0 0";
+    carryoverImage.style.transform = transform;
+    carryoverImage.style.cursor = viewerDragState ? "grabbing" : "";
+  });
+
+  const faceLayer = preview.querySelector<HTMLElement>(":scope > .face-risk-layer");
+  if (faceLayer && !faceLayer.hidden) {
+    faceLayer.style.left = `${fit.left}px`;
+    faceLayer.style.top = `${fit.top}px`;
+    faceLayer.style.width = `${fit.width}px`;
+    faceLayer.style.height = `${fit.height}px`;
+    faceLayer.style.transformOrigin = "0 0";
+    faceLayer.style.transform = transform;
+  }
+
+  preview.classList.toggle("is-zoomed", state.viewerTransform.zoom > 1);
+  preview.classList.toggle("is-dragging", Boolean(viewerDragState));
 }
 
 function renderViewerActionDock(group: ReceivedAssetGroup) {
@@ -2534,6 +2819,8 @@ function warmOriginalsForGroups(groups: ReceivedAssetGroup[]) {
         const image = new Image();
         image.decoding = "async";
         image.src = url;
+      } else if (shouldRequestOriginalPreviewAsset(asset)) {
+        void originalPreviewUrlForPath(localPath, "upgrade");
       } else if (supportsFullThumbnailAsset(asset)) {
         void thumbnailUrlForPath(localPath, VIEWER_PREVIEW_MAX_EDGE, "upgrade", "full");
       }
@@ -2591,6 +2878,7 @@ function renderWorkbenchEmptyState() {
 
 function renderGroupCard(group: ReceivedAssetGroup) {
   const card = el("article", "group-card");
+  const isExpanded = group.group_id === state.selectedGroupId;
   card.tabIndex = 0;
   card.addEventListener("click", () => void selectGroup(group));
   card.addEventListener("keydown", (event) => {
@@ -2599,13 +2887,11 @@ function renderGroupCard(group: ReceivedAssetGroup) {
       void selectGroup(group);
     }
   });
-  if (group.group_id === state.selectedGroupId) {
+  if (isExpanded) {
     card.classList.add("is-selected");
-  }
-  if (group.burst && group.group_id === state.selectedGroupId) {
     card.classList.add("is-expanded");
   }
-  const thumb = renderAssetThumb(group, "asset-thumb");
+  const thumb = renderAssetThumb(group, "asset-thumb", isExpanded);
   append(thumb, renderThumbMeta(group));
   const body = el("div", "group-card-body");
   append(
@@ -2622,19 +2908,19 @@ function renderGroupCard(group: ReceivedAssetGroup) {
     renderMarks(group),
   );
   append(card, thumb, body);
-  if (group.burst && group.group_id === state.selectedGroupId) {
+  if (isExpanded && group.burst) {
     append(card, renderBurstStrip(group));
   }
   return card;
 }
 
-function renderAssetThumb(group: ReceivedAssetGroup, className: string) {
+function renderAssetThumb(group: ReceivedAssetGroup, className: string, original = false) {
   const thumb = el("div", `${className} ${sourceStatus(group)}`);
-  appendPreviewImage(thumb, group);
-  append(thumb, renderPreviewStatusBadge(group), renderFaceRiskOverlay(group));
-  thumb.addEventListener("pointermove", (event) => updateLoupeFromPointer(event, group));
+  appendPreviewImage(thumb, group, { original, eager: original });
+  append(thumb, renderPreviewStatusBadge(group, currentThumbnailMaxEdge(), original), renderFaceRiskOverlay(group));
+  thumb.addEventListener("pointermove", (event) => updateLoupeFromPointer(event, group, currentThumbnailMaxEdge(), true));
   thumb.addEventListener("pointerleave", () => clearLoupeIfFloating());
-  thumb.addEventListener("wheel", (event) => handleLoupeWheel(event, group), { passive: false });
+  thumb.addEventListener("wheel", (event) => handleLoupeWheel(event, group, currentThumbnailMaxEdge(), true), { passive: false });
   return thumb;
 }
 
@@ -2665,8 +2951,9 @@ function renderBurstStrip(group: ReceivedAssetGroup) {
       event?.stopPropagation();
       void selectGroup(member);
     });
+    frame.title = previewTooltipForGroup(member);
     appendPreviewImage(frame, member);
-    append(frame, renderPreviewStatusBadge(member));
+    append(frame, el("span", "viewer-frame-index", String(index + 1)));
     if (member.group_id === group.group_id) frame.classList.add("is-current");
     append(frameRow, frame);
   });
@@ -2844,6 +3131,10 @@ function syncFaceRiskLayer(container: HTMLElement) {
   if (containerWidth <= 0 || containerHeight <= 0) {
     return;
   }
+  if (container.classList.contains("viewer-main-preview")) {
+    applyViewerTransformToNode(container);
+    return;
+  }
   const imageRatio = image.naturalWidth / image.naturalHeight;
   const containerRatio = containerWidth / containerHeight;
   const objectFit = getComputedStyle(image).objectFit;
@@ -2962,11 +3253,23 @@ function selectAdjacentBurst(group: ReceivedAssetGroup, direction: number) {
   const members = burstMembersOf(group);
   const currentIndex = Math.max(0, members.findIndex((member) => member.group_id === group.group_id));
   const next = members[(currentIndex + direction + members.length) % members.length];
-  void selectGroup(next);
+  void selectGroup(next, { preserveViewerTransform: true });
 }
 
 function groupIdentity(group: ReceivedAssetGroup) {
   return group.group_id ?? group.group_key;
+}
+
+function uniqueGroupsByIdentity(groups: ReceivedAssetGroup[]) {
+  const seen = new Set<string>();
+  return groups.filter((group) => {
+    const identity = groupIdentity(group);
+    if (seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
+  });
 }
 
 function groupByIdentity(groupId: string) {
@@ -2979,6 +3282,9 @@ function previewUrlForGroup(group: ReceivedAssetGroup, maxEdge = currentThumbnai
   if (!asset || !localPath) return "";
   if (original && supportsBrowserOriginalAsset(asset)) {
     return convertFileSrc(localPath);
+  }
+  if (original && shouldRequestOriginalPreviewAsset(asset)) {
+    return originalPreviewUrlCache.get(originalPreviewCacheKey(localPath)) ?? "";
   }
   return (
     thumbnailUrlCache.get(thumbnailCacheKey(localPath, maxEdge, "full")) ??
@@ -2995,10 +3301,16 @@ function previewLocalPathForGroup(group: ReceivedAssetGroup) {
 function originalPreviewUrlForGroup(group: ReceivedAssetGroup) {
   const asset = previewAssetForGroup(group);
   const localPath = asset ? localPreviewablePath(asset) : null;
-  if (!asset || !localPath || !supportsBrowserOriginalAsset(asset)) {
+  if (!asset || !localPath) {
     return null;
   }
-  return convertFileSrc(localPath);
+  if (supportsBrowserOriginalAsset(asset)) {
+    return convertFileSrc(localPath);
+  }
+  if (shouldRequestOriginalPreviewAsset(asset)) {
+    return originalPreviewUrlCache.get(originalPreviewCacheKey(localPath)) ?? null;
+  }
+  return null;
 }
 
 function setPreviewBackground(node: HTMLElement, group: ReceivedAssetGroup, maxEdge = currentThumbnailMaxEdge(), original = false) {
@@ -3026,9 +3338,13 @@ function appendPreviewImage(node: HTMLElement, group: ReceivedAssetGroup, option
     node.dataset.previewPath = localPath;
     node.dataset.previewMaxEdge = "original";
     node.classList.remove("no-preview", "is-loading");
-    insertPreviewImage(node, convertFileSrc(localPath), "full", options.eager);
+    insertPreviewImage(node, convertFileSrc(localPath), "original", options.eager);
     syncPreviewStatusBadge(node, "original");
     refreshPreviewProgressDom();
+    return;
+  }
+  if (options.original && shouldRequestOriginalPreviewAsset(previewAsset)) {
+    appendOriginalPreviewImage(node, group, localPath, maxEdge, options.eager);
     return;
   }
   const fullKey = thumbnailCacheKey(localPath, maxEdge, "full");
@@ -3070,6 +3386,62 @@ function appendPreviewImage(node: HTMLElement, group: ReceivedAssetGroup, option
   });
 }
 
+function appendOriginalPreviewImage(
+  node: HTMLElement,
+  group: ReceivedAssetGroup,
+  localPath: string,
+  fallbackMaxEdge: number,
+  eager = false,
+) {
+  const key = originalPreviewCacheKey(localPath);
+  node.dataset.previewPath = localPath;
+  node.dataset.previewMaxEdge = "original";
+  node.classList.remove("no-preview");
+  const cachedOriginal = originalPreviewUrlCache.get(key);
+  if (cachedOriginal) {
+    node.classList.remove("is-loading");
+    insertPreviewImage(node, cachedOriginal, "original", eager);
+    syncPreviewStatusBadge(node, "original");
+    refreshPreviewProgressDom();
+    return;
+  }
+
+  const fallback =
+    thumbnailUrlCache.get(thumbnailCacheKey(localPath, fallbackMaxEdge, "full")) ??
+    thumbnailUrlCache.get(thumbnailCacheKey(localPath, fallbackMaxEdge, "fast"));
+  if (fallback) {
+    insertPreviewImage(node, fallback, "full", eager);
+  } else {
+    node.classList.add("is-loading");
+    void thumbnailUrlForPath(localPath, fallbackMaxEdge, "visible", "fast").then((url) => {
+      if (!node.isConnected || node.dataset.previewPath !== localPath || node.dataset.previewMaxEdge !== "original") {
+        return;
+      }
+      node.classList.remove("is-loading");
+      if (url && !originalPreviewUrlCache.has(key)) {
+        insertPreviewImage(node, url, "fast", eager);
+      }
+    });
+  }
+
+  syncPreviewStatusBadge(node, previewStageForGroup(group, fallbackMaxEdge, true));
+  void originalPreviewUrlForPath(localPath, "visible").then((url) => {
+    if (!node.isConnected || node.dataset.previewPath !== localPath || node.dataset.previewMaxEdge !== "original") {
+      return;
+    }
+    node.classList.remove("is-loading");
+    if (!url) {
+      node.classList.add("no-preview");
+      syncPreviewStatusBadge(node, "failed");
+      return;
+    }
+    node.classList.remove("no-preview");
+    insertPreviewImage(node, url, "original", eager);
+    syncPreviewStatusBadge(node, "original");
+    refreshPreviewProgressDom();
+  });
+}
+
 function scheduleFullQualityUpgrade(node: HTMLElement, localPath: string, maxEdge: number) {
   const key = thumbnailCacheKey(localPath, maxEdge, "full");
   const cachedUrl = thumbnailUrlCache.get(key);
@@ -3100,7 +3472,7 @@ function scheduleFullQualityUpgrade(node: HTMLElement, localPath: string, maxEdg
   });
 }
 
-function insertPreviewImage(node: HTMLElement, url: string, quality: ThumbnailQuality, eager = false) {
+function insertPreviewImage(node: HTMLElement, url: string, quality: PreviewImageQuality, eager = false) {
   const current = node.querySelector<HTMLImageElement>(":scope > img.preview-image");
   if (current?.src === url && current.dataset.quality === quality) {
     return;
@@ -3120,11 +3492,18 @@ function insertPreviewImage(node: HTMLElement, url: string, quality: ThumbnailQu
       }
     });
     syncFaceRiskLayer(node);
+    if (node.classList.contains("viewer-main-preview")) {
+      clearViewerCarryover(node);
+      applyViewerTransformToNode(node);
+    }
   };
   image.addEventListener("load", settle, { once: true });
   image.addEventListener("error", () => {
     image.remove();
-  });
+    if (node.classList.contains("viewer-main-preview")) {
+      clearViewerCarryover(node);
+    }
+  }, { once: true });
   node.prepend(image);
   if (image.complete) {
     settle();
@@ -3135,8 +3514,12 @@ function thumbnailCacheKey(localPath: string, maxEdge = THUMBNAIL_MAX_EDGE, qual
   return `${quality}:${maxEdge}:${localPath}`;
 }
 
+function originalPreviewCacheKey(localPath: string) {
+  return `original:${localPath}`;
+}
+
 function currentThumbnailMaxEdge() {
-  const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 1.5);
+  const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2.25);
   const edge = Math.ceil(state.thumbSize * pixelRatio);
   return Math.min(THUMBNAIL_MAX_EDGE, Math.max(THUMBNAIL_MIN_EDGE, edge));
 }
@@ -3150,7 +3533,27 @@ function previewStageForGroup(group: ReceivedAssetGroup, maxEdge = currentThumbn
   if (original && supportsBrowserOriginalAsset(asset)) {
     return "original";
   }
+  if (original && shouldRequestOriginalPreviewAsset(asset)) {
+    return originalPreviewStageForLocalPath(localPath);
+  }
   return previewStageForLocalPath(localPath, maxEdge);
+}
+
+function originalPreviewStageForLocalPath(localPath: string): PreviewStage {
+  const key = originalPreviewCacheKey(localPath);
+  if (originalPreviewUrlCache.has(key)) {
+    return "original";
+  }
+  if (originalPreviewActiveKeys.has(key)) {
+    return "loading";
+  }
+  if (originalPreviewPending.has(key) || originalPreviewQueued.has(key)) {
+    return "queued";
+  }
+  if (originalPreviewFailedKeys.has(key)) {
+    return "failed";
+  }
+  return "idle";
 }
 
 function previewStageForLocalPath(localPath: string, maxEdge = currentThumbnailMaxEdge()): PreviewStage {
@@ -3192,6 +3595,15 @@ function renderPreviewStatusBadge(
   return badge;
 }
 
+function previewTooltipForGroup(
+  group: ReceivedAssetGroup,
+  maxEdge = currentThumbnailMaxEdge(),
+  original = false,
+) {
+  const display = previewBadge(previewStageForGroup(group, maxEdge, original));
+  return `${group.group_key} · ${display.label}`;
+}
+
 function applyPreviewStatusBadge(badge: HTMLElement, stage: PreviewStage) {
   const display = previewBadge(stage);
   badge.className = `preview-status-badge ${display.tone}`;
@@ -3225,6 +3637,13 @@ function syncPreviewNodesForThumbnailItem(item: ThumbnailQueueItem) {
     if (node.dataset.previewPath !== item.localPath || node.dataset.previewMaxEdge !== String(item.maxEdge)) {
       return;
     }
+    const url = thumbnailUrlCache.get(item.key) ?? null;
+    applyCachedPreviewToNode(node, {
+      localPath: item.localPath,
+      maxEdge: String(item.maxEdge),
+      quality: item.quality,
+      url,
+    });
     syncPreviewStatusBadge(node, previewStageForLocalPath(item.localPath, item.maxEdge));
   });
 }
@@ -3249,6 +3668,24 @@ async function thumbnailUrlForPath(
     thumbnailPending.delete(key);
   });
   thumbnailPending.set(key, request);
+  return request;
+}
+
+async function originalPreviewUrlForPath(localPath: string, priority: ThumbnailPriority = "visible") {
+  const key = originalPreviewCacheKey(localPath);
+  const cached = originalPreviewUrlCache.get(key);
+  if (cached) return cached;
+  const pending = originalPreviewPending.get(key);
+  if (pending) {
+    if (priority === "visible") {
+      promoteQueuedOriginalPreview(key);
+    }
+    return pending;
+  }
+  const request = enqueueOriginalPreviewRequest(key, localPath, priority).finally(() => {
+    originalPreviewPending.delete(key);
+  });
+  originalPreviewPending.set(key, request);
   return request;
 }
 
@@ -3289,7 +3726,9 @@ async function warmThumbnailBatch(localPaths: string[], maxEdge: number, quality
         }
         const key = thumbnailCacheKey(item.source_path, maxEdge, quality);
         thumbnailFailedKeys.delete(key);
-        thumbnailUrlCache.set(key, convertFileSrc(item.path));
+        const url = convertFileSrc(item.path);
+        thumbnailUrlCache.set(key, url);
+        syncPreviewNodesForCachedThumbnail(item.source_path, maxEdge, quality, url);
       }
     } catch {
       // Visible thumbnails still use the priority queue; background warmup can fail quietly.
@@ -3300,6 +3739,86 @@ async function warmThumbnailBatch(localPaths: string[], maxEdge: number, quality
       refreshPreviewProgressDom();
     }
   }
+}
+
+function enqueueOriginalPreviewRequest(key: string, localPath: string, priority: ThumbnailPriority) {
+  const request = new Promise<string | null>((resolve) => {
+    const item: OriginalPreviewQueueItem = { key, localPath, priority, resolve };
+    originalPreviewFailedKeys.delete(key);
+    originalPreviewQueued.set(key, item);
+    if (priority === "visible") {
+      originalPreviewQueue.unshift(item);
+    } else if (priority === "upgrade") {
+      const firstPrefetchIndex = originalPreviewQueue.findIndex((candidate) => candidate.priority === "prefetch");
+      if (firstPrefetchIndex >= 0) {
+        originalPreviewQueue.splice(firstPrefetchIndex, 0, item);
+      } else {
+        originalPreviewQueue.push(item);
+      }
+    } else {
+      originalPreviewQueue.push(item);
+    }
+    pumpOriginalPreviewQueue();
+    refreshPreviewProgressDom();
+  });
+  return request;
+}
+
+function promoteQueuedOriginalPreview(key: string) {
+  const item = originalPreviewQueued.get(key);
+  if (!item) {
+    return;
+  }
+  const index = originalPreviewQueue.indexOf(item);
+  if (index <= 0) {
+    return;
+  }
+  originalPreviewQueue.splice(index, 1);
+  originalPreviewQueue.unshift(item);
+}
+
+function pumpOriginalPreviewQueue() {
+  while (originalPreviewQueue.length && originalPreviewActiveCount < ORIGINAL_PREVIEW_CONCURRENCY) {
+    const [item] = originalPreviewQueue.splice(0, 1);
+    originalPreviewQueued.delete(item.key);
+    if (originalPreviewUrlCache.has(item.key)) {
+      item.resolve(originalPreviewUrlCache.get(item.key) ?? null);
+      syncPreviewNodesForOriginalItem(item);
+      refreshPreviewProgressDom();
+      continue;
+    }
+    startOriginalPreviewItem(item);
+    void api
+      .getAssetOriginalPreview(item.localPath)
+      .then((response) => {
+        const url = convertFileSrc(response.path);
+        originalPreviewFailedKeys.delete(item.key);
+        originalPreviewUrlCache.set(item.key, url);
+        item.resolve(url);
+      })
+      .catch(() => {
+        originalPreviewFailedKeys.add(item.key);
+        item.resolve(null);
+      })
+      .finally(() => {
+        finishOriginalPreviewItem(item);
+        pumpOriginalPreviewQueue();
+      });
+  }
+}
+
+function startOriginalPreviewItem(item: OriginalPreviewQueueItem) {
+  originalPreviewActiveKeys.add(item.key);
+  originalPreviewActiveCount += 1;
+  syncPreviewNodesForOriginalItem(item);
+  refreshPreviewProgressDom();
+}
+
+function finishOriginalPreviewItem(item: OriginalPreviewQueueItem) {
+  originalPreviewActiveKeys.delete(item.key);
+  originalPreviewActiveCount = Math.max(0, originalPreviewActiveCount - 1);
+  syncPreviewNodesForOriginalItem(item);
+  refreshPreviewProgressDom();
 }
 
 function enqueueThumbnailRequest(
@@ -3331,6 +3850,72 @@ function enqueueThumbnailRequest(
   return request;
 }
 
+function syncPreviewNodesForOriginalItem(item: OriginalPreviewQueueItem) {
+  document.querySelectorAll<HTMLElement>("[data-preview-path]").forEach((node) => {
+    if (node.dataset.previewPath !== item.localPath || node.dataset.previewMaxEdge !== "original") {
+      return;
+    }
+    const url = originalPreviewUrlCache.get(item.key) ?? null;
+    applyCachedPreviewToNode(node, {
+      localPath: item.localPath,
+      maxEdge: "original",
+      quality: "original",
+      url,
+    });
+    syncPreviewStatusBadge(node, originalPreviewStageForLocalPath(item.localPath));
+  });
+}
+
+function syncPreviewNodesForCachedThumbnail(
+  localPath: string,
+  maxEdge: number,
+  quality: ThumbnailQuality,
+  url: string | null,
+) {
+  document.querySelectorAll<HTMLElement>("[data-preview-path]").forEach((node) => {
+    if (node.dataset.previewPath !== localPath || node.dataset.previewMaxEdge !== String(maxEdge)) {
+      return;
+    }
+    applyCachedPreviewToNode(node, {
+      localPath,
+      maxEdge: String(maxEdge),
+      quality,
+      url,
+    });
+    syncPreviewStatusBadge(node, previewStageForLocalPath(localPath, maxEdge));
+  });
+}
+
+function applyCachedPreviewToNode(
+  node: HTMLElement,
+  item: { localPath: string; maxEdge: string; quality: PreviewSyncQuality; url: string | null },
+) {
+  const current = node.querySelector<HTMLImageElement>(":scope > img.preview-image");
+  if (
+    !shouldApplyPreviewSync(
+      {
+        previewPath: node.dataset.previewPath,
+        previewMaxEdge: node.dataset.previewMaxEdge,
+        previewFullPending: node.dataset.previewFullPending,
+        currentQuality: previewQualityFromImage(current),
+      },
+      item,
+    )
+  ) {
+    return;
+  }
+  node.classList.remove("no-preview", "is-loading");
+  insertPreviewImage(node, item.url as string, item.quality);
+}
+
+function previewQualityFromImage(image: HTMLImageElement | null): PreviewSyncQuality | undefined {
+  const quality = image?.dataset.quality;
+  if (quality === "fast" || quality === "full" || quality === "original") {
+    return quality;
+  }
+  return undefined;
+}
+
 function promoteQueuedThumbnail(key: string) {
   const item = thumbnailQueued.get(key);
   if (!item) {
@@ -3354,6 +3939,7 @@ function pumpThumbnailQueue() {
     thumbnailQueued.delete(item.key);
     if (thumbnailUrlCache.has(item.key)) {
       item.resolve(thumbnailUrlCache.get(item.key) ?? null);
+      syncPreviewNodesForThumbnailItem(item);
       refreshPreviewProgressDom();
       continue;
     }
@@ -3452,6 +4038,11 @@ function shouldRequestFullPreviewAsset(asset: ReceivedAsset, original: boolean) 
   return shouldRequestFullPreview(format, original);
 }
 
+function shouldRequestOriginalPreviewAsset(asset: ReceivedAsset) {
+  const format = cssToken(asset.format || extensionOf(asset.filename));
+  return shouldRequestOriginalPreview(format);
+}
+
 function extensionOf(path: string | null | undefined) {
   return path?.split(/[./\\]/).filter(Boolean).at(-1) ?? "";
 }
@@ -3462,6 +4053,9 @@ function absolutePathOrNull(path: string | null | undefined) {
 }
 
 function updateLoupeFromPointer(event: PointerEvent, group: ReceivedAssetGroup, maxEdge = currentThumbnailMaxEdge(), original = false) {
+  if (original) {
+    void ensureOriginalPreviewForGroup(group, "visible");
+  }
   if (!previewUrlForGroup(group, maxEdge, original)) return;
   const next = loupeFromPointer(event, group, maxEdge, original);
   const previous = state.loupe;
@@ -3565,15 +4159,13 @@ function positionLoupeOverlay(overlay: HTMLElement, loupe: LoupeState) {
 
 function loupeFromPointer(event: PointerEvent | WheelEvent, group: ReceivedAssetGroup, maxEdge: number, original = false): LoupeState {
   const target = event.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
   const groupId = groupIdentity(group);
   const current = state.loupe;
-  const rawX = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-  const rawY = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+  const point = normalizedPreviewPoint(target, event.clientX, event.clientY);
   return {
     groupId,
-    x: loupeSampleCoordinate(rawX),
-    y: loupeSampleCoordinate(rawY),
+    x: point.x,
+    y: point.y,
     clientX: event.clientX,
     clientY: event.clientY,
     zoom: state.loupe?.zoom ?? 2,
@@ -3583,8 +4175,48 @@ function loupeFromPointer(event: PointerEvent | WheelEvent, group: ReceivedAsset
   };
 }
 
-function loupeSampleCoordinate(value: number) {
-  return clamp((value - LOUPE_EDGE_PAD) / (1 - LOUPE_EDGE_PAD * 2), 0, 1);
+function ensureOriginalPreviewForGroup(group: ReceivedAssetGroup, priority: ThumbnailPriority) {
+  const asset = previewAssetForGroup(group);
+  const localPath = asset ? localPreviewablePath(asset) : null;
+  if (!asset || !localPath || !shouldRequestOriginalPreviewAsset(asset)) {
+    return null;
+  }
+  return originalPreviewUrlForPath(localPath, priority);
+}
+
+function normalizedPreviewPoint(target: HTMLElement, clientX: number, clientY: number) {
+  const rect = target.getBoundingClientRect();
+  const image = target.querySelector<HTMLImageElement>(":scope > img.preview-image");
+  const naturalWidth = image?.naturalWidth || rect.width || 1;
+  const naturalHeight = image?.naturalHeight || rect.height || 1;
+  const objectFit = image ? getComputedStyle(image).objectFit : "cover";
+  const imageRect = objectFit === "cover"
+    ? coverImageRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: naturalWidth, height: naturalHeight })
+    : containedImageRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, { width: naturalWidth, height: naturalHeight });
+  return normalizedPointInRect(imageRect, clientX, clientY);
+}
+
+function coverImageRect(container: { left: number; top: number; width: number; height: number }, image: { width: number; height: number }) {
+  const safeContainerWidth = Math.max(1, container.width);
+  const safeContainerHeight = Math.max(1, container.height);
+  const imageWidth = Math.max(1, image.width);
+  const imageHeight = Math.max(1, image.height);
+  const scale = Math.max(safeContainerWidth / imageWidth, safeContainerHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  return {
+    left: container.left + (safeContainerWidth - width) / 2,
+    top: container.top + (safeContainerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
+function normalizedPointInRect(rect: { left: number; top: number; width: number; height: number }, clientX: number, clientY: number) {
+  return {
+    x: clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+    y: clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 1),
+  };
 }
 
 function formatPairLabel(group: ReceivedAssetGroup) {
