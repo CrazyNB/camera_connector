@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod desktop_scan;
 pub mod error;
 pub mod lan_share;
 mod media_metadata;
@@ -23,6 +24,11 @@ pub use analysis::{
     SelectionRecommendationStatus, SelectionSource, SubjectAssessment, TechnicalAssessment,
     TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
     TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+};
+pub use desktop_scan::{
+    desktop_scan_root_key, desktop_scan_root_label, desktop_scan_transfer_id,
+    discover_desktop_media_files, DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun,
+    DesktopScannedFile, DesktopSourceStatus, DESKTOP_SCAN_PROTOCOL,
 };
 pub use error::{ImporterError, Result};
 pub use lan_share::{generate_lan_share_token, GuestMark, LanShareGuestMark, LanShareSession};
@@ -53,8 +59,8 @@ pub use runtime::{
 pub use service::{
     AccountView, AssetFacetCount, AssetGroupModelEvaluationInput, AssetGroupPage, AssetGroupQuery,
     AssetGroupSort, AssetGroupSummary, CameraConnectorDashboard, CameraConnectorService,
-    ConnectedDeviceView, PublishQueueFailureView, ReceiverConfigRequest, ReceiverSettingsUpdate,
-    SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
+    ConnectedDeviceView, DesktopProjectScanResult, PublishQueueFailureView, ReceiverConfigRequest,
+    ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
 };
 pub use storage::{
     GlobalAssetSummary, LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project,

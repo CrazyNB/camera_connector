@@ -8,6 +8,7 @@ pub enum ImportSource {
     FtpPush,
     SftpPush,
     ManualDrop,
+    DesktopScan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +29,9 @@ pub struct ReceivedAsset {
     pub display_source: Option<String>,
     pub remote_addr: Option<String>,
     pub virtual_display_path: Option<String>,
+    pub source_status: Option<String>,
+    pub source_modified_at_ms: Option<i64>,
+    pub last_seen_scan_id: Option<String>,
     pub duplicate_index: Option<usize>,
     pub duplicate_count: Option<usize>,
 }
@@ -60,6 +64,9 @@ impl ReceivedAsset {
             display_source: None,
             remote_addr: None,
             virtual_display_path: None,
+            source_status: None,
+            source_modified_at_ms: None,
+            last_seen_scan_id: None,
             duplicate_index: None,
             duplicate_count: None,
         }

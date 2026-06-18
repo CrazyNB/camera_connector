@@ -115,8 +115,12 @@ impl ObjectFormat {
         matches!(self, Self::Mov | Self::Mp4)
     }
 
+    pub fn is_photo(self) -> bool {
+        self == Self::Jpeg || self == Self::Tiff || self.is_raw()
+    }
+
     pub fn is_supported_media(self) -> bool {
-        self == Self::Jpeg || self == Self::Tiff || self.is_raw() || self.is_video()
+        self.is_photo() || self.is_video()
     }
 }
 
@@ -142,5 +146,19 @@ impl FromStr for ObjectFormat {
             "unknown" => Self::Unknown,
             _ => return Err(()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn photo_format_predicate_matches_cross_platform_asset_semantics() {
+        assert!(ObjectFormat::Jpeg.is_photo());
+        assert!(ObjectFormat::Nef.is_photo());
+        assert!(ObjectFormat::Tiff.is_photo());
+        assert!(!ObjectFormat::Mov.is_photo());
+        assert!(!ObjectFormat::Unknown.is_photo());
     }
 }

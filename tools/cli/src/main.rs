@@ -1324,6 +1324,7 @@ fn source_protocol_label(source: ImportSource) -> &'static str {
         ImportSource::FtpPush => "ftp",
         ImportSource::SftpPush => "sftp",
         ImportSource::ManualDrop => "manual",
+        ImportSource::DesktopScan => "desktop_scan",
     }
 }
 
@@ -1429,6 +1430,14 @@ mod tests {
         let result = parse_source("ftps");
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn source_protocol_label_includes_desktop_scan() {
+        assert_eq!(
+            source_protocol_label(ImportSource::DesktopScan),
+            "desktop_scan"
+        );
     }
 
     #[test]

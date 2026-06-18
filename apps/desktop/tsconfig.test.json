@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": ".tmp-test",
+    "rootDir": "."
+  },
+  "include": [
+    "src/workflow.ts",
+    "src/virtualGrid.ts",
+    "src/thumbnailScheduler.ts",
+    "src/previewStatus.ts",
+    "src/previewSync.ts",
+    "src/intelligence.ts",
+    "src/mediaPreview.ts",
+    "src/viewerMode.ts",
+    "src/imageViewport.ts",
+    "test/**/*.ts"
+  ]
+}
