@@ -392,7 +392,7 @@ internal fun ProjectAssetsScreen(
                         projectName = activeProject?.name ?: "Android LAN Share",
                     ),
                     projectSnapshotLoader = {
-                        coreGateway.loadProjectAssets(ProjectAssetQuery())
+                        loadProjectSyncSnapshotAssets(coreGateway)
                     },
                 )
                 val server = LanShareHttpServer(router)
@@ -1831,6 +1831,23 @@ internal fun ProjectReceiverLaunchPanel(
 
 internal fun receiverEndpointLabel(receiver: ReceiverState, connectHost: String? = null): String =
     "${receiver.protocol} ${normalizeCameraConnectHost(connectHost)}:${receiver.port}"
+
+internal suspend fun loadProjectSyncSnapshotAssets(
+    coreGateway: CoreGateway,
+    pageSize: Int = 2_000,
+): List<ProjectAsset> {
+    val cleanPageSize = pageSize.coerceAtLeast(1)
+    val assets = mutableListOf<ProjectAsset>()
+    var offset = 0
+    while (true) {
+        val page = coreGateway.loadProjectAssets(ProjectAssetQuery(), offset = offset, limit = cleanPageSize)
+        assets += page
+        if (page.size < cleanPageSize) {
+            return assets
+        }
+        offset += page.size
+    }
+}
 
 private suspend fun burstRecommendationCandidateVisuals(
     context: Context,
