@@ -695,7 +695,7 @@ private fun List<ProjectAsset>.toProjectSyncSnapshotJson(token: String, exported
         val groupId = asset.id.ifBlank { asset.groupKey.ifBlank { asset.displayPath } }
         val assetId = "$groupId:primary"
         val path = asset.originalPath?.takeIf { it.isNotBlank() } ?: asset.displayPath
-        val filename = lastPathPart(path).ifBlank { lastPathPart(asset.displayPath).ifBlank { groupId } }
+        val filename = syncFilename(asset, groupId)
         val normalizedStem = normalizedStem(filename).ifBlank { normalizedStem(groupId) }
         val receivedAtMs = asset.receivedAt.toLongOrNull()
         val sourceIdentity = asset.displaySource ?: asset.username
@@ -810,6 +810,42 @@ private fun List<ProjectAsset>.toProjectSyncSnapshotJson(token: String, exported
 
 private fun lastPathPart(value: String): String =
     value.trim().replace('\\', '/').substringAfterLast('/')
+
+private fun syncFilename(asset: ProjectAsset, fallback: String): String {
+    val displayFilename = lastPathPart(asset.displayPath)
+    val originalFilename = asset.originalPath
+        ?.takeIf { it.isNotBlank() }
+        ?.let(::lastPathPart)
+        .orEmpty()
+    return originalFilename
+        .takeIf(::looksLikeMediaFilename)
+        ?: displayFilename.takeIf(::looksLikeMediaFilename)
+        ?: displayFilename.ifBlank { originalFilename.ifBlank { fallback } }
+}
+
+private fun looksLikeMediaFilename(value: String): Boolean =
+    value.substringAfterLast('.', missingDelimiterValue = "")
+        .lowercase()
+        .let { extension ->
+            extension in setOf(
+                "jpg",
+                "jpeg",
+                "heic",
+                "heif",
+                "png",
+                "dng",
+                "cr2",
+                "cr3",
+                "nef",
+                "arw",
+                "raf",
+                "rw2",
+                "orf",
+                "mov",
+                "mp4",
+                "m4v",
+            )
+        }
 
 private fun parentPath(value: String): Any {
     val normalized = value.trim().replace('\\', '/')

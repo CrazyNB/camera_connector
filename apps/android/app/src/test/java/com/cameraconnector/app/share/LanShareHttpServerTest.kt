@@ -143,6 +143,41 @@ class LanShareHttpServerTest {
     }
 
     @Test
+    fun projectSnapshotRouteUsesDisplayFilenameWhenContentUriHasNoFilename() = runBlocking {
+        val gateway = RecordingShareGateway(
+            assets = listOf(
+                ProjectAsset(
+                    id = "group-1",
+                    groupKey = "IMG_1001",
+                    displayPath = "Pictures/exports/IMG_1001.JPG",
+                    format = "Jpeg",
+                    receivedAt = "1781000001000",
+                    originalPath = "content://media/external/images/media/1001",
+                    sizeBytes = 4,
+                    hasJpeg = true,
+                ),
+            ),
+        )
+        val router = LanShareRouter(
+            gateway = gateway,
+            previewLoader = { _, _, _ -> null },
+        )
+
+        val response = router.handle(
+            LanShareRequest(method = "GET", path = "/api/s/token-1/project-snapshot"),
+        )
+        val asset = JSONObject(response.body.toString(Charsets.UTF_8))
+            .getJSONArray("assets")
+            .getJSONObject(0)
+
+        assertEquals(200, response.status)
+        assertEquals("IMG_1001.JPG", asset.getString("original_filename"))
+        assertEquals("IMG_1001.JPG", asset.getString("final_filename"))
+        assertEquals("img_1001", asset.getString("normalized_stem"))
+        assertEquals("content://media/external/images/media/1001", asset.getString("original_path"))
+    }
+
+    @Test
     fun discoveryRouteReturnsSnapshotPathForActiveShare() = runBlocking {
         val router = LanShareRouter(
             gateway = RecordingShareGateway(),
