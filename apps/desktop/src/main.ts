@@ -597,7 +597,7 @@ async function bootstrap() {
     setStatus(event.payload ? "扫描完成" : "扫描失败");
     await refreshCurrentProject(false);
     if (event.payload) {
-      await syncLanProjectContextAfterScan();
+      await syncLanProjectContext();
     }
   });
   window.addEventListener("resize", () => {
@@ -680,7 +680,7 @@ async function refreshCurrentProject(showLoadedStatus = true) {
   render();
 }
 
-async function syncLanProjectContextAfterScan() {
+async function syncLanProjectContext(showNoSourceStatus = false) {
   const projectId = state.selectedProjectId;
   if (!projectId) return;
   state.lanSyncPhase = "discovering";
@@ -692,6 +692,9 @@ async function syncLanProjectContextAfterScan() {
     const source = sources[0];
     if (!source) {
       state.lanSyncPhase = "idle";
+      if (showNoSourceStatus) {
+        state.status = "project-sync no source";
+      }
       render();
       return;
     }
@@ -1533,6 +1536,7 @@ function renderSourcePanel() {
     append(
       box,
       commandButton(state.scan?.assets_indexed ? "重新扫描" : "扫描文件夹", "source-action", () => void startScan(), Boolean(blocker)),
+      commandButton("同步局域网项目", "source-action", () => void syncLanProjectContext(true), Boolean(blocker)),
     );
   }
   return box;
