@@ -125,22 +125,31 @@ project groups or assets.
 ## Matching Policy
 
 The matcher compares snapshot facts with the desktop project's indexed assets
-after a scan.
+after a scan. The matching rules must follow the fields that current code
+actually preserves across Android/receiver and desktop scan paths. Android or
+receiver `original_path` values can be camera upload paths, SAF-backed
+`document_uri` output context, or other device-local facts; desktop
+`original_path` values are relative to the selected local scan root. Therefore
+paths are not a cross-device identity authority.
 
 Asset matching is attempted in this order:
 
-1. `original_path + format + size_bytes + capture_at_ms`
-2. `original_filename + format + size_bytes + capture_at_ms`
-3. `original_filename + format + size_bytes`
+1. `original_filename/final_filename + format + size_bytes + capture_at_ms`
+2. `normalized_stem + format + size_bytes + capture_at_ms`
+3. `original_filename/final_filename + format + size_bytes`
 4. `normalized_stem + format + size_bytes`
 5. `normalized_stem + format`
 
 Group matching is attempted in this order:
 
 1. all member assets matched with no conflicts;
-2. `source_identity + original_parent_path + normalized_stem`;
-3. `original_parent_path + normalized_stem`;
-4. `normalized_stem`.
+2. exact set of matched member local group ids collapses to one group;
+3. `source_identity + display_key`;
+4. `display_key`.
+
+`original_path` and `original_parent_path` may be used only as secondary
+diagnostic or tie-breaking inputs when both sides come from the same source
+shape. They must not make a match unique by themselves.
 
 A lower-confidence match can be applied only when it is unique. Ambiguous
 matches are not applied automatically.
