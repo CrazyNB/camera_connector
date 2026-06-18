@@ -206,6 +206,34 @@ class LanShareHttpServerTest {
     }
 
     @Test
+    fun projectSnapshotRouteRejectsWrongTokenBeforeUsingProjectLevelLoader() = runBlocking {
+        var projectLoaderCalled = false
+        val router = LanShareRouter(
+            gateway = RecordingShareGateway(),
+            previewLoader = { _, _, _ -> null },
+            discoveryInfo = LanShareDiscoveryInfo(token = "token-1", projectName = "Wedding Selects"),
+            projectSnapshotLoader = {
+                projectLoaderCalled = true
+                listOf(
+                    ProjectAsset(
+                        id = "project-wide",
+                        displayPath = "PROJECT_WIDE.JPG",
+                        format = "Jpeg",
+                        receivedAt = "11",
+                    ),
+                )
+            },
+        )
+
+        val response = router.handle(
+            LanShareRequest(method = "GET", path = "/api/s/wrong-token/project-snapshot"),
+        )
+
+        assertEquals(404, response.status)
+        assertFalse(projectLoaderCalled)
+    }
+
+    @Test
     fun guestPageIncludesRunnableClientApp() = runBlocking {
         val router = LanShareRouter(
             gateway = RecordingShareGateway(),

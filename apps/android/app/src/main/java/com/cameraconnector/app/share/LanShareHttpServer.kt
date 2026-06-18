@@ -585,6 +585,10 @@ class LanShareRouter(
     }
 
     private suspend fun projectSnapshot(token: String): LanShareResponse {
+        val info = discoveryInfo
+        if (info != null && token != info.token) {
+            return LanShareResponse.json(404, JSONObject().put("error", "snapshot_not_found"))
+        }
         val assets = projectSnapshotLoader?.invoke(token) ?: gateway.loadAssets(token)
         return LanShareResponse.json(
             200,
