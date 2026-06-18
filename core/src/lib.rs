@@ -4,6 +4,7 @@ pub mod error;
 pub mod lan_share;
 mod media_metadata;
 pub mod model;
+pub mod project_sync;
 pub mod push;
 pub mod receive;
 pub mod runtime;
@@ -36,6 +37,13 @@ pub use model::{
     group_received_assets, AssetFormatRole, AssetUserMarks, ImportSource, ObjectFormat,
     ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup,
     ReceivedAssetTechnicalDefectSummary,
+};
+pub use project_sync::{
+    PROJECT_SYNC_SCHEMA_VERSION, ProjectSyncApplySummary, ProjectSyncMatchSummary,
+    ProjectSyncProjectSummary, ProjectSyncSnapshot, ProjectSyncSnapshotAsset,
+    ProjectSyncSnapshotGroup, ProjectSyncSnapshotModelEvaluation,
+    ProjectSyncSnapshotRecommendation, ProjectSyncSnapshotUserMarks, ProjectSyncSourceDevice,
+    match_project_sync_snapshot, parse_project_sync_snapshot_json,
 };
 pub use push::{
     CameraConnectorConfig, FtpPushServer, ModelProviderSettingsConfig, PushProtocol,

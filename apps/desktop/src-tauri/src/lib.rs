@@ -24,6 +24,7 @@ pub fn run() {
             commands::get_subject_assessments_for_asset_groups,
             commands::delete_project_asset_group,
             commands::save_group_user_marks,
+            commands::sync_project_snapshot_from_path,
             commands::get_model_provider_settings_list,
             commands::save_model_provider_settings,
             commands::delete_model_provider_settings,

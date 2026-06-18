@@ -11,8 +11,8 @@ use camera_connector_core::{
     AssetGroupPage, AssetGroupQuery, BurstGroup, CameraConnectorDashboard, CameraConnectorService,
     CvPolicy, DesktopScanRun, EvaluationRunStatus, ModelProviderKind, ModelProviderSettings,
     ModelSendMode, PreviewSample, Project, ProjectEvaluationSettings, ProjectRecommendationMode,
-    PromptPack, SceneProfile, SelectionRecommendation, StoredAsset, SubjectAssessment,
-    TechnicalAssessmentPolicy,
+    ProjectSyncApplySummary, PromptPack, SceneProfile, SelectionRecommendation, StoredAsset,
+    SubjectAssessment, TechnicalAssessmentPolicy,
 };
 use image::metadata::Orientation;
 use image::{DynamicImage, GrayImage, ImageBuffer, ImageDecoder, ImageReader, Rgb, RgbImage};
@@ -237,6 +237,37 @@ pub struct DesktopCvAssessmentResponse {
 pub struct SubjectAssessmentsRequest {
     pub project_id: String,
     pub asset_group_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncProjectSnapshotRequest {
+    pub project_id: String,
+    pub snapshot_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncProjectSnapshotResponse {
+    pub matched_assets: usize,
+    pub matched_groups: usize,
+    pub applied_user_marks: usize,
+    pub applied_model_evaluations: usize,
+    pub applied_selection_recommendations: usize,
+    pub unresolved_records: usize,
+    pub ambiguous_records: usize,
+}
+
+impl From<ProjectSyncApplySummary> for SyncProjectSnapshotResponse {
+    fn from(summary: ProjectSyncApplySummary) -> Self {
+        Self {
+            matched_assets: summary.matched_assets,
+            matched_groups: summary.matched_groups,
+            applied_user_marks: summary.applied_user_marks,
+            applied_model_evaluations: summary.applied_model_evaluations,
+            applied_selection_recommendations: summary.applied_selection_recommendations,
+            unresolved_records: summary.unresolved_records,
+            ambiguous_records: summary.ambiguous_records,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1203,6 +1234,34 @@ pub fn save_group_user_marks(
             request.marked,
         )
         .map_err(desktop_error)
+}
+
+fn sync_project_snapshot_from_path_blocking(
+    service: &CameraConnectorService,
+    request: SyncProjectSnapshotRequest,
+) -> Result<SyncProjectSnapshotResponse, DesktopError> {
+    let raw = fs::read_to_string(&request.snapshot_path)
+        .map_err(camera_connector_core::ImporterError::from)
+        .map_err(desktop_error)?;
+    let snapshot =
+        camera_connector_core::parse_project_sync_snapshot_json(&raw).map_err(desktop_error)?;
+    service
+        .sync_project_snapshot(&request.project_id, &snapshot)
+        .map(SyncProjectSnapshotResponse::from)
+        .map_err(desktop_error)
+}
+
+#[tauri::command]
+pub async fn sync_project_snapshot_from_path(
+    state: State<'_, DesktopState>,
+    request: SyncProjectSnapshotRequest,
+) -> Result<SyncProjectSnapshotResponse, DesktopError> {
+    let service = state.service.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sync_project_snapshot_from_path_blocking(&service, request)
+    })
+    .await
+    .map_err(|error| thumbnail_error(format!("project snapshot sync task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -2373,6 +2432,83 @@ mod tests {
     #[test]
     fn desktop_face_detector_loads_bundled_model() {
         desktop_face_detector().expect("bundled PICO model should load");
+    }
+
+    #[test]
+    fn sync_project_snapshot_from_path_returns_compact_counts() {
+        let temp_dir = unique_temp_dir("desktop-project-sync-snapshot");
+        fs::create_dir_all(&temp_dir).expect("temp dir should create");
+        let root = temp_dir.join("photos");
+        fs::create_dir_all(&root).expect("photo root should create");
+        fs::write(root.join("IMG_5100.JPG"), [1_u8, 2, 3, 4]).expect("jpeg should write");
+
+        let service = CameraConnectorService::new(Some(temp_dir.join("config.json")));
+        let project = service
+            .create_project("Desktop Snapshot Sync")
+            .expect("project should create");
+        let scan = service
+            .create_desktop_project_scan(&project.project_id, &root)
+            .expect("scan should queue");
+        service
+            .run_desktop_project_scan(&scan.scan_id)
+            .expect("scan should complete");
+
+        let snapshot_path = temp_dir.join("snapshot.json");
+        fs::write(
+            &snapshot_path,
+            r#"{
+              "schema_version": 1,
+              "source_device": {"device_id": "phone", "device_label": "Phone", "platform": "android"},
+              "project": {"project_id": "phone-project", "name": "Phone Project", "exported_at_ms": 1781800000000},
+              "assets": [{
+                "asset_id": "remote-asset",
+                "group_id": "remote-group",
+                "original_filename": "IMG_5100.JPG",
+                "final_filename": "IMG_5100.JPG",
+                "normalized_stem": "IMG_5100",
+                "original_path": "Android/DCIM/IMG_5100.JPG",
+                "original_parent_path": "Android/DCIM",
+                "format": "jpeg",
+                "size_bytes": 4,
+                "capture_at_ms": null,
+                "received_at_ms": null,
+                "source_identity": null
+              }],
+              "groups": [{
+                "group_id": "remote-group",
+                "display_key": "IMG_5100",
+                "source_identity": null,
+                "original_parent_path": "Android/DCIM",
+                "member_asset_ids": ["remote-asset"],
+                "primary_asset_id": "remote-asset",
+                "preview_asset_id": "remote-asset",
+                "has_raw": false,
+                "has_jpeg": true,
+                "has_video": false
+              }],
+              "model_evaluations": [],
+              "selection_recommendations": [],
+              "user_marks": [{"group_id": "remote-group", "favorite": true, "marked": null}]
+            }"#,
+        )
+        .expect("snapshot should write");
+
+        let response = sync_project_snapshot_from_path_blocking(
+            &service,
+            SyncProjectSnapshotRequest {
+                project_id: project.project_id,
+                snapshot_path,
+            },
+        )
+        .expect("snapshot sync should return counts");
+
+        assert_eq!(response.matched_assets, 1);
+        assert_eq!(response.matched_groups, 1);
+        assert_eq!(response.applied_user_marks, 1);
+        assert_eq!(response.unresolved_records, 0);
+        assert_eq!(response.ambiguous_records, 0);
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]

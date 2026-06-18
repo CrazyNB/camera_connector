@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     append_transfer_record, assess_preview_sample, assess_preview_sample_with_policy,
     discover_desktop_media_files, evaluate_asset_group_with_model_provider,
-    evaluate_asset_group_with_stub, group_received_assets, read_connected_devices,
+    evaluate_asset_group_with_stub, group_received_assets, match_project_sync_snapshot,
+    read_connected_devices,
     read_receiver_runtime_status, read_transfer_log, recommend_burst_group_from_model_evaluations,
     recommend_project_model_selections, recommend_selection_with_model_provider,
     scan_received_asset_groups, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
@@ -16,13 +17,14 @@ use crate::{
     EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, GuestMark,
     ImportSource, LanShareGuestMark, LanShareSession, ModelProviderKind, ModelProviderSettings,
     ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob, ObjectFormat, PreviewSample,
-    ProjectEvaluationSettings, ProjectRecommendationMode, ProjectStatus, PromptPack,
-    PromptPackContent, PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig,
-    ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus,
-    ReceiverSettingsConfig, Result, SceneProfile, SelectionCandidateVisualInput,
-    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
-    SqliteStore, StoredAsset, StoredObjectLocation, SubjectAssessment, TechnicalAssessment,
-    TechnicalAssessmentPolicy, TransferRecord, TransferStatus,
+    ProjectEvaluationSettings, ProjectRecommendationMode, ProjectStatus, ProjectSyncApplySummary,
+    ProjectSyncSnapshot, PromptPack, PromptPackContent, PublishQueueItem, PublishQueueSummary,
+    PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig,
+    ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
+    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
+    SelectionRecommendationStatus, SelectionSource, SqliteStore, StoredAsset, StoredObjectLocation,
+    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TransferRecord,
+    TransferStatus,
 };
 
 const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
@@ -1658,6 +1660,126 @@ impl CameraConnectorService {
         self.storage_store()?.assets_for_group(project_id, group_id)
     }
 
+    pub fn sync_project_snapshot(
+        &self,
+        project_id: &str,
+        snapshot: &ProjectSyncSnapshot,
+    ) -> Result<ProjectSyncApplySummary> {
+        let store = self.storage_store()?;
+        let local_groups = store.stored_asset_groups(project_id)?;
+        let mut local_assets = Vec::new();
+        for group in &local_groups {
+            local_assets.extend(store.assets_for_group(project_id, &group.group_id)?);
+        }
+
+        let match_summary = match_project_sync_snapshot(snapshot, &local_assets, &local_groups);
+        let mut summary = ProjectSyncApplySummary {
+            matched_assets: match_summary.matched_assets.len(),
+            matched_groups: match_summary.matched_groups.len(),
+            unresolved_records: match_summary.unmatched_assets.len()
+                + match_summary.unmatched_groups.len(),
+            ambiguous_records: match_summary.ambiguous_assets.len()
+                + match_summary.ambiguous_groups.len(),
+            ..ProjectSyncApplySummary::default()
+        };
+
+        for marks in &snapshot.user_marks {
+            if marks.favorite.is_none() && marks.marked.is_none() {
+                continue;
+            }
+            let Some(local_group_id) = match_summary.matched_groups.get(&marks.group_id) else {
+                summary.unresolved_records += 1;
+                continue;
+            };
+            store.set_asset_group_user_marks(
+                project_id,
+                local_group_id,
+                marks.favorite,
+                marks.marked,
+            )?;
+            summary.applied_user_marks += 1;
+        }
+
+        for evaluation in &snapshot.model_evaluations {
+            let Some(local_group_id) = match_summary.matched_groups.get(&evaluation.group_id)
+            else {
+                summary.unresolved_records += 1;
+                continue;
+            };
+            store.save_model_evaluation(project_sync_model_evaluation(
+                project_id,
+                local_group_id,
+                evaluation,
+            ))?;
+            summary.applied_model_evaluations += 1;
+        }
+
+        for recommendation in &snapshot.selection_recommendations {
+            let scope = SelectionRecommendationScope::from_str(&recommendation.scope);
+            let Some(selected_group_ids) = mapped_project_sync_group_ids(
+                &recommendation.selected_group_ids,
+                &match_summary.matched_groups,
+            ) else {
+                summary.unresolved_records += 1;
+                continue;
+            };
+            let Some(candidate_group_ids) = mapped_project_sync_group_ids(
+                &recommendation.candidate_group_ids,
+                &match_summary.matched_groups,
+            ) else {
+                summary.unresolved_records += 1;
+                continue;
+            };
+            let Some(rejected_group_ids) = mapped_project_sync_group_ids(
+                &recommendation.rejected_group_ids,
+                &match_summary.matched_groups,
+            ) else {
+                summary.unresolved_records += 1;
+                continue;
+            };
+            let subject_id = match scope {
+                SelectionRecommendationScope::Project => project_id.to_string(),
+                SelectionRecommendationScope::BurstGroup => {
+                    let Some(subject_group_id) = recommendation.subject_group_id.as_ref() else {
+                        summary.unresolved_records += 1;
+                        continue;
+                    };
+                    let Some(local_group_id) = match_summary.matched_groups.get(subject_group_id)
+                    else {
+                        summary.unresolved_records += 1;
+                        continue;
+                    };
+                    local_group_id.clone()
+                }
+            };
+            store.save_selection_recommendation(SelectionRecommendation {
+                recommendation_id: format!(
+                    "project-sync-rec-{}",
+                    stable_project_sync_key(&format!(
+                        "{project_id}\t{}\t{subject_id}",
+                        recommendation.recommendation_id
+                    ))
+                ),
+                run_id: None,
+                scope,
+                project_id: project_id.to_string(),
+                subject_id,
+                selected_asset_group_ids: selected_group_ids,
+                candidate_asset_group_ids: candidate_group_ids,
+                rejected_asset_group_ids: rejected_group_ids,
+                source: SelectionSource::Imported,
+                status: SelectionRecommendationStatus::from_str(&recommendation.status),
+                confidence: recommendation.confidence,
+                reason: recommendation.reason.clone(),
+                created_at_ms: recommendation.created_at_ms,
+                updated_at_ms: recommendation.updated_at_ms,
+            })?;
+            summary.applied_selection_recommendations += 1;
+        }
+
+        Ok(summary)
+    }
+
     pub fn set_asset_group_user_marks(
         &self,
         project_id: &str,
@@ -2869,6 +2991,63 @@ fn current_time_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
+}
+
+fn mapped_project_sync_group_ids(
+    snapshot_group_ids: &[String],
+    matched_groups: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let mut local_group_ids = Vec::with_capacity(snapshot_group_ids.len());
+    for snapshot_group_id in snapshot_group_ids {
+        local_group_ids.push(matched_groups.get(snapshot_group_id)?.clone());
+    }
+    Some(local_group_ids)
+}
+
+fn project_sync_model_evaluation(
+    project_id: &str,
+    local_group_id: &str,
+    evaluation: &crate::ProjectSyncSnapshotModelEvaluation,
+) -> crate::ModelEvaluation {
+    crate::ModelEvaluation {
+        evaluation_id: format!(
+            "project-sync-eval-{}",
+            stable_project_sync_key(&format!(
+                "{project_id}\t{}\t{local_group_id}",
+                evaluation.evaluation_id
+            ))
+        ),
+        run_id: format!(
+            "project-sync-run-{}",
+            stable_project_sync_key(&format!("{project_id}\t{}", evaluation.evaluation_id))
+        ),
+        project_id: project_id.to_string(),
+        asset_group_id: local_group_id.to_string(),
+        evaluator_kind: crate::ModelEvaluatorKind::Imported,
+        evaluator_version: evaluation.evaluator_version.clone(),
+        status: crate::ModelEvaluationStatus::from_str(&evaluation.status),
+        score: evaluation.score,
+        tier: crate::ModelEvaluationTier::from_str(&evaluation.tier),
+        selectable: evaluation.selectable,
+        summary: evaluation.summary.clone(),
+        strengths: evaluation.strengths.clone(),
+        weaknesses: evaluation.weaknesses.clone(),
+        technical_warnings: evaluation.technical_warnings.clone(),
+        prompt_pack_id: evaluation.prompt_pack_id.clone(),
+        prompt_pack_version: evaluation.prompt_pack_version.clone(),
+        prompt_hash: evaluation.prompt_hash.clone(),
+        created_at_ms: evaluation.created_at_ms,
+        updated_at_ms: evaluation.updated_at_ms,
+    }
+}
+
+fn stable_project_sync_key(value: &str) -> String {
+    let mut hash = 1469598103934665603_u64;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    format!("{hash:016x}")
 }
 
 fn ensure_service_project_is_active(store: &SqliteStore, project_id: &str) -> Result<()> {
