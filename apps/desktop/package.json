@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
-    "test:logic": "tsc -p tsconfig.test.json && node --test .tmp-test/test/workflow.test.js .tmp-test/test/virtualGrid.test.js .tmp-test/test/thumbnailScheduler.test.js .tmp-test/test/previewStatus.test.js .tmp-test/test/previewSync.test.js .tmp-test/test/burstDisplay.test.js .tmp-test/test/mediaPreview.test.js .tmp-test/test/viewerMode.test.js .tmp-test/test/imageViewport.test.js .tmp-test/test/intelligence.test.js",
+    "test:logic": "tsc -p tsconfig.test.json && node --test .tmp-test/test/workflow.test.js .tmp-test/test/virtualGrid.test.js .tmp-test/test/thumbnailScheduler.test.js .tmp-test/test/previewStatus.test.js .tmp-test/test/previewSync.test.js .tmp-test/test/lanProjectSync.test.js .tmp-test/test/burstDisplay.test.js .tmp-test/test/mediaPreview.test.js .tmp-test/test/viewerMode.test.js .tmp-test/test/imageViewport.test.js .tmp-test/test/intelligence.test.js",
     "tauri": "tauri"
   },
   "dependencies": {

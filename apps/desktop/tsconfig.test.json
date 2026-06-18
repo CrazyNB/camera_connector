@@ -13,6 +13,7 @@
     "src/thumbnailScheduler.ts",
     "src/previewStatus.ts",
     "src/previewSync.ts",
+    "src/lanProjectSync.ts",
     "src/intelligence.ts",
     "src/mediaPreview.ts",
     "src/viewerMode.ts",

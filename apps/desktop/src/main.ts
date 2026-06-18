@@ -57,6 +57,10 @@ import {
   type SavePromptPackRequest,
 } from "./intelligence";
 import { previewBadge, previewProgress, type PreviewStage } from "./previewStatus";
+import {
+  selectLanProjectSnapshotSource,
+  type LanProjectSnapshotSource,
+} from "./lanProjectSync";
 import "./styles.css";
 
 type Project = {
@@ -182,14 +186,6 @@ type SyncProjectSnapshotResponse = {
   applied_selection_recommendations: number;
   unresolved_records: number;
   ambiguous_records: number;
-};
-
-type LanProjectSnapshotSource = {
-  device_label: string;
-  platform: string;
-  project_name: string;
-  snapshot_url: string;
-  base_url: string;
 };
 
 type LanSyncPhase = "idle" | "discovering" | "syncing" | "done" | "failed";
@@ -689,7 +685,7 @@ async function syncLanProjectContext(showNoSourceStatus = false) {
   try {
     const sources = await api.discoverLanProjectSnapshots();
     state.lanSyncSources = sources;
-    const source = sources[0];
+    const source = selectLanProjectSnapshotSource(sources, selectedProject()?.name);
     if (!source) {
       state.lanSyncPhase = "idle";
       if (showNoSourceStatus) {
