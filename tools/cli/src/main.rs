@@ -2369,6 +2369,7 @@ mod tests {
                     is_favorite: false,
                     is_flagged: false,
                     user_marks: camera_connector_core::AssetUserMarks::default(),
+                    guest_mark: None,
                 }],
                 summary: AssetGroupSummary {
                     group_count: 1,
@@ -2508,6 +2509,7 @@ mod tests {
             is_favorite: false,
             is_flagged: false,
             user_marks: camera_connector_core::AssetUserMarks::default(),
+            guest_mark: None,
         };
 
         let line = asset_group_line(&group);

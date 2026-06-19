@@ -13,16 +13,16 @@ use crate::{
     scan_received_asset_groups, AnalysisEntityType, AnalysisJob, AnalysisJobType, AssetFormatRole,
     AssetUserMarks, BurstGroup, BurstGroupingProfile, CameraConnectorConfig, ConnectedDevice,
     CvPolicy, DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun, EvaluationRun,
-    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, ImportSource,
-    ModelProviderKind, ModelProviderSettings, ModelProviderSettingsConfig, ModelSendMode,
-    NewAnalysisJob, ObjectFormat, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, ProjectStatus, PromptPack, PromptPackContent, PublishQueueItem,
-    PublishQueueSummary, PushProtocol, PushReceiverConfig, ReceivedAsset, ReceivedAssetGroup,
-    ReceiverAccountConfig, ReceiverRuntimeStatus, ReceiverSettingsConfig, Result, SceneProfile,
-    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
-    SelectionRecommendationStatus, SqliteStore, StoredAsset, StoredObjectLocation,
-    SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy, TransferRecord,
-    TransferStatus,
+    EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, GlobalAssetSummary, GuestMark,
+    ImportSource, LanShareGuestMark, LanShareSession, ModelProviderKind, ModelProviderSettings,
+    ModelProviderSettingsConfig, ModelSendMode, NewAnalysisJob, ObjectFormat, PreviewSample,
+    ProjectEvaluationSettings, ProjectRecommendationMode, ProjectStatus, PromptPack,
+    PromptPackContent, PublishQueueItem, PublishQueueSummary, PushProtocol, PushReceiverConfig,
+    ReceivedAsset, ReceivedAssetGroup, ReceiverAccountConfig, ReceiverRuntimeStatus,
+    ReceiverSettingsConfig, Result, SceneProfile, SelectionCandidateVisualInput,
+    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SqliteStore, StoredAsset, StoredObjectLocation, SubjectAssessment, TechnicalAssessment,
+    TechnicalAssessmentPolicy, TransferRecord, TransferStatus,
 };
 
 const MODEL_EVALUATION_OUTPUT_SCHEMA_VERSION: &str = "model-evaluation-v1";
@@ -70,7 +70,7 @@ pub struct TransferQuery {
     pub remote_addr: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetGroupQuery {
     pub username: Option<String>,
     pub source_name: Option<String>,
@@ -82,6 +82,10 @@ pub struct AssetGroupQuery {
     pub collection: Option<String>,
     pub favorite: Option<bool>,
     pub marked: Option<bool>,
+    #[serde(default)]
+    pub user_mark_any: Vec<String>,
+    pub guest_mark: Option<String>,
+    pub min_model_score: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1602,6 +1606,50 @@ impl CameraConnectorService {
             .asset_group_page(project_id, query, offset, limit)
     }
 
+    pub fn create_lan_share_session(
+        &self,
+        project_id: &str,
+        query: AssetGroupQuery,
+        title: Option<String>,
+    ) -> Result<LanShareSession> {
+        let store = self.storage_store()?;
+        ensure_service_project_is_active(&store, project_id)?;
+        store.create_lan_share_session(project_id, query, title, current_time_ms())
+    }
+
+    pub fn stop_lan_share_session(&self, share_id: &str) -> Result<Option<LanShareSession>> {
+        self.storage_store()?
+            .stop_lan_share_session(share_id, current_time_ms())
+    }
+
+    pub fn lan_share_asset_group_page(
+        &self,
+        token: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AssetGroupPage> {
+        let store = self.storage_store()?;
+        let session = active_lan_share_session(&store, token)?;
+        store.asset_group_page(&session.project_id, session.query, offset, limit)
+    }
+
+    pub fn set_lan_share_guest_mark(
+        &self,
+        token: &str,
+        asset_group_id: &str,
+        guest_mark: Option<GuestMark>,
+    ) -> Result<Option<LanShareGuestMark>> {
+        let store = self.storage_store()?;
+        let session = active_lan_share_session(&store, token)?;
+        store.set_lan_share_guest_mark(
+            &session.share_id,
+            &session.project_id,
+            asset_group_id,
+            guest_mark,
+            current_time_ms(),
+        )
+    }
+
     pub fn project_group_assets(
         &self,
         project_id: &str,
@@ -2835,6 +2883,16 @@ fn ensure_service_project_is_active(store: &SqliteStore, project_id: &str) -> Re
     Ok(())
 }
 
+fn active_lan_share_session(store: &SqliteStore, token: &str) -> Result<LanShareSession> {
+    let session = store
+        .lan_share_session_by_token(token)?
+        .ok_or_else(|| crate::ImporterError::internal("lan share session not found"))?;
+    if !session.active {
+        return Err(crate::ImporterError::internal("lan share session stopped"));
+    }
+    Ok(session)
+}
+
 fn should_schedule_subject_assessment_for_settings(settings: &ProjectEvaluationSettings) -> bool {
     settings.scene_profile == SceneProfile::Portrait
 }
@@ -3399,7 +3457,58 @@ fn asset_group_matches(group: &ReceivedAssetGroup, query: &AssetGroupQuery) -> b
         .marked
         .map(|expected| group.user_marks.marked == expected)
         .unwrap_or(true);
-    asset_matches && favorite_matches && marked_matches
+    let user_mark_any_matches = user_mark_any_matches(group, &query.user_mark_any);
+    let guest_mark_matches = guest_mark_matches(group, query.guest_mark.as_deref());
+    let score_matches = query
+        .min_model_score
+        .map(|minimum| group_best_score(group).map(|score| score >= minimum).unwrap_or(false))
+        .unwrap_or(true);
+    asset_matches
+        && favorite_matches
+        && marked_matches
+        && user_mark_any_matches
+        && guest_mark_matches
+        && score_matches
+}
+
+fn user_mark_any_matches(group: &ReceivedAssetGroup, marks: &[String]) -> bool {
+    if marks.is_empty() {
+        return true;
+    }
+    marks.iter().any(|mark| match mark.trim().to_ascii_lowercase().as_str() {
+        "favorite" | "favorites" => group.user_marks.favorite,
+        "marked" | "mark" | "flag" | "flagged" => group.user_marks.marked,
+        _ => false,
+    })
+}
+
+fn guest_mark_matches(group: &ReceivedAssetGroup, mark: Option<&str>) -> bool {
+    match mark.map(|value| value.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(value) if value.is_empty() || value == "all" => true,
+        Some(value) if value == "none" || value == "unmarked" => group.guest_mark.is_none(),
+        Some(value) => group
+            .guest_mark
+            .map(|guest_mark| guest_mark.as_wire() == value.as_str())
+            .unwrap_or(false),
+    }
+}
+
+fn group_best_score(group: &ReceivedAssetGroup) -> Option<i64> {
+    group
+        .burst
+        .as_ref()
+        .and_then(|burst| burst.best_score)
+        .map(score_for_threshold)
+        .or(group.model_score)
+}
+
+fn score_for_threshold(score: f64) -> i64 {
+    if score > 1.0 {
+        score.round() as i64
+    } else {
+        (score * 100.0).round() as i64
+    }
 }
 
 fn group_assets(group: &ReceivedAssetGroup) -> Vec<&ReceivedAsset> {

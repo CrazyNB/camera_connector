@@ -1,6 +1,7 @@
 package com.cameraconnector.app.ui
 
 import androidx.compose.ui.graphics.Color
+import com.cameraconnector.app.core.GuestMark
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetRole
 import kotlin.math.roundToInt
@@ -142,13 +143,23 @@ internal fun ProjectAsset.recommendationBadgeText(): String? =
 internal fun ProjectAsset.compactFormatBadge(): String? =
     when {
         hasJpeg && hasRaw -> "JPG+RAW"
+        hasJpeg -> "JPG"
         hasRaw -> "RAW"
         hasVideo -> "视频"
         else -> null
     }
 
+internal fun ProjectAsset.guestMarkBadgeText(): String? =
+    when (guestMark) {
+        GuestMark.Favorite -> "访客 收藏"
+        GuestMark.Marked -> "访客 标记"
+        GuestMark.Reject -> "访客 删除"
+        null -> null
+    }
+
 internal fun ProjectAsset.tileAuxiliaryBadges(): List<String> =
     buildList {
+        guestMarkBadgeText()?.let(::add)
         if (userMarks.favorite) add("收藏")
         if (userMarks.marked) add("标记")
         tileRiskAuxiliaryBadge()?.let(::add)

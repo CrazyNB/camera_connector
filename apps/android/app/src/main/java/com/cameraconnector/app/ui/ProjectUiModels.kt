@@ -93,6 +93,12 @@ internal data class ManualProjectRecommendationActionUi(
     val disabledReason: String?,
 )
 
+internal data class LanShareActionUi(
+    val enabled: Boolean,
+    val label: String,
+    val disabledReason: String?,
+)
+
 internal data class ProjectPhotoGridItemUi(
     val key: String,
     val coverAsset: ProjectAsset,
@@ -124,6 +130,14 @@ internal enum class ProjectPhotoCollection(val label: String) {
     Marked("\u6807\u8bb0"),
     TechnicalRisk("\u6280\u672f\u98ce\u9669"),
     PendingAnalysis("\u5f85\u5206\u6790"),
+}
+
+internal enum class GuestMarkFilter(val label: String, val queryValue: String?) {
+    All("全部访客", null),
+    Favorite("访客收藏", "favorite"),
+    Marked("访客标记", "marked"),
+    Reject("访客删除", "reject"),
+    None("未标记", "none"),
 }
 
 internal enum class ReceiverStartBlockReason {
@@ -272,6 +286,34 @@ internal fun manualProjectRecommendationActionUi(
         disabledReason = if (actionInFlight) "\u9879\u76ee\u4f18\u9009\u751f\u6210\u4e2d" else null,
     )
 }
+
+internal fun lanShareActionUi(
+    activeProjectId: String?,
+    assetCount: Int,
+    running: Boolean,
+): LanShareActionUi =
+    when {
+        running -> LanShareActionUi(
+            enabled = false,
+            label = "启动中",
+            disabledReason = null,
+        )
+        activeProjectId.isNullOrBlank() -> LanShareActionUi(
+            enabled = false,
+            label = "局域网选片",
+            disabledReason = "请先进入项目",
+        )
+        assetCount <= 0 -> LanShareActionUi(
+            enabled = false,
+            label = "局域网选片",
+            disabledReason = "当前没有照片",
+        )
+        else -> LanShareActionUi(
+            enabled = true,
+            label = "局域网选片",
+            disabledReason = null,
+        )
+    }
 
 
 internal fun projectRecommendationRunFeedback(run: EvaluationRunUi): String =
@@ -427,6 +469,8 @@ internal fun assetListQuery(
     selectedCollection: ProjectPhotoCollection,
     selectedFilter: AssetFormatFilter,
     selectedSort: PhotoSortMode,
+    selectedGuestMarkFilter: GuestMarkFilter = GuestMarkFilter.All,
+    selectedMinModelScore: Int? = null,
 ): ProjectAssetQuery {
     val favorite = if (selectedCollection == ProjectPhotoCollection.Favorites) true else null
     val marked = if (selectedCollection == ProjectPhotoCollection.Marked) true else null
@@ -442,6 +486,8 @@ internal fun assetListQuery(
         collection = collection,
         favorite = favorite,
         marked = marked,
+        guestMark = selectedGuestMarkFilter.queryValue,
+        minModelScore = selectedMinModelScore,
     )
 }
 

@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::media_metadata::extract_capture_time_ms;
 use crate::{
     desktop_scan_root_key, desktop_scan_root_label, desktop_scan_transfer_id,
-    group_received_assets, AnalysisEntityType, AnalysisJob, AnalysisJobStatus, AnalysisJobType,
-    AssetFacetCount, AssetGroupPage, AssetGroupQuery, AssetGroupSort, AssetGroupSummary,
-    AssetUserMarks, BurstGroup, BurstGroupingProfile, ConnectedDevice, CvPolicy,
-    DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun, DesktopScannedFile,
-    DesktopSourceStatus, EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger,
-    EvaluationRunType, ImportSource, ImporterError, ModelEvaluation, ModelEvaluationStatus,
+    generate_lan_share_token, group_received_assets, AnalysisEntityType, AnalysisJob,
+    AnalysisJobStatus, AnalysisJobType, AssetFacetCount, AssetGroupPage, AssetGroupQuery,
+    AssetGroupSort, AssetGroupSummary, AssetUserMarks, BurstGroup, BurstGroupingProfile,
+    ConnectedDevice, CvPolicy, DesktopScanIndexResult, DesktopScanPhase, DesktopScanRun,
+    DesktopScannedFile, DesktopSourceStatus, EvaluationRun, EvaluationRunStatus,
+    EvaluationRunTrigger, EvaluationRunType, GuestMark, ImportSource, ImporterError,
+    LanShareGuestMark, LanShareSession, ModelEvaluation, ModelEvaluationStatus,
     ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind, NewAnalysisJob, ObjectFormat,
     ProjectEvaluationSettings, ProjectRecommendationMode, PushProtocol, ReceivedAsset,
     ReceivedAssetBurstSummary, ReceivedAssetGroup, ReceivedAssetTechnicalDefectSummary,
@@ -448,6 +449,8 @@ impl SqliteStore {
             for table in [
                 "burst_member_manual_edits",
                 "asset_group_user_marks",
+                "lan_share_guest_marks",
+                "lan_share_sessions",
                 "subject_assessments",
                 "model_evaluations",
                 "selection_recommendations",
@@ -858,6 +861,8 @@ impl SqliteStore {
                                 user_marks_for_asset_group(connection, project_id, &group_id)?;
                             group.is_favorite = group.user_marks.favorite;
                             group.is_flagged = group.user_marks.marked;
+                            group.guest_mark =
+                                guest_mark_for_asset_group(connection, project_id, &group_id)?;
                         }
                         if asset_group_matches_analysis(&group, &query) {
                             groups.push(group);
@@ -985,6 +990,10 @@ impl SqliteStore {
                 params![project_id, group_id],
             )?;
             transaction.execute(
+                "DELETE FROM lan_share_guest_marks WHERE project_id = ?1 AND asset_group_id = ?2",
+                params![project_id, group_id],
+            )?;
+            transaction.execute(
                 "DELETE FROM burst_member_manual_edits WHERE project_id = ?1 AND member_group_id = ?2",
                 params![project_id, group_id],
             )?;
@@ -1067,6 +1076,107 @@ impl SqliteStore {
                 params![project_id, group_id, next.favorite, next.marked, now,],
             )?;
             Ok(next)
+        })
+    }
+
+    pub fn create_lan_share_session(
+        &self,
+        project_id: &str,
+        query: AssetGroupQuery,
+        title: Option<String>,
+        now_ms: i64,
+    ) -> Result<LanShareSession> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            let token = generate_lan_share_token();
+            let share_id = format!("share-{now_ms}-{}", stable_key(&token));
+            let query_json = asset_group_query_json(&query)?;
+            connection.execute(
+                "INSERT INTO lan_share_sessions (
+                    share_id, project_id, token, query_json, title, active,
+                    created_at_ms, updated_at_ms, stopped_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, NULL)",
+                params![
+                    &share_id,
+                    project_id,
+                    &token,
+                    query_json,
+                    title.as_deref(),
+                    now_ms,
+                ],
+            )?;
+            lan_share_session_by_id(connection, &share_id)?
+                .ok_or_else(|| sqlite_data_error("lan share session not found after insert"))
+        })
+    }
+
+    pub fn lan_share_session_by_token(&self, token: &str) -> Result<Option<LanShareSession>> {
+        self.with_read_connection(|connection| lan_share_session_by_token(connection, token))
+    }
+
+    pub fn stop_lan_share_session(
+        &self,
+        share_id: &str,
+        now_ms: i64,
+    ) -> Result<Option<LanShareSession>> {
+        self.with_connection(|connection| {
+            connection.execute(
+                "UPDATE lan_share_sessions
+                 SET active = 0, updated_at_ms = ?1, stopped_at_ms = ?1
+                 WHERE share_id = ?2",
+                params![now_ms, share_id],
+            )?;
+            lan_share_session_by_id(connection, share_id)
+        })
+    }
+
+    pub fn set_lan_share_guest_mark(
+        &self,
+        share_id: &str,
+        project_id: &str,
+        asset_group_id: &str,
+        guest_mark: Option<GuestMark>,
+        now_ms: i64,
+    ) -> Result<Option<LanShareGuestMark>> {
+        self.with_connection(|connection| {
+            ensure_project_exists(connection, project_id)?;
+            if lan_share_session_by_id(connection, share_id)?.is_none() {
+                return Err(sqlite_data_error("lan share session not found"));
+            }
+            if stored_asset_group_by_id(connection, project_id, asset_group_id)?.is_none() {
+                return Err(sqlite_data_error("asset group not found"));
+            }
+            if let Some(guest_mark) = guest_mark {
+                connection.execute(
+                    "INSERT INTO lan_share_guest_marks (
+                        share_id, project_id, asset_group_id, guest_mark, updated_at_ms
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(share_id, asset_group_id) DO UPDATE SET
+                        project_id = excluded.project_id,
+                        guest_mark = excluded.guest_mark,
+                        updated_at_ms = excluded.updated_at_ms",
+                    params![
+                        share_id,
+                        project_id,
+                        asset_group_id,
+                        guest_mark.as_wire(),
+                        now_ms,
+                    ],
+                )?;
+                return Ok(Some(LanShareGuestMark {
+                    share_id: share_id.to_string(),
+                    project_id: project_id.to_string(),
+                    asset_group_id: asset_group_id.to_string(),
+                    guest_mark,
+                    updated_at_ms: now_ms,
+                }));
+            }
+            connection.execute(
+                "DELETE FROM lan_share_guest_marks
+                 WHERE share_id = ?1 AND project_id = ?2 AND asset_group_id = ?3",
+                params![share_id, project_id, asset_group_id],
+            )?;
+            Ok(None)
         })
     }
 
@@ -3184,6 +3294,90 @@ fn user_marks_for_asset_group(
         .map(|marks| marks.unwrap_or_default())
 }
 
+fn guest_mark_for_asset_group(
+    connection: &Connection,
+    project_id: &str,
+    group_id: &str,
+) -> std::result::Result<Option<GuestMark>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT marks.guest_mark
+             FROM lan_share_guest_marks marks
+             JOIN lan_share_sessions sessions ON sessions.share_id = marks.share_id
+             WHERE marks.project_id = ?1
+               AND marks.asset_group_id = ?2
+               AND sessions.active = 1
+             ORDER BY marks.updated_at_ms DESC, sessions.created_at_ms DESC
+             LIMIT 1",
+            params![project_id, group_id],
+            |row| {
+                let raw: String = row.get(0)?;
+                GuestMark::from_wire(&raw)
+                    .ok_or_else(|| sqlite_data_error(format!("invalid guest mark: {raw}")))
+            },
+        )
+        .optional()
+}
+
+fn lan_share_session_by_id(
+    connection: &Connection,
+    share_id: &str,
+) -> std::result::Result<Option<LanShareSession>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT share_id, project_id, token, query_json, title, active,
+                    created_at_ms, updated_at_ms, stopped_at_ms
+             FROM lan_share_sessions
+             WHERE share_id = ?1",
+            params![share_id],
+            lan_share_session_from_row,
+        )
+        .optional()
+}
+
+fn lan_share_session_by_token(
+    connection: &Connection,
+    token: &str,
+) -> std::result::Result<Option<LanShareSession>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT share_id, project_id, token, query_json, title, active,
+                    created_at_ms, updated_at_ms, stopped_at_ms
+             FROM lan_share_sessions
+             WHERE token = ?1",
+            params![token],
+            lan_share_session_from_row,
+        )
+        .optional()
+}
+
+fn lan_share_session_from_row(
+    row: &Row<'_>,
+) -> std::result::Result<LanShareSession, rusqlite::Error> {
+    let query_json: String = row.get(3)?;
+    Ok(LanShareSession {
+        share_id: row.get(0)?,
+        project_id: row.get(1)?,
+        token: row.get(2)?,
+        query: asset_group_query_from_json(query_json)?,
+        title: row.get(4)?,
+        active: row.get(5)?,
+        created_at_ms: row.get(6)?,
+        updated_at_ms: row.get(7)?,
+        stopped_at_ms: row.get(8)?,
+    })
+}
+
+fn asset_group_query_json(value: &AssetGroupQuery) -> std::result::Result<String, rusqlite::Error> {
+    serde_json::to_string(value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
+fn asset_group_query_from_json(
+    value: String,
+) -> std::result::Result<AssetGroupQuery, rusqlite::Error> {
+    serde_json::from_str(&value).map_err(|error| sqlite_data_error(error.to_string()))
+}
+
 fn initialize_schema(
     connection: &Connection,
     db_path: &Path,
@@ -3455,6 +3649,27 @@ fn initialize_schema(
             PRIMARY KEY(project_id, group_id)
         );
 
+        CREATE TABLE IF NOT EXISTS lan_share_sessions (
+            share_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            token TEXT NOT NULL UNIQUE,
+            query_json TEXT NOT NULL,
+            title TEXT,
+            active INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            stopped_at_ms INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS lan_share_guest_marks (
+            share_id TEXT NOT NULL REFERENCES lan_share_sessions(share_id) ON DELETE CASCADE,
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
+            asset_group_id TEXT NOT NULL REFERENCES asset_groups(group_id) ON DELETE CASCADE,
+            guest_mark TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(share_id, asset_group_id)
+        );
+
         CREATE TABLE IF NOT EXISTS technical_assessments (
             asset_group_id TEXT NOT NULL,
             assessor_version TEXT NOT NULL,
@@ -3521,6 +3736,8 @@ fn initialize_schema(
         CREATE INDEX IF NOT EXISTS idx_burst_members_group ON burst_group_members(member_group_id, burst_group_id);
         CREATE INDEX IF NOT EXISTS idx_burst_member_manual_edits_project ON burst_member_manual_edits(project_id, action, member_group_id);
         CREATE INDEX IF NOT EXISTS idx_asset_group_user_marks_project ON asset_group_user_marks(project_id, favorite, marked);
+        CREATE INDEX IF NOT EXISTS idx_lan_share_sessions_token ON lan_share_sessions(token);
+        CREATE INDEX IF NOT EXISTS idx_lan_share_guest_marks_project ON lan_share_guest_marks(project_id, asset_group_id);
         CREATE INDEX IF NOT EXISTS idx_technical_assessments_status ON technical_assessments(status, gate_status);
         CREATE INDEX IF NOT EXISTS idx_model_evaluations_project ON model_evaluations(project_id, status, tier);
         CREATE INDEX IF NOT EXISTS idx_model_evaluations_asset_group ON model_evaluations(asset_group_id, evaluator_version);
@@ -5358,13 +5575,52 @@ fn asset_group_matches_analysis(group: &ReceivedAssetGroup, query: &AssetGroupQu
         .marked
         .map(|expected| group.user_marks.marked == expected)
         .unwrap_or(true);
+    let user_mark_any_matches = user_mark_any_matches(group, &query.user_mark_any);
+    let guest_mark_matches = guest_mark_matches(group, query.guest_mark.as_deref());
     let collection_matches = query
         .collection
         .as_ref()
         .map(|collection| asset_group_matches_collection(group, collection))
         .unwrap_or(true);
+    let score_matches = query
+        .min_model_score
+        .map(|minimum| {
+            group_best_score(group)
+                .map(score_for_threshold)
+                .map(|score| score >= minimum)
+                .unwrap_or(false)
+        })
+        .unwrap_or(true);
 
-    favorite_matches && marked_matches && collection_matches
+    favorite_matches
+        && marked_matches
+        && user_mark_any_matches
+        && guest_mark_matches
+        && collection_matches
+        && score_matches
+}
+
+fn user_mark_any_matches(group: &ReceivedAssetGroup, marks: &[String]) -> bool {
+    if marks.is_empty() {
+        return true;
+    }
+    marks.iter().any(|mark| match mark.trim().to_ascii_lowercase().as_str() {
+        "favorite" | "favorites" => group.user_marks.favorite,
+        "marked" | "mark" | "flag" | "flagged" => group.user_marks.marked,
+        _ => false,
+    })
+}
+
+fn guest_mark_matches(group: &ReceivedAssetGroup, mark: Option<&str>) -> bool {
+    match mark.map(|value| value.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(value) if value.is_empty() || value == "all" => true,
+        Some(value) if value == "none" || value == "unmarked" => group.guest_mark.is_none(),
+        Some(value) => group
+            .guest_mark
+            .map(|guest_mark| guest_mark.as_wire() == value.as_str())
+            .unwrap_or(false),
+    }
 }
 
 fn asset_group_matches_collection(group: &ReceivedAssetGroup, collection: &str) -> bool {
@@ -5448,6 +5704,14 @@ fn score_sort_key(score: Option<f64>) -> i64 {
         .filter(|value| value.is_finite())
         .map(|value| (value * 1_000_000.0).round() as i64)
         .unwrap_or(i64::MIN)
+}
+
+fn score_for_threshold(score: f64) -> i64 {
+    if score > 1.0 {
+        score.round() as i64
+    } else {
+        (score * 100.0).round() as i64
+    }
 }
 
 fn group_received_sort_time(group: &ReceivedAssetGroup) -> Option<i64> {

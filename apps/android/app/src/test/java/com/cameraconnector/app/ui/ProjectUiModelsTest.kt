@@ -2,6 +2,7 @@ package com.cameraconnector.app.ui
 
 import androidx.compose.ui.unit.dp
 import com.cameraconnector.app.core.EvaluationRunUi
+import com.cameraconnector.app.core.GuestMark
 import com.cameraconnector.app.core.PhotoSortMode
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetBurst
@@ -349,6 +350,54 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun lanShareActionRequiresActiveProjectAndAssets() {
+        assertFalse(lanShareActionUi(activeProjectId = null, assetCount = 3, running = false).enabled)
+        assertFalse(lanShareActionUi(activeProjectId = "project-1", assetCount = 0, running = false).enabled)
+        assertFalse(lanShareActionUi(activeProjectId = "project-1", assetCount = 3, running = true).enabled)
+        assertTrue(lanShareActionUi(activeProjectId = "project-1", assetCount = 3, running = false).enabled)
+    }
+
+    @Test
+    fun lanShareAssetQueryKeepsCurrentListAndCombinesTagsAsOr() {
+        val baseQuery = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.ModelSelects,
+            selectedFilter = AssetFormatFilter.Raw,
+            selectedSort = PhotoSortMode.ModelScore,
+            selectedGuestMarkFilter = GuestMarkFilter.Reject,
+            selectedMinModelScore = 80,
+        )
+        val query = lanShareAssetQuery(
+            baseQuery = baseQuery,
+            favoriteOnly = true,
+            markedOnly = true,
+            minModelScore = 70,
+        )
+
+        assertEquals("model_selects", query.collection)
+        assertEquals(com.cameraconnector.app.core.ProjectAssetRole.Raw, query.role)
+        assertEquals(PhotoSortMode.ModelScore, query.sort)
+        assertNull(query.favorite)
+        assertNull(query.marked)
+        assertEquals(listOf("favorite", "marked"), query.userMarkAny)
+        assertEquals("reject", query.guestMark)
+        assertEquals(70, query.minModelScore)
+    }
+
+    @Test
+    fun assetListQueryIncludesGuestMarkAndScoreFilters() {
+        val query = assetListQuery(
+            selectedCollection = ProjectPhotoCollection.All,
+            selectedFilter = AssetFormatFilter.All,
+            selectedSort = PhotoSortMode.LatestReceived,
+            selectedGuestMarkFilter = GuestMarkFilter.None,
+            selectedMinModelScore = 80,
+        )
+
+        assertEquals("none", query.guestMark)
+        assertEquals(80, query.minModelScore)
+    }
+
+    @Test
     fun projectPhotoGridItemsCollapseBurstMembersToBestCover() {
         val burst = ProjectAssetBurst(
             burstGroupId = "burst-1",
@@ -605,6 +654,32 @@ class ProjectUiModelsTest {
 
         assertNull(asset.burstCountBadgeText())
         assertEquals(listOf("JPG+RAW"), asset.tileAuxiliaryBadges())
+    }
+
+    @Test
+    fun jpegOnlyAssetShowsFormatBadge() {
+        val asset = projectAsset(id = "jpeg-only").copy(
+            hasJpeg = true,
+            hasRaw = false,
+        )
+
+        assertEquals(listOf("JPG"), asset.tileAuxiliaryBadges())
+    }
+
+    @Test
+    fun guestMarkBadgeIsHiddenWhenNoGuestMarkExists() {
+        assertNull(projectAsset(id = "guest-none").copy(guestMark = null).guestMarkBadgeText())
+    }
+
+    @Test
+    fun guestMarkBadgeShowsRejectAsGuestDeleteSuggestion() {
+        val asset = projectAsset(id = "guest-reject").copy(
+            guestMark = GuestMark.Reject,
+            hasJpeg = true,
+        )
+
+        assertEquals("访客 删除", asset.guestMarkBadgeText())
+        assertEquals(listOf("访客 删除", "JPG"), asset.tileAuxiliaryBadges())
     }
 
     @Test

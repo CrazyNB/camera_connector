@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -99,11 +101,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -118,6 +122,7 @@ import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DEFAULT_LISTEN_HOST
 import com.cameraconnector.app.core.DeviceAccount
+import com.cameraconnector.app.core.LanShareSessionUi
 import com.cameraconnector.app.core.ModelEvaluationPreviewInput
 import com.cameraconnector.app.core.ProjectAsset
 import com.cameraconnector.app.core.ProjectAssetQuery
@@ -137,7 +142,11 @@ import com.cameraconnector.app.media.isDecodablePreviewLocation
 import com.cameraconnector.app.media.loadPhotoMetadata
 import com.cameraconnector.app.media.loadPreviewBitmap
 import com.cameraconnector.app.media.loadPreviewSampleJson
+import com.cameraconnector.app.share.CoreLanShareGateway
+import com.cameraconnector.app.share.LanShareHttpServer
+import com.cameraconnector.app.share.LanShareRouter
 import com.cameraconnector.app.storage.AndroidStorageGateway
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -174,6 +183,8 @@ internal fun ProjectAssetsScreen(
 ) {
     var selectedFilter by remember { mutableStateOf(AssetFormatFilter.All) }
     var selectedSort by remember { mutableStateOf(PhotoSortMode.LatestReceived) }
+    var selectedGuestMarkFilter by remember { mutableStateOf(GuestMarkFilter.All) }
+    var selectedMinModelScore by remember { mutableStateOf<Int?>(null) }
     var selectedPhotoCollection by rememberSaveable { mutableStateOf(ProjectPhotoCollection.All) }
     var selectedPhoto by remember { mutableStateOf<ProjectAsset?>(null) }
     var selectedBurstPreview by remember { mutableStateOf<ProjectPhotoGridItemUi?>(null) }
@@ -185,15 +196,29 @@ internal fun ProjectAssetsScreen(
     var filterExpanded by remember { mutableStateOf(false) }
     var projectFeedbackMessage by remember { mutableStateOf<String?>(null) }
     var projectFeedbackToken by remember { mutableStateOf(0) }
+    var lanShareSession by remember { mutableStateOf<LanShareSessionUi?>(null) }
+    var lanSharePort by remember { mutableStateOf<Int?>(null) }
+    var lanShareServer by remember { mutableStateOf<LanShareHttpServer?>(null) }
+    var lanShareStarting by remember { mutableStateOf(false) }
+    var lanShareError by remember { mutableStateOf<String?>(null) }
+    var lanShareConfigVisible by remember { mutableStateOf(false) }
+    var lanShareScopeSnapshot by remember { mutableStateOf<LanShareScopeUi?>(null) }
+    var lanShareFavoriteOnly by rememberSaveable { mutableStateOf(false) }
+    var lanShareMarkedOnly by rememberSaveable { mutableStateOf(false) }
+    var lanShareMinModelScore by rememberSaveable { mutableStateOf<Int?>(null) }
     val assetQuery = remember(
         selectedPhotoCollection,
         selectedFilter,
         selectedSort,
+        selectedGuestMarkFilter,
+        selectedMinModelScore,
     ) {
         assetListQuery(
             selectedCollection = selectedPhotoCollection,
             selectedFilter = selectedFilter,
             selectedSort = selectedSort,
+            selectedGuestMarkFilter = selectedGuestMarkFilter,
+            selectedMinModelScore = selectedMinModelScore,
         )
     }
     val filteredAssets by produceState<List<ProjectAsset>>(
@@ -203,6 +228,8 @@ internal fun ProjectAssetsScreen(
         selectedPhotoCollection,
         selectedFilter,
         selectedSort,
+        selectedGuestMarkFilter,
+        selectedMinModelScore,
         dashboard.assets,
     ) {
         value = withContext(Dispatchers.IO) {
@@ -231,9 +258,64 @@ internal fun ProjectAssetsScreen(
         manualBurstSplitTargets(selectedGridItems)
     }
     val sourceProjectId = projectState.activeProjectId
+    val activeProject = projectState.activeProjectSummary()
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val receiverConnectHost = normalizeCameraConnectHost(cameraConnectHost)
+    val lanShareUrl = remember(lanShareSession, lanSharePort, receiverConnectHost) {
+        val session = lanShareSession
+        val port = lanSharePort
+        if (session != null && port != null) {
+            "http://$receiverConnectHost:$port/s/${session.token}"
+        } else {
+            null
+        }
+    }
+    val lanShareAction = lanShareActionUi(
+        activeProjectId = sourceProjectId,
+        assetCount = 0,
+        running = lanShareStarting,
+    )
+    val lanShareQuery = remember(
+        assetQuery,
+        lanShareFavoriteOnly,
+        lanShareMarkedOnly,
+        lanShareMinModelScore,
+    ) {
+        lanShareAssetQuery(
+            baseQuery = assetQuery,
+            favoriteOnly = lanShareFavoriteOnly,
+            markedOnly = lanShareMarkedOnly,
+            minModelScore = lanShareMinModelScore,
+        )
+    }
+    val lanSharePreviewAssets by produceState<List<ProjectAsset>>(
+        initialValue = emptyList(),
+        projectState.activeProjectId,
+        lanShareQuery,
+        lanShareConfigVisible,
+    ) {
+        value = if (sourceProjectId == null) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                coreGateway.loadProjectAssets(lanShareQuery)
+            }
+        }
+    }
+    val configuredLanShareAction = lanShareActionUi(
+        activeProjectId = sourceProjectId,
+        assetCount = lanSharePreviewAssets.size,
+        running = lanShareStarting,
+    )
+    val currentLanShareScope = LanShareScopeUi(
+        projectName = activeProject?.name ?: "当前项目",
+        favoriteOnly = lanShareFavoriteOnly,
+        markedOnly = lanShareMarkedOnly,
+        minModelScore = lanShareMinModelScore,
+        assetCount = lanSharePreviewAssets.size,
+    )
     LaunchedEffect(projectFeedbackToken) {
         if (projectFeedbackMessage != null) {
             delay(1_400)
@@ -242,7 +324,89 @@ internal fun ProjectAssetsScreen(
     }
     fun showProjectFeedback(message: String) {
         projectFeedbackMessage = message
-        projectFeedbackToken += 1
+            projectFeedbackToken += 1
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            lanShareServer?.close()
+        }
+    }
+
+    fun stopLanShare(showFeedback: Boolean = true) {
+        val session = lanShareSession
+        val server = lanShareServer
+        lanShareSession = null
+        lanSharePort = null
+        lanShareServer = null
+        lanShareError = null
+        lanShareScopeSnapshot = null
+        server?.close()
+        if (session != null) {
+            coroutineScope.launch {
+                runCatching { coreGateway.stopLanShareSession(session.shareId) }
+                if (showFeedback) {
+                    showProjectFeedback("已停止多方筛选")
+                }
+            }
+        } else if (showFeedback) {
+            showProjectFeedback("已停止多方筛选")
+        }
+    }
+
+    fun startLanShare() {
+        val projectId = sourceProjectId ?: return
+        if (!configuredLanShareAction.enabled) {
+            return
+        }
+        val shareScope = currentLanShareScope
+        lanShareStarting = true
+        lanShareError = null
+        coroutineScope.launch {
+            var createdSession: LanShareSessionUi? = null
+            var createdServer: LanShareHttpServer? = null
+            runCatching {
+                val session = coreGateway.createLanShareSession(
+                    projectId = projectId,
+                    query = lanShareQuery,
+                    title = "LAN photo selection",
+                )
+                createdSession = session
+                val router = LanShareRouter(
+                    gateway = CoreLanShareGateway(coreGateway),
+                    previewLoader = previewLoader@{ token, groupId, fullQuality ->
+                        val asset = coreGateway.loadLanShareAssets(token)
+                            .firstOrNull { candidate -> candidate.assetSelectionId() == groupId }
+                            ?: return@previewLoader null
+                        val quality = if (fullQuality) PreviewQuality.FullScreen else PreviewQuality.Thumbnail
+                        val jpegQuality = if (fullQuality) 92 else 82
+                        withContext(Dispatchers.IO) {
+                            loadPreviewBitmap(context, asset.previewLocation, quality)
+                                ?.toJpegBytes(jpegQuality)
+                        }
+                    },
+                )
+                val server = LanShareHttpServer(router)
+                createdServer = server
+                val port = server.start(0)
+                Triple(session, server, port)
+            }.onSuccess { (session, server, port) ->
+                lanShareServer?.close()
+                lanShareSession = session
+                lanShareServer = server
+                lanSharePort = port
+                lanShareScopeSnapshot = shareScope
+                showProjectFeedback("多方筛选已开启")
+            }.onFailure { error ->
+                createdServer?.close()
+                createdSession?.let { session ->
+                    runCatching { coreGateway.stopLanShareSession(session.shareId) }
+                }
+                lanShareError = error.message ?: "多方筛选启动失败"
+                showProjectFeedback("多方筛选启动失败")
+            }
+            lanShareStarting = false
+        }
     }
 
     LaunchedEffect(dashboard.receiver.running) {
@@ -494,6 +658,25 @@ internal fun ProjectAssetsScreen(
             },
         )
     }
+    if (lanShareConfigVisible) {
+        LanShareConfigDialog(
+            scope = lanShareScopeSnapshot ?: currentLanShareScope,
+            action = configuredLanShareAction,
+            activeUrl = lanShareUrl,
+            error = lanShareError,
+            editable = lanShareUrl == null,
+            onFavoriteOnlyChange = { lanShareFavoriteOnly = it },
+            onMarkedOnlyChange = { lanShareMarkedOnly = it },
+            onMinModelScoreChange = { lanShareMinModelScore = it },
+            onDismiss = { lanShareConfigVisible = false },
+            onStart = ::startLanShare,
+            onStop = { stopLanShare() },
+            onCopyLink = { url ->
+                clipboardManager.setText(AnnotatedString(url))
+                showProjectFeedback("多方筛选链接已复制")
+            },
+        )
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -512,9 +695,12 @@ internal fun ProjectAssetsScreen(
             ProjectReceiverStatusStrip(
                 dashboard = dashboard,
                 projectState = projectState,
+                lanShareAction = lanShareAction,
+                lanShareUrl = lanShareUrl,
                 onOpenProjects = onOpenProjects,
                 onExpand = { onReceiverPanelExpandedChange(true) },
                 onOpenProjectIntelligence = onOpenProjectIntelligence,
+                onConfigureLanShare = { lanShareConfigVisible = true },
                 connectHost = receiverConnectHost,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -544,6 +730,16 @@ internal fun ProjectAssetsScreen(
                 PhotoSortBar(
                     selectedSort = selectedSort,
                     onSortChange = { selectedSort = it },
+                )
+                Spacer(Modifier.height(8.dp))
+                GuestMarkFilterBar(
+                    selectedFilter = selectedGuestMarkFilter,
+                    onFilterChange = { selectedGuestMarkFilter = it },
+                )
+                Spacer(Modifier.height(8.dp))
+                ModelScoreThresholdBar(
+                    selectedScore = selectedMinModelScore,
+                    onScoreChange = { selectedMinModelScore = it },
                 )
             }
             Spacer(Modifier.height(10.dp))
@@ -745,8 +941,11 @@ internal fun ProjectAssetsScreen(
                     projectState = projectState,
                     notificationPermissionGranted = notificationPermissionGranted,
                     actionsEnabled = actionsEnabled,
+                    lanShareAction = lanShareAction,
+                    lanShareUrl = lanShareUrl,
                     onOpenProjects = onOpenProjects,
                     onOpenProjectIntelligence = onOpenProjectIntelligence,
+                    onConfigureLanShare = { lanShareConfigVisible = true },
                     onConfigureAccount = onConfigureAccount,
                     onRequestNotificationPermission = onRequestNotificationPermission,
                     onStartReceiver = onStartReceiver,
@@ -973,9 +1172,12 @@ private fun BurstGroupPreviewTile(
 internal fun ProjectReceiverStatusStrip(
     dashboard: DashboardState,
     projectState: ProjectState,
+    lanShareAction: LanShareActionUi,
+    lanShareUrl: String?,
     onOpenProjects: () -> Unit,
     onExpand: () -> Unit,
     onOpenProjectIntelligence: () -> Unit,
+    onConfigureLanShare: () -> Unit,
     connectHost: String?,
     modifier: Modifier = Modifier,
 ) {
@@ -1038,7 +1240,11 @@ internal fun ProjectReceiverStatusStrip(
                 onClick = onOpenProjectIntelligence,
                 enabled = project != null,
             )
-            ProjectReceiverOverflowMenu()
+            ProjectReceiverOverflowMenu(
+                lanShareAction = lanShareAction,
+                lanShareUrl = lanShareUrl,
+                onConfigureLanShare = onConfigureLanShare,
+            )
         }
     }
 }
@@ -1094,40 +1300,323 @@ private fun ReceiverCollapseButton(
 
 @Composable
 private fun ProjectReceiverOverflowMenu(
+    lanShareAction: LanShareActionUi,
+    lanShareUrl: String?,
+    onConfigureLanShare: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val sharingActive = lanShareUrl != null
+    val actionTint = if (sharingActive) ElementSuccess else ElementBlue
     Box(modifier = modifier) {
         ReceiverHeaderIconButton(
             imageVector = Icons.Outlined.MoreVert,
-            contentDescription = "\u66f4\u591a",
+            contentDescription = "多方筛选",
             onClick = { expanded = true },
+            tint = actionTint,
         )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            containerColor = ElementSurface,
+            containerColor = ElementBackground.copy(alpha = 0.88f),
+            shape = RoundedCornerShape(10.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = BorderStroke(1.dp, ElementBorder.copy(alpha = 0.45f)),
         ) {
             DropdownMenuItem(
-                text = { Text("\u5206\u4eab") },
-                enabled = false,
-                onClick = {},
-            )
-            DropdownMenuItem(
-                text = { Text("\u591a\u4eba\u9009\u7247") },
-                enabled = false,
-                onClick = {},
+                text = {
+                    Text(
+                        text = "多方筛选",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                },
+                modifier = Modifier.height(38.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                enabled = lanShareUrl != null || lanShareAction.enabled || lanShareAction.disabledReason != null,
+                onClick = {
+                    expanded = false
+                    onConfigureLanShare()
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.Share,
+                        contentDescription = null,
+                        tint = actionTint,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
             )
         }
     }
 }
 
+private data class LanShareScopeUi(
+    val projectName: String,
+    val favoriteOnly: Boolean,
+    val markedOnly: Boolean,
+    val minModelScore: Int?,
+    val assetCount: Int,
+)
+
+private val lanShareScoreThresholdOptions = listOf<Int?>(null, 60, 70, 80)
+
+internal fun lanShareAssetQuery(
+    baseQuery: ProjectAssetQuery,
+    favoriteOnly: Boolean,
+    markedOnly: Boolean,
+    minModelScore: Int?,
+): ProjectAssetQuery =
+    baseQuery.copy(
+        userMarkAny = buildList {
+            if (favoriteOnly) {
+                add("favorite")
+            }
+            if (markedOnly) {
+                add("marked")
+            }
+        },
+        minModelScore = minModelScore,
+    )
+
+@Composable
+private fun LanShareConfigDialog(
+    scope: LanShareScopeUi,
+    action: LanShareActionUi,
+    activeUrl: String?,
+    error: String?,
+    editable: Boolean,
+    onFavoriteOnlyChange: (Boolean) -> Unit,
+    onMarkedOnlyChange: (Boolean) -> Unit,
+    onMinModelScoreChange: (Int?) -> Unit,
+    onDismiss: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onCopyLink: (String) -> Unit,
+) {
+    val sharingActive = activeUrl != null
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = ElementSurface,
+        title = {
+            Text(if (sharingActive) "多方筛选范围" else "多方筛选配置")
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = if (sharingActive) {
+                        "当前链接正在共享以下范围。"
+                    } else {
+                        "将共享当前列表筛选结果给同一局域网访客。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LanShareScopeRow(label = "项目", value = scope.projectName)
+                if (editable) {
+                    LanShareMarkOptions(
+                        favoriteOnly = scope.favoriteOnly,
+                        markedOnly = scope.markedOnly,
+                        onFavoriteOnlyChange = onFavoriteOnlyChange,
+                        onMarkedOnlyChange = onMarkedOnlyChange,
+                    )
+                    LanShareOptionGroup(
+                        label = "评分阈值",
+                        options = lanShareScoreThresholdOptions,
+                        selected = scope.minModelScore,
+                        labelForValue = { value -> value?.let { "≥$it" } ?: "不限" },
+                        onSelected = onMinModelScoreChange,
+                    )
+                } else {
+                    LanShareScopeRow(label = "标签", value = lanShareTagSummary(scope.favoriteOnly, scope.markedOnly))
+                    LanShareScopeRow(label = "评分阈值", value = scope.minModelScore?.let { "≥$it" } ?: "不限")
+                }
+                LanShareScopeRow(label = "数量", value = "${scope.assetCount} 张")
+                activeUrl?.let { url ->
+                    LanShareScopeRow(label = "链接", value = url)
+                }
+                if (!sharingActive) {
+                    action.disabledReason?.let { reason ->
+                        Text(
+                            text = reason,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ElementDanger,
+                        )
+                    }
+                }
+                if (sharingActive) {
+                    Text(
+                        text = "要改变筛选条件，请先停止当前多方筛选，再调整上方筛选后重新开始。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                error?.takeIf { it.isNotBlank() }?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ElementDanger,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (activeUrl == null) {
+                Button(
+                    enabled = action.enabled,
+                    onClick = onStart,
+                ) {
+                    Text("开始共享")
+                }
+            } else {
+                Button(
+                    onClick = { onCopyLink(activeUrl) },
+                ) {
+                    Text("复制链接")
+                }
+            }
+        },
+        dismissButton = {
+            if (activeUrl == null) {
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            } else {
+                TextButton(
+                    onClick = {
+                        onDismiss()
+                        onStop()
+                    },
+                ) {
+                    Text("停止共享")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun LanShareScopeRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun <T> LanShareOptionGroup(
+    label: String,
+    options: List<T>,
+    selected: T,
+    labelForValue: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(options) { option ->
+                FilterChipButton(
+                    label = labelForValue(option),
+                    selected = option == selected,
+                    onClick = { onSelected(option) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanShareMarkOptions(
+    favoriteOnly: Boolean,
+    markedOnly: Boolean,
+    onFavoriteOnlyChange: (Boolean) -> Unit,
+    onMarkedOnlyChange: (Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "标签",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                FilterChipButton(
+                    label = "不限",
+                    selected = !favoriteOnly && !markedOnly,
+                    onClick = {
+                        onFavoriteOnlyChange(false)
+                        onMarkedOnlyChange(false)
+                    },
+                )
+            }
+            item {
+                FilterChipButton(
+                    label = "收藏",
+                    selected = favoriteOnly,
+                    onClick = { onFavoriteOnlyChange(!favoriteOnly) },
+                )
+            }
+            item {
+                FilterChipButton(
+                    label = "标记",
+                    selected = markedOnly,
+                    onClick = { onMarkedOnlyChange(!markedOnly) },
+                )
+            }
+        }
+    }
+}
+
+private fun lanShareTagSummary(
+    favoriteOnly: Boolean,
+    markedOnly: Boolean,
+): String =
+    buildList {
+        if (favoriteOnly) {
+            add("收藏")
+        }
+        if (markedOnly) {
+            add("标记")
+        }
+    }.takeIf { it.isNotEmpty() }?.joinToString(" + ") ?: "不限"
+
 @Composable
 internal fun ProjectLaunchHeader(
     projectState: ProjectState,
     actionsEnabled: Boolean,
+    lanShareAction: LanShareActionUi,
+    lanShareUrl: String?,
     onOpenProjects: () -> Unit,
     onOpenProjectIntelligence: () -> Unit,
+    onConfigureLanShare: () -> Unit,
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1173,7 +1662,11 @@ internal fun ProjectLaunchHeader(
                 onClick = onOpenProjectIntelligence,
                 enabled = project != null,
             )
-            ProjectReceiverOverflowMenu()
+            ProjectReceiverOverflowMenu(
+                lanShareAction = lanShareAction,
+                lanShareUrl = lanShareUrl,
+                onConfigureLanShare = onConfigureLanShare,
+            )
         }
     }
 }
@@ -1184,8 +1677,11 @@ internal fun ProjectReceiverLaunchPanel(
     projectState: ProjectState,
     notificationPermissionGranted: Boolean,
     actionsEnabled: Boolean,
+    lanShareAction: LanShareActionUi,
+    lanShareUrl: String?,
     onOpenProjects: () -> Unit,
     onOpenProjectIntelligence: () -> Unit,
+    onConfigureLanShare: () -> Unit,
     onConfigureAccount: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onStartReceiver: (ReceiverSettings, String) -> Unit,
@@ -1243,8 +1739,11 @@ internal fun ProjectReceiverLaunchPanel(
             ProjectLaunchHeader(
                 projectState = projectState,
                 actionsEnabled = actionsEnabled,
+                lanShareAction = lanShareAction,
+                lanShareUrl = lanShareUrl,
                 onOpenProjects = onOpenProjects,
                 onOpenProjectIntelligence = onOpenProjectIntelligence,
+                onConfigureLanShare = onConfigureLanShare,
                 onCollapse = onCollapse,
             )
             Spacer(Modifier.height(10.dp))
@@ -1581,6 +2080,79 @@ private fun SelectionActionButtonContent(
     }
 }
 
+private fun Bitmap.toJpegBytes(quality: Int = 82): ByteArray {
+    val output = ByteArrayOutputStream()
+    compress(Bitmap.CompressFormat.JPEG, quality, output)
+    return output.toByteArray()
+}
+
+@Composable
+private fun LanShareControlStrip(
+    action: LanShareActionUi,
+    activeUrl: String?,
+    error: String?,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    ElementCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "多方筛选",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = activeUrl ?: action.disabledReason ?: "共享当前筛选结果给同一局域网访客",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (activeUrl == null) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            ElementBlue
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                if (activeUrl == null) {
+                    Button(
+                        enabled = action.enabled,
+                        onClick = onStart,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(action.label)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onStop,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("停止")
+                    }
+                }
+            }
+            error?.takeIf { it.isNotBlank() }?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ElementDanger,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 internal fun PhotoListControlRow(
     selectedCollection: ProjectPhotoCollection,
@@ -1590,7 +2162,6 @@ internal fun PhotoListControlRow(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    val activeSummary = photoListFilterSummary(selectedFilter, selectedSort)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1628,15 +2199,6 @@ internal fun PhotoListControlRow(
                 }
             }
         }
-        activeSummary?.let { summary ->
-            Text(
-                summary,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
@@ -1669,6 +2231,40 @@ internal fun AssetFormatFilterBar(
                 label = "${filter.label} $count",
                 selected = selectedFilter == filter,
                 onClick = { onFilterChange(filter) },
+            )
+        }
+    }
+}
+
+@Composable
+internal fun GuestMarkFilterBar(
+    selectedFilter: GuestMarkFilter,
+    onFilterChange: (GuestMarkFilter) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(GuestMarkFilter.entries) { filter ->
+            FilterChipButton(
+                label = filter.label,
+                selected = selectedFilter == filter,
+                onClick = { onFilterChange(filter) },
+            )
+        }
+    }
+}
+
+private val modelScoreThresholdOptions = listOf<Int?>(null, 60, 70, 80)
+
+@Composable
+internal fun ModelScoreThresholdBar(
+    selectedScore: Int?,
+    onScoreChange: (Int?) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(modelScoreThresholdOptions) { score ->
+            FilterChipButton(
+                label = score?.let { "评分 ≥$it" } ?: "评分不限",
+                selected = selectedScore == score,
+                onClick = { onScoreChange(score) },
             )
         }
     }
@@ -1833,7 +2429,7 @@ private fun auxiliaryBadgeColor(text: String): Color =
         "收藏" -> ElementSuccess
         "标记" -> ElementBlue
         "风险", "不支持预览" -> ElementDanger
-        "RAW", "JPG+RAW" -> ElementPurple
+        "RAW", "JPG", "JPG+RAW" -> ElementPurple
         "视频" -> ElementInfo
         else -> ElementInfo
     }

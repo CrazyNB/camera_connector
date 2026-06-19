@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod desktop_scan;
 pub mod error;
+pub mod lan_share;
 mod media_metadata;
 pub mod model;
 pub mod push;
@@ -30,6 +31,7 @@ pub use desktop_scan::{
     DesktopScannedFile, DesktopSourceStatus, DESKTOP_SCAN_PROTOCOL,
 };
 pub use error::{ImporterError, Result};
+pub use lan_share::{generate_lan_share_token, GuestMark, LanShareGuestMark, LanShareSession};
 pub use model::{
     group_received_assets, AssetFormatRole, AssetUserMarks, ImportSource, ObjectFormat,
     ReceivedAsset, ReceivedAssetBurstSummary, ReceivedAssetGroup,
