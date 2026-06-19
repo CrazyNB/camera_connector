@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   adjacentViewerGroup,
@@ -10,6 +11,7 @@ import {
   viewerBurstWarmWindow,
   viewerCarryoverSource,
   viewerCurrentGroup,
+  viewerReplacementAfterDelete,
   viewerQueueWindow,
   zoomViewerTransformAtPoint,
 } from "../src/viewerMode.js";
@@ -43,6 +45,12 @@ test("viewerCurrentGroup falls back to the first visible group", () => {
 test("adjacentViewerGroup wraps across the queue", () => {
   assert.equal(adjacentViewerGroup(groups, groups[0], -1)?.group_id, "group-8");
   assert.equal(adjacentViewerGroup(groups, groups[7], 1)?.group_id, "group-1");
+});
+
+test("viewerReplacementAfterDelete keeps the viewer near the deleted group", () => {
+  assert.equal(viewerReplacementAfterDelete(groups, groups[3])?.group_id, "group-5");
+  assert.equal(viewerReplacementAfterDelete(groups, groups[7])?.group_id, "group-7");
+  assert.equal(viewerReplacementAfterDelete([groups[0]], groups[0]), null);
 });
 
 test("viewerQueueWindow keeps the active group centered when possible", () => {
@@ -116,10 +124,10 @@ test("zoomViewerTransformAtPoint clamps zoom and preserves existing pan", () => 
   assert.deepEqual(next, { zoom: 8, panX: -1380, panY: -920 });
 });
 
-test("toggleViewerDoubleClickZoom zooms to 2x around the clicked image point", () => {
+test("toggleViewerDoubleClickZoom zooms to 4x around the clicked image point", () => {
   const next = toggleViewerDoubleClickZoom({ zoom: 1, panX: 0, panY: 0 }, { x: 300, y: 120 });
 
-  assert.deepEqual(next, { zoom: 2, panX: -300, panY: -120 });
+  assert.deepEqual(next, { zoom: 4, panX: -900, panY: -360 });
 });
 
 test("toggleViewerDoubleClickZoom resets when the viewer is already zoomed", () => {
@@ -143,4 +151,10 @@ test("dragViewerTransform pans only while zoomed", () => {
 
 test("resetViewerTransform restores the unzoomed viewer", () => {
   assert.deepEqual(resetViewerTransform(), { zoom: 1, panX: 0, panY: 0 });
+});
+
+test("viewer navigation keeps its centered transform while pressed", () => {
+  const css = readFileSync("src/styles.css", "utf8");
+
+  assert.match(css, /\.viewer-nav:active:not\(:disabled\)\s*{[^}]*transform:\s*translateY\(-50%\)/s);
 });

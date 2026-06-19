@@ -16,6 +16,7 @@
     "src/lanProjectSync.ts",
     "src/intelligence.ts",
     "src/mediaPreview.ts",
+    "src/lightTableLayout.ts",
     "src/viewerMode.ts",
     "src/imageViewport.ts",
     "test/**/*.ts"

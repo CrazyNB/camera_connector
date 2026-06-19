@@ -43,6 +43,15 @@ export function adjacentViewerGroup<T extends ViewerGroup>(groups: T[], currentG
   return groups[(safeIndex + direction + groups.length) % groups.length];
 }
 
+export function viewerReplacementAfterDelete<T extends ViewerGroup>(groups: T[], deletedGroup: T | null) {
+  const remaining = groups.filter((group) => !deletedGroup || viewerGroupIdentity(group) !== viewerGroupIdentity(deletedGroup));
+  if (!remaining.length) return null;
+  if (!deletedGroup) return remaining[0];
+  const deletedIndex = viewerGroupIndex(groups, deletedGroup);
+  if (deletedIndex < 0) return remaining[0];
+  return remaining[Math.min(deletedIndex, remaining.length - 1)] ?? null;
+}
+
 export function viewerQueueWindow<T extends ViewerGroup>(groups: T[], currentGroup: T | null, radius = 7) {
   if (!groups.length) return [];
   const windowSize = Math.min(groups.length, radius * 2 + 1);
@@ -118,7 +127,7 @@ export function zoomViewerTransformAtPoint(
 export function toggleViewerDoubleClickZoom(
   transform: ViewerTransform,
   imagePoint: ViewerPoint,
-  defaultZoom = 2,
+  defaultZoom = 4,
 ): ViewerTransform {
   if (transform.zoom > VIEWER_MIN_ZOOM) {
     return resetViewerTransform();

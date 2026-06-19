@@ -17,6 +17,7 @@ import {
 import { fullThumbnailConcurrency } from "./thumbnailScheduler";
 import { shouldApplyPreviewSync, type PreviewSyncQuality } from "./previewSync";
 import { visibleGridWindow, type VisibleGridWindow } from "./virtualGrid";
+import { expandedGridColumn, initialLoupeZoom, nextLoupeZoom, viewerActionScope } from "./lightTableLayout";
 import {
   adjacentViewerGroup,
   dragViewerTransform,
@@ -29,6 +30,7 @@ import {
   viewerCurrentGroup,
   viewerGroupIdentity,
   viewerQueueWindow,
+  viewerReplacementAfterDelete,
   zoomViewerTransformAtPoint,
 } from "./viewerMode";
 import { containedImageRect, normalizedContainedImagePoint } from "./imageViewport";
@@ -246,6 +248,13 @@ type DesktopCvAssessmentResponse = {
   subject_count: number;
 };
 
+type DesktopCvAssessmentProgress = DesktopCvAssessmentResponse & {
+  project_id: string;
+  scope: "project" | "group";
+  total_count: number;
+  current_group_id?: string | null;
+};
+
 type SubjectAssessment = {
   assessment_id: string;
   project_id: string;
@@ -350,6 +359,7 @@ type AppState = {
   lanSyncSources: LanProjectSnapshotSource[];
   lanSyncSummary: SyncProjectSnapshotResponse | null;
   lanSyncError: string | null;
+  cvProgress: DesktopCvAssessmentProgress | null;
   boardScrollTop: number;
   boardWidth: number;
   assetPageLoading: boolean;
@@ -392,6 +402,7 @@ const state: AppState = {
   lanSyncSources: [],
   lanSyncSummary: null,
   lanSyncError: null,
+  cvProgress: null,
   boardScrollTop: 0,
   boardWidth: 0,
   assetPageLoading: false,
@@ -400,6 +411,8 @@ const state: AppState = {
 const ASSET_PAGE_LIMIT = 96;
 const LOUPE_SHOW_DELAY_MS = 1000;
 const LOUPE_EDGE_PAD = 0.12;
+const LOUPE_OVERLAY_MAX_WIDTH = 960;
+const LOUPE_OVERLAY_HEIGHT = 620;
 const GRID_GAP = 12;
 const VIRTUAL_OVERSCAN_ROWS = 2;
 const THUMBNAIL_MIN_EDGE = 640;
@@ -497,8 +510,14 @@ const api = {
   getGroupDetail(projectId: string, groupId: string): Promise<StoredAsset[]> {
     return invoke("get_project_group_detail", { projectId, groupId });
   },
-  runDesktopCvAssessment(projectId: string, limit = 1000): Promise<DesktopCvAssessmentResponse> {
-    return invoke("run_desktop_cv_assessment", { request: { project_id: projectId, limit } });
+  runDesktopCvAssessment(
+    projectId: string,
+    limit = 1000,
+    assetGroupIds?: string[],
+  ): Promise<DesktopCvAssessmentResponse> {
+    return invoke("run_desktop_cv_assessment", {
+      request: { project_id: projectId, limit, asset_group_ids: assetGroupIds },
+    });
   },
   getSubjectAssessments(projectId: string, assetGroupIds: string[]): Promise<SubjectAssessment[]> {
     return invoke("get_subject_assessments_for_asset_groups", {
@@ -595,6 +614,13 @@ async function bootstrap() {
     if (event.payload) {
       await syncLanProjectContext();
     }
+  });
+  await listen<DesktopCvAssessmentProgress>("desktop-cv-assessment-progress", (event) => {
+    if (event.payload.project_id !== state.selectedProjectId) {
+      return;
+    }
+    state.cvProgress = event.payload;
+    render();
   });
   window.addEventListener("resize", () => {
     lastVirtualSignature = "";
@@ -1004,6 +1030,7 @@ async function deleteAssetGroup(targetGroup = state.selectedGroup) {
   if (!confirmed) {
     return;
   }
+  const replacementGroup = viewerReplacementAfterDelete(filteredGroups(), group);
   const deleted = await withBusy("删除照片组", () => api.deleteAssetGroup(projectId, group.group_id as string));
   if (!deleted) {
     await refreshCurrentProject(false);
@@ -1015,8 +1042,8 @@ async function deleteAssetGroup(targetGroup = state.selectedGroup) {
     delete remaining[group.group_id];
     state.subjectAssessments = remaining;
   }
-  state.selectedGroupId = null;
-  state.selectedGroup = null;
+  state.selectedGroupId = replacementGroup?.group_id ?? null;
+  state.selectedGroup = replacementGroup;
   state.groupDetail = [];
   state.loupe = null;
   state.status = `已删除 ${group.group_key}`;
@@ -1061,11 +1088,62 @@ function purgePreviewCachesForGroup(group: ReceivedAssetGroup) {
 async function runAnalysisJobs() {
   const projectId = state.selectedProjectId;
   if (!projectId) return;
+  state.cvProgress = {
+    project_id: projectId,
+    scope: viewerActionScope("global-quality"),
+    total_count: Math.max(1, state.assetPage?.summary.group_count ?? allGroups().length),
+    assessed_count: 0,
+    failed_count: 0,
+    skipped_count: 0,
+    subject_count: 0,
+    current_group_id: null,
+  };
+  render();
   const summary = await withBusy("运行全局质检", () => api.runDesktopCvAssessment(projectId, 2000));
   if (summary) {
-    state.status = `全局质检：${summary.assessed_count} 个照片组完成，${summary.failed_count} 失败，${summary.skipped_count} 跳过`;
+    state.status = qualityAssessmentStatus("全局质检", summary);
+    state.cvProgress = null;
     await refreshCurrentProject(false);
+  } else {
+    state.cvProgress = null;
+    render();
   }
+}
+
+async function runGroupAnalysis(targetGroup = state.selectedGroup) {
+  const projectId = state.selectedProjectId;
+  const groupId = targetGroup?.group_id;
+  if (!projectId || !groupId) {
+    return;
+  }
+  state.cvProgress = {
+    project_id: projectId,
+    scope: viewerActionScope("quality"),
+    total_count: 1,
+    assessed_count: 0,
+    failed_count: 0,
+    skipped_count: 0,
+    subject_count: 0,
+    current_group_id: groupId,
+  };
+  render();
+  const summary = await withBusy("质量检查", () => api.runDesktopCvAssessment(projectId, 1, [groupId]));
+  if (summary) {
+    state.status = qualityAssessmentStatus(targetGroup.group_key, summary);
+    state.cvProgress = null;
+    await refreshCurrentProject(false);
+  } else {
+    state.cvProgress = null;
+    render();
+  }
+}
+
+function qualityAssessmentStatus(label: string, summary: DesktopCvAssessmentResponse) {
+  const done = summary.assessed_count;
+  const failed = summary.failed_count;
+  const skipped = summary.skipped_count;
+  const subject = summary.subject_count ? `，人脸 ${summary.subject_count}` : "";
+  return `${label}：完成 ${done}，失败 ${failed}，跳过 ${skipped}${subject}`;
 }
 
 async function recommendBurst(targetGroup = state.selectedGroup) {
@@ -1286,6 +1364,7 @@ function renderTopBar() {
         el("strong", "", `${summary?.group_count ?? 0} 组`),
         el("span", "", `${summary?.asset_count ?? 0} 文件`),
         renderScanProgressPill(),
+        renderCvProgressPill(),
         renderPreviewProgressPill(),
       ),
       status,
@@ -1405,6 +1484,7 @@ function renderTopContext() {
     el("strong", "", `${summary?.group_count ?? 0} 组`),
     el("span", "", `${summary?.asset_count ?? 0} 文件`),
     renderScanProgressPill(),
+    renderCvProgressPill(),
     renderPreviewProgressPill(),
   );
   return context;
@@ -1422,6 +1502,19 @@ function renderPreviewProgressPill() {
   const pill = el("span", "progress-pill preview-progress-pill", progress.label);
   pill.title = "高清预览进度。低清表示已经可看，高清或原图表示当前预览完成。";
   pill.dataset.previewProgress = "true";
+  return pill;
+}
+
+function renderCvProgressPill() {
+  const progress = state.cvProgress;
+  if (!progress) {
+    return null;
+  }
+  const done = progress.assessed_count + progress.failed_count + progress.skipped_count;
+  const total = Math.max(progress.total_count, done);
+  const label = progress.scope === "group" ? `单张质检 ${done}/${total}` : `全局质检 ${done}/${total}`;
+  const pill = el("span", `progress-pill quality-progress-pill ${done >= total ? "ready" : "working"}`, label);
+  pill.title = `完成 ${progress.assessed_count}，失败 ${progress.failed_count}，跳过 ${progress.skipped_count}，人脸 ${progress.subject_count}`;
   return pill;
 }
 
@@ -2710,7 +2803,7 @@ function renderViewerActionDock(group: ReceivedAssetGroup) {
     dock,
     keep,
     mark,
-    commandButton("质量检查", "viewer-action", () => void runAnalysisJobs(), Boolean(state.busy)),
+    commandButton("质量检查", "viewer-action", () => void runGroupAnalysis(group), Boolean(state.busy || !group.group_id)),
     commandButton("AI 评价", "viewer-action", () => void evaluateGroupWithModel(group), Boolean(state.busy || !setup.modelReady || !group.group_id)),
     commandButton("推荐连拍", "viewer-action primary-action", () => void recommendBurst(group), Boolean(state.busy || !group.burst)),
     commandButton("移出连拍", "viewer-action", () => void removeFromBurst(group), Boolean(state.busy || !group.burst)),
@@ -2843,7 +2936,7 @@ function renderVirtualWindow(board: HTMLElement, groups: ReceivedAssetGroup[], m
     return;
   }
   lastVirtualSignature = signature;
-  windowNode.replaceChildren(...groups.slice(metrics.startIndex, metrics.endIndex).map(renderGroupCard));
+  windowNode.replaceChildren(...groups.slice(metrics.startIndex, metrics.endIndex).map((group) => renderGroupCard(group, metrics.columns)));
   prefetchThumbnailsAroundWindow(groups, metrics);
 }
 
@@ -2973,7 +3066,7 @@ function renderWorkbenchEmptyState() {
   return empty;
 }
 
-function renderGroupCard(group: ReceivedAssetGroup) {
+function renderGroupCard(group: ReceivedAssetGroup, gridColumns = 0) {
   const card = el("article", "group-card");
   const isExpanded = group.group_id === state.selectedGroupId;
   card.tabIndex = 0;
@@ -2987,6 +3080,10 @@ function renderGroupCard(group: ReceivedAssetGroup) {
   if (isExpanded) {
     card.classList.add("is-selected");
     card.classList.add("is-expanded");
+    const gridColumn = expandedGridColumn(gridColumns);
+    if (gridColumn) {
+      card.style.gridColumn = gridColumn;
+    }
   }
   const thumb = renderAssetThumb(group, "asset-thumb", isExpanded);
   append(thumb, renderThumbMeta(group));
@@ -3108,14 +3205,7 @@ function renderEvaluationPanel(group: ReceivedAssetGroup) {
   append(
     panel,
     el("h3", "", "检查结果"),
-    checkResultList([
-      ["文件", readable(sourceStatus(group)), sourceStatus(group)],
-      ["质量", readable(group.technical_gate_status ?? group.technical_status ?? "pending"), group.technical_gate_status ?? group.technical_status ?? "pending"],
-      ["AI", modelLabel(group), group.model_status ?? "pending"],
-      ["等级", readable(group.model_tier ?? "none"), group.model_tier ?? "none"],
-      ["连拍", group.burst ? `${group.burst.member_count} 张` : "无", group.burst ? "available" : "none"],
-      ["推荐", readable(group.burst?.recommendation_status ?? "none"), group.burst?.recommendation_status ?? "none"],
-    ]),
+    qualityResultList(group),
   );
   if (group.model_summary) {
     append(panel, el("p", "summary-text", group.model_summary));
@@ -3123,11 +3213,106 @@ function renderEvaluationPanel(group: ReceivedAssetGroup) {
   if (group.technical_defects.length) {
     const defects = el("div", "defects");
     for (const defect of group.technical_defects) {
-      append(defects, el("div", "defect", `${readable(defect.defect_type)} / ${readable(defect.severity)}`));
+      append(defects, el("div", "defect", userFacingTechnicalDefect(defect)));
     }
     append(panel, defects);
   }
   return panel;
+}
+
+function qualityResultList(group: ReceivedAssetGroup) {
+  const faceAssessment = latestFaceAssessment(group);
+  const rows: Array<{ label: string; value: string; status: string; note?: string }> = [
+    sourceResult(group),
+    technicalResult(group),
+    modelResult(group),
+  ];
+  if (faceAssessment) {
+    rows.push(faceResult(faceAssessment));
+  }
+  rows.push(
+    {
+      label: "连拍",
+      value: group.burst ? `${group.burst.member_count} 张` : "无",
+      status: group.burst ? "available" : "none",
+      note: group.burst ? "同一连拍序列内比较。" : "单张照片组。",
+    },
+    {
+      label: "推荐",
+      value: recommendationStatusLabel(group.burst?.recommendation_status ?? "none"),
+      status: group.burst?.recommendation_status ?? "none",
+    },
+  );
+  const list = el("div", "quality-result-list");
+  for (const row of rows) {
+    append(list, qualityResultRow(row.label, row.value, row.status, row.note));
+  }
+  return list;
+}
+
+function qualityResultRow(label: string, value: string, status: string, note = "") {
+  const row = el("div", "quality-result-row");
+  append(
+    row,
+    append(el("div", "quality-result-main"), append(el("span", "quality-label"), statusDot(checkResultDot(status)), el("span", "", label)), el("strong", "", value)),
+  );
+  if (note) {
+    append(row, el("p", "", note));
+  }
+  return row;
+}
+
+function sourceResult(group: ReceivedAssetGroup) {
+  const status = sourceStatus(group);
+  const note =
+    status === "available"
+      ? "原图路径可读取。"
+      : status === "changed"
+        ? "磁盘文件已变化，建议重新扫描。"
+        : status === "missing"
+          ? "原图路径缺失。"
+          : "";
+  return { label: "文件", value: readable(status), status, note };
+}
+
+function technicalResult(group: ReceivedAssetGroup) {
+  const status = group.technical_gate_status ?? group.technical_status ?? "pending";
+  const token = cssToken(status);
+  const value = group.technical_defects.length ? "需复核" : technicalGateStatusLabel(status);
+  const note = group.technical_defects.length
+    ? group.technical_defects.slice(0, 2).map(userFacingTechnicalDefect).join(" / ")
+    : technicalStatusNote(token);
+  return { label: "质量", value, status, note };
+}
+
+function modelResult(group: ReceivedAssetGroup) {
+  const status = group.model_status ?? "pending";
+  const tier = group.model_tier && cssToken(group.model_tier) !== "none" ? `，${modelTierLabel(group.model_tier)}` : "";
+  return {
+    label: "AI",
+    value: typeof group.model_score === "number" ? `${modelStatusLabel(status)}${tier}` : modelStatusLabel(status),
+    status,
+    note: group.model_summary ? "已有模型评价摘要。" : "当前照片组的模型评价状态。",
+  };
+}
+
+function faceResult(assessment: SubjectAssessment) {
+  const signals = subjectSignals(assessment);
+  const faceCount = signals.face_count ?? 0;
+  return {
+    label: "人脸",
+    value: technicalGateStatusLabel(assessment.gate_status),
+    status: assessment.gate_status,
+    note: faceCount ? `检测到 ${faceCount} 张人脸，风险会在图片上用细红框标出。` : "未检测到人脸。",
+  };
+}
+
+function technicalStatusNote(token: string) {
+  if (["pass", "ready", "completed"].includes(token)) return "本地质量门控通过。";
+  if (["warn", "inconclusive"].includes(token)) return "有质量风险，建议人工复核。";
+  if (["reject", "failed"].includes(token)) return "质量门控不建议入选。";
+  if (token === "unsupported") return "此格式暂不支持本地质量检查。";
+  return "还没有运行质量检查。";
 }
 
 function renderFaceRiskOverlay(group: ReceivedAssetGroup) {
@@ -4174,7 +4359,7 @@ function handleLoupeWheel(event: WheelEvent, group: ReceivedAssetGroup, maxEdge 
   }
   event.preventDefault();
   event.stopPropagation();
-  const nextZoom = clamp(loupe.zoom + (event.deltaY < 0 ? 0.2 : -0.2), 1.5, 4);
+  const nextZoom = nextLoupeZoom(loupe.zoom, event.deltaY < 0 ? "in" : "out");
   const next = {
     ...loupeFromPointer(event, group, maxEdge, original),
     zoom: nextZoom,
@@ -4245,13 +4430,13 @@ function applyLoupeDom(loupe: LoupeState, group: ReceivedAssetGroup) {
 }
 
 function positionLoupeOverlay(overlay: HTMLElement, loupe: LoupeState) {
-  const overlayWidth = Math.min(520, window.innerWidth - 16);
-  const overlayHeight = 360;
+  const overlayWidth = Math.min(LOUPE_OVERLAY_MAX_WIDTH, window.innerWidth - 16);
+  const overlayHeight = Math.min(LOUPE_OVERLAY_HEIGHT, window.innerHeight - 16);
   const gap = 18;
   const rightSide = loupe.clientX + gap + overlayWidth;
   const preferredLeft = rightSide > window.innerWidth - 8 ? loupe.clientX - overlayWidth - gap : loupe.clientX + gap;
   overlay.style.left = `${clamp(preferredLeft, 8, window.innerWidth - overlayWidth - 8)}px`;
-  overlay.style.top = `${clamp(loupe.clientY - 96, 8, window.innerHeight - overlayHeight - 8)}px`;
+  overlay.style.top = `${clamp(loupe.clientY - overlayHeight / 2, 8, window.innerHeight - overlayHeight - 8)}px`;
 }
 
 function loupeFromPointer(event: PointerEvent | WheelEvent, group: ReceivedAssetGroup, maxEdge: number, original = false): LoupeState {
@@ -4265,7 +4450,7 @@ function loupeFromPointer(event: PointerEvent | WheelEvent, group: ReceivedAsset
     y: point.y,
     clientX: event.clientX,
     clientY: event.clientY,
-    zoom: state.loupe?.zoom ?? 2,
+    zoom: initialLoupeZoom(state.loupe?.zoom),
     maxEdge,
     original,
     startedAtMs: current?.groupId === groupId ? current.startedAtMs : performance.now(),
@@ -4479,11 +4664,151 @@ function sourceStatus(group: ReceivedAssetGroup) {
   return "available";
 }
 
+function technicalGateStatusLabel(value: string | null | undefined) {
+  switch (cssToken(value ?? "")) {
+    case "pass":
+      return "通过";
+    case "warn":
+      return "有风险";
+    case "reject":
+      return "严重风险";
+    case "inconclusive":
+      return "无法判断";
+    case "unsupported":
+      return "暂不支持";
+    case "":
+    case "pending":
+    case "technical-pending":
+      return "待检查";
+    default:
+      return readable(value ?? "pending");
+  }
+}
+
+function modelStatusLabel(value: string | null | undefined) {
+  switch (cssToken(value ?? "")) {
+    case "ready":
+    case "done":
+    case "completed":
+    case "evaluated":
+      return "已评价";
+    case "running":
+    case "processing":
+    case "analyzing":
+      return "评价中";
+    case "failed":
+    case "error":
+      return "评价失败";
+    case "skipped":
+    case "":
+      return "未评价";
+    case "pending":
+    case "queued":
+      return "待评价";
+    default:
+      return readable(value ?? "pending");
+  }
+}
+
+function modelTierLabel(value: string | null | undefined) {
+  switch (cssToken(value ?? "")) {
+    case "excellent":
+      return "优秀";
+    case "good":
+      return "良好";
+    case "normal":
+      return "普通";
+    case "weak":
+      return "偏弱";
+    case "reject":
+      return "不建议入选";
+    case "":
+    case "none":
+      return "未知";
+    default:
+      return readable(value ?? "none");
+  }
+}
+
+function recommendationStatusLabel(value: string | null | undefined) {
+  switch (cssToken(value ?? "")) {
+    case "recommended":
+    case "completed":
+    case "ready":
+    case "done":
+      return "已推荐";
+    case "running":
+    case "processing":
+    case "analyzing":
+      return "推荐中";
+    case "stale":
+      return "更新中";
+    case "no-selection":
+    case "none":
+      return "未推荐";
+    case "unsupported":
+      return "不支持推荐";
+    case "failed":
+    case "error":
+      return "推荐失败";
+    case "":
+    case "pending":
+    case "queued":
+      return "待推荐";
+    default:
+      return readable(value ?? "pending");
+  }
+}
+
+function userFacingTechnicalDefect(defect: ReceivedAssetTechnicalDefectSummary) {
+  const type = cssToken(defect.defect_type);
+  const severity = cssToken(defect.severity);
+  if (type === "blur") {
+    if (severity === "severe") return "严重失焦";
+    if (severity === "high") return "失焦";
+    if (severity === "medium") return "清晰度偏软";
+    if (severity === "low") return "细节略软";
+    return "画面不够清晰";
+  }
+  if (type === "highlight-clip") {
+    if (severity === "severe") return "大面积过曝";
+    if (severity === "high") return "过曝";
+    if (severity === "medium") return "局部过曝";
+    if (severity === "low") return "高光略有溢出";
+    return "高光过曝";
+  }
+  if (type === "shadow-clip") {
+    if (severity === "severe") return "大面积死黑";
+    if (severity === "high") return "暗部死黑";
+    if (severity === "medium") return "暗部略有死黑";
+    if (severity === "low") return "暗部略暗";
+    return "暗部死黑";
+  }
+  if (type === "noise") {
+    if (severity === "severe") return "高噪点明显";
+    if (severity === "high") return "噪点偏高";
+    if (severity === "medium") return "细节略脏";
+    if (severity === "low") return "轻微噪点";
+    return "噪点偏高";
+  }
+  if (type === "color-cast") {
+    if (severity === "severe") return "严重偏色";
+    if (severity === "high") return "偏色明显";
+    if (severity === "medium") return "色彩偏色";
+    if (severity === "low") return "轻微偏色";
+    return "色彩偏色";
+  }
+  if (type === "unsupported") {
+    return "需人工确认";
+  }
+  return defect.reason?.trim() || readable(defect.defect_type);
+}
+
 function modelLabel(group: ReceivedAssetGroup) {
   if (typeof group.model_score === "number") {
-    return `${group.model_score} ${readable(group.model_tier ?? "model")}`;
+    return `${group.model_score} ${modelTierLabel(group.model_tier ?? "model")}`;
   }
-  return readable(group.model_status ?? "pending");
+  return modelStatusLabel(group.model_status ?? "pending");
 }
 
 function renderFormatBadges(group: ReceivedAssetGroup) {
@@ -4676,6 +5001,7 @@ const READABLE_LABELS: Record<string, string> = {
   failed: "失败",
   general: "通用",
   indexed: "已索引",
+  inconclusive: "无法判断",
   landscape: "风光",
   loose: "宽松",
   missing: "缺失",
@@ -4696,6 +5022,8 @@ const READABLE_LABELS: Record<string, string> = {
   setup: "待设置",
   standard: "标准",
   strict: "严格",
+  unsupported: "暂不支持",
+  warn: "有风险",
   "model select": "AI 推荐",
   "technical pending": "质量待查",
 };
