@@ -1933,7 +1933,7 @@ input:disabled {
 .loupe-overlay {
   position: fixed;
   z-index: 30;
-  width: min(520px, calc(100vw - 16px));
+  width: min(960px, calc(100vw - 16px));
   overflow: hidden;
   background: var(--chrome);
   border: 1px solid oklch(0.42 0.035 226);
@@ -1943,7 +1943,7 @@ input:disabled {
 }
 
 .loupe-crop {
-  height: 318px;
+  height: min(580px, calc(100vh - 86px));
   background-repeat: no-repeat;
 }
 
@@ -2253,13 +2253,28 @@ input:disabled {
   background: oklch(0.05 0.006 248 / 0.58);
   border: 1px solid var(--line);
   border-radius: 999px;
-  opacity: 0;
+  opacity: 0.72;
   transform: translateY(-50%);
+  transition:
+    opacity 120ms var(--ease),
+    background-color 120ms var(--ease),
+    border-color 120ms var(--ease);
 }
 
 .viewer-main-preview:hover .viewer-nav,
 .viewer-nav:focus-visible {
-  opacity: 1;
+  opacity: 0.96;
+}
+
+.viewer-nav:hover,
+.viewer-nav:focus-visible {
+  background: oklch(0.08 0.01 248 / 0.72);
+  border-color: oklch(0.43 0.02 248);
+}
+
+.viewer-nav:active:not(:disabled) {
+  background: oklch(0.1 0.012 248 / 0.82);
+  transform: translateY(-50%);
 }
 
 .viewer-nav::before {
@@ -2994,6 +3009,54 @@ input:disabled {
 .check-result-list {
   display: grid;
   gap: 7px;
+}
+
+.quality-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-result-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  background: oklch(0.09 0.01 248);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+}
+
+.quality-result-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.quality-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quality-result-main strong {
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quality-result-row p {
+  margin: 0 0 0 17px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .check-result-row {

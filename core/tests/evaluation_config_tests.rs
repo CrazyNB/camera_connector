@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::BTreeSet, fs};
 
 use camera_connector_core::{
     AnalysisJobType, CameraConnectorConfig, CameraConnectorService, CvPolicy, EvaluationRun,
@@ -7,6 +7,90 @@ use camera_connector_core::{
     StoredObjectLocation, SubjectAssessment, TechnicalAssessmentPolicy, TransferRecord,
     TransferStatus,
 };
+
+#[test]
+fn evaluation_config_tests_builtin_prompt_packs_cover_multiple_photographic_scenarios() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should create");
+    let service = CameraConnectorService::new(Some(temp_dir.path().join("config.json")));
+
+    let packs = service
+        .global_prompt_packs()
+        .expect("built-in prompt packs should list");
+    let built_in = packs
+        .iter()
+        .filter(|pack| pack.built_in)
+        .collect::<Vec<_>>();
+    let built_in_ids = built_in
+        .iter()
+        .map(|pack| pack.prompt_pack_id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    assert!(
+        built_in.len() >= 5,
+        "shipping prompt pack library should cover at least five styles/scenes"
+    );
+    for expected_id in [
+        "general-default",
+        "documentary-integrity",
+        "portrait-editorial",
+        "portrait-lifestyle",
+        "landscape-fine-art",
+        "wildlife-ethics",
+        "action-sports-moment",
+    ] {
+        assert!(
+            built_in_ids.contains(expected_id),
+            "missing built-in prompt pack {expected_id}"
+        );
+    }
+
+    let scene_profiles = built_in
+        .iter()
+        .map(|pack| pack.scene_profile.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        scene_profiles.len() >= 4,
+        "prompt packs should cover multiple scene profiles"
+    );
+
+    for pack in built_in {
+        assert_eq!(pack.distribution_folder, "builtin");
+        assert_eq!(pack.schema, "model-evaluation-v1");
+        assert!(pack.capabilities.contains(&"single_evaluation".to_string()));
+        assert!(pack.capabilities.contains(&"burst_selection".to_string()));
+        assert!(pack.capabilities.contains(&"project_selection".to_string()));
+        assert!(
+            pack.style_tags.len() >= 2,
+            "{} should expose product-facing style tags",
+            pack.prompt_pack_id
+        );
+        let markdown = service
+            .prompt_markdown_for_pack(&pack.prompt_pack_id)
+            .expect("prompt markdown should load")
+            .expect("built-in prompt markdown should exist");
+        assert!(
+            markdown.chars().count() >= 600,
+            "{} prompt is too thin to guide aesthetic judging",
+            pack.prompt_pack_id
+        );
+        assert!(
+            markdown.contains("评分维度") && markdown.contains("淘汰") && markdown.contains("连拍"),
+            "{} prompt should include scoring dimensions, rejection criteria, and burst guidance",
+            pack.prompt_pack_id
+        );
+    }
+
+    let portrait_lifestyle = service
+        .prompt_markdown_for_pack("portrait-lifestyle")
+        .expect("portrait lifestyle prompt should load")
+        .expect("portrait lifestyle prompt should exist");
+    for keyword in ["故事感", "情绪", "日系", "运动", "广角", "剪影"] {
+        assert!(
+            portrait_lifestyle.contains(keyword),
+            "portrait lifestyle prompt should cover {keyword}"
+        );
+    }
+}
 
 #[test]
 fn evaluation_config_tests_service_creates_user_prompt_pack_from_shared_preference() {

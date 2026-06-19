@@ -223,6 +223,7 @@ pub struct EnqueueModelEvaluationResponse {
 pub struct DesktopCvAssessmentRequest {
     pub project_id: String,
     pub limit: Option<usize>,
+    pub asset_group_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,6 +232,18 @@ pub struct DesktopCvAssessmentResponse {
     pub failed_count: usize,
     pub skipped_count: usize,
     pub subject_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DesktopCvAssessmentProgress {
+    pub project_id: String,
+    pub scope: String,
+    pub total_count: usize,
+    pub assessed_count: usize,
+    pub failed_count: usize,
+    pub skipped_count: usize,
+    pub subject_count: usize,
+    pub current_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -572,7 +585,9 @@ fn get_asset_original_preview_blocking(
 
     let cache_dir = state_dir.join("preview-cache").join("v1").join("original");
     fs::create_dir_all(&cache_dir).map_err(|error| {
-        thumbnail_error(format!("original preview cache could not be created: {error}"))
+        thumbnail_error(format!(
+            "original preview cache could not be created: {error}"
+        ))
     })?;
     let cache_key = original_preview_cache_key(&source_path, &metadata);
     let output_path = cache_dir.join(format!("{cache_key}.jpg"));
@@ -600,6 +615,7 @@ fn get_asset_original_preview_blocking(
 fn run_desktop_cv_assessment_blocking(
     service: &CameraConnectorService,
     request: DesktopCvAssessmentRequest,
+    app: Option<AppHandle>,
 ) -> Result<DesktopCvAssessmentResponse, DesktopError> {
     let limit = request.limit.unwrap_or(1000).clamp(1, 5000);
     let mut offset = 0usize;
@@ -608,6 +624,16 @@ fn run_desktop_cv_assessment_blocking(
     let mut failed_count = 0usize;
     let mut skipped_count = 0usize;
     let mut subject_count = 0usize;
+    let scope = if request
+        .asset_group_ids
+        .as_ref()
+        .map(|ids| ids.iter().any(|id| !id.trim().is_empty()))
+        .unwrap_or(false)
+    {
+        "group"
+    } else {
+        "project"
+    };
     let project_settings = service
         .project_evaluation_settings(&request.project_id)
         .map_err(desktop_error)?;
@@ -615,6 +641,49 @@ fn run_desktop_cv_assessment_blocking(
     let should_schedule_subjects = service
         .should_schedule_subject_assessment(&request.project_id)
         .unwrap_or(false);
+
+    if let Some(group_ids) = request.asset_group_ids.clone() {
+        let requested_ids: Vec<_> = group_ids
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .take(limit)
+            .collect();
+        let total_count = requested_ids.len().max(1);
+        for group_id in requested_ids {
+            match assess_desktop_cv_group(
+                service,
+                &request.project_id,
+                &group_id,
+                subject_policy,
+                should_schedule_subjects,
+            ) {
+                DesktopCvGroupOutcome::Assessed { subjects } => {
+                    assessed_count += 1;
+                    subject_count += subjects;
+                }
+                DesktopCvGroupOutcome::Skipped => skipped_count += 1,
+                DesktopCvGroupOutcome::Failed => failed_count += 1,
+            }
+            emit_desktop_cv_progress(
+                app.as_ref(),
+                &request.project_id,
+                scope,
+                total_count,
+                assessed_count,
+                failed_count,
+                skipped_count,
+                subject_count,
+                Some(group_id),
+            );
+        }
+        return Ok(DesktopCvAssessmentResponse {
+            assessed_count,
+            failed_count,
+            skipped_count,
+            subject_count,
+        });
+    }
 
     while assessed_count + failed_count + skipped_count < limit {
         let page = service
@@ -628,61 +697,51 @@ fn run_desktop_cv_assessment_blocking(
         if page.groups.is_empty() {
             break;
         }
+        let total_count = page.total_groups.min(limit).max(1);
         for group in page.groups {
             if assessed_count + failed_count + skipped_count >= limit {
                 break;
             }
             let Some(group_id) = group.group_id.as_deref() else {
                 skipped_count += 1;
+                emit_desktop_cv_progress(
+                    app.as_ref(),
+                    &request.project_id,
+                    scope,
+                    total_count,
+                    assessed_count,
+                    failed_count,
+                    skipped_count,
+                    subject_count,
+                    None,
+                );
                 continue;
             };
-            let assets = match service.project_group_assets(&request.project_id, group_id) {
-                Ok(assets) => assets,
-                Err(_) => {
-                    failed_count += 1;
-                    continue;
+            match assess_desktop_cv_group(
+                service,
+                &request.project_id,
+                group_id,
+                subject_policy,
+                should_schedule_subjects,
+            ) {
+                DesktopCvGroupOutcome::Assessed { subjects } => {
+                    assessed_count += 1;
+                    subject_count += subjects;
                 }
-            };
-            let Some(asset) = best_asset_for_cv(&assets) else {
-                skipped_count += 1;
-                continue;
-            };
-            let Some(source_path) = asset_local_path(asset) else {
-                skipped_count += 1;
-                continue;
-            };
-            let sample = match preview_sample_from_source_path(&source_path, 768) {
-                Ok(sample) => sample,
-                Err(_) => {
-                    failed_count += 1;
-                    continue;
-                }
-            };
-            if service
-                .assess_asset_group_preview_with_provider_configured(
-                    group_id,
-                    sample,
-                    "desktop-cv-technical-v1",
-                    false,
-                )
-                .is_ok()
-            {
-                assessed_count += 1;
-                if should_schedule_subjects {
-                    match save_desktop_face_assessment(
-                        service,
-                        &request.project_id,
-                        group_id,
-                        &source_path,
-                        subject_policy,
-                    ) {
-                        Ok(saved) => subject_count += saved,
-                        Err(_) => failed_count += 1,
-                    }
-                }
-            } else {
-                failed_count += 1;
+                DesktopCvGroupOutcome::Skipped => skipped_count += 1,
+                DesktopCvGroupOutcome::Failed => failed_count += 1,
             }
+            emit_desktop_cv_progress(
+                app.as_ref(),
+                &request.project_id,
+                scope,
+                total_count,
+                assessed_count,
+                failed_count,
+                skipped_count,
+                subject_count,
+                Some(group_id.to_string()),
+            );
         }
         if !page.has_more {
             break;
@@ -696,6 +755,90 @@ fn run_desktop_cv_assessment_blocking(
         skipped_count,
         subject_count,
     })
+}
+
+enum DesktopCvGroupOutcome {
+    Assessed { subjects: usize },
+    Skipped,
+    Failed,
+}
+
+fn assess_desktop_cv_group(
+    service: &CameraConnectorService,
+    project_id: &str,
+    group_id: &str,
+    subject_policy: TechnicalAssessmentPolicy,
+    should_schedule_subjects: bool,
+) -> DesktopCvGroupOutcome {
+    let assets = match service.project_group_assets(project_id, group_id) {
+        Ok(assets) => assets,
+        Err(_) => return DesktopCvGroupOutcome::Failed,
+    };
+    let Some(asset) = best_asset_for_cv(&assets) else {
+        return DesktopCvGroupOutcome::Skipped;
+    };
+    let Some(source_path) = asset_local_path(asset) else {
+        return DesktopCvGroupOutcome::Skipped;
+    };
+    let sample = match preview_sample_from_source_path(&source_path, 768) {
+        Ok(sample) => sample,
+        Err(_) => return DesktopCvGroupOutcome::Failed,
+    };
+    if service
+        .assess_asset_group_preview_with_provider_configured(
+            group_id,
+            sample,
+            "desktop-cv-technical-v1",
+            false,
+        )
+        .is_err()
+    {
+        return DesktopCvGroupOutcome::Failed;
+    }
+    let mut subjects = 0usize;
+    if should_schedule_subjects {
+        match save_desktop_face_assessment(
+            service,
+            project_id,
+            group_id,
+            &source_path,
+            subject_policy,
+        ) {
+            Ok(saved) => subjects += saved,
+            Err(_) => return DesktopCvGroupOutcome::Failed,
+        }
+    }
+    DesktopCvGroupOutcome::Assessed { subjects }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_desktop_cv_progress(
+    app: Option<&AppHandle>,
+    project_id: &str,
+    scope: &str,
+    total_count: usize,
+    assessed_count: usize,
+    failed_count: usize,
+    skipped_count: usize,
+    subject_count: usize,
+    current_group_id: Option<String>,
+) {
+    let Some(app) = app else {
+        return;
+    };
+    let _ = app.emit(
+        "desktop-cv-assessment-progress",
+        DesktopCvAssessmentProgress {
+            project_id: project_id.to_string(),
+            scope: scope.to_string(),
+            total_count,
+            assessed_count,
+            failed_count,
+            skipped_count,
+            subject_count,
+            current_group_id,
+        },
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -1155,12 +1298,13 @@ pub fn get_project_group_detail(
 
 #[tauri::command]
 pub async fn run_desktop_cv_assessment(
+    app: AppHandle,
     state: State<'_, DesktopState>,
     request: DesktopCvAssessmentRequest,
 ) -> Result<DesktopCvAssessmentResponse, DesktopError> {
     let service = state.service.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        run_desktop_cv_assessment_blocking(&service, request)
+        run_desktop_cv_assessment_blocking(&service, request, Some(app))
     })
     .await
     .map_err(|error| thumbnail_error(format!("desktop cv task failed: {error}")))?
@@ -1555,15 +1699,19 @@ fn write_original_preview_image(
 ) -> Result<(), DesktopError> {
     let temporary_path = output_path.with_extension(format!("jpg.{}.tmp", current_time_ms()));
     let file = File::create(&temporary_path).map_err(|error| {
-        thumbnail_error(format!("original preview file could not be created: {error}"))
+        thumbnail_error(format!(
+            "original preview file could not be created: {error}"
+        ))
     })?;
     let mut writer = BufWriter::new(file);
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 90);
-    encoder
-        .encode_image(image)
-        .map_err(|error| thumbnail_error(format!("original preview could not be encoded: {error}")))?;
+    encoder.encode_image(image).map_err(|error| {
+        thumbnail_error(format!("original preview could not be encoded: {error}"))
+    })?;
     writer.flush().map_err(|error| {
-        thumbnail_error(format!("original preview file could not be flushed: {error}"))
+        thumbnail_error(format!(
+            "original preview file could not be flushed: {error}"
+        ))
     })?;
     drop(writer);
     match fs::rename(&temporary_path, output_path) {
@@ -2243,9 +2391,11 @@ mod tests {
         let temp_dir = unique_temp_dir("desktop-original-preview-large");
         fs::create_dir_all(&temp_dir).expect("temp dir should create");
         let output_path = temp_dir.join("original.jpg");
-        let mut image = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(1600, 900, Rgb([10, 20, 30])));
+        let mut image =
+            DynamicImage::ImageRgb8(ImageBuffer::from_pixel(1600, 900, Rgb([10, 20, 30])));
 
-        write_original_preview_image(&mut image, &output_path).expect("original preview should write");
+        write_original_preview_image(&mut image, &output_path)
+            .expect("original preview should write");
 
         let output = image::open(&output_path).expect("original preview should decode");
         assert_eq!(output.dimensions(), (1600, 900));
