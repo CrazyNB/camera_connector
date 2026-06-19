@@ -74,6 +74,12 @@ internal data class PhotoDetailDecisionUi(
         get() = splitBurstTarget != null
 }
 
+internal data class PhotoDetailExportUi(
+    val enabled: Boolean,
+    val fileName: String,
+    val unavailableReason: String?,
+)
+
 internal data class BurstMemberFilmstripItemUi(
     val asset: ProjectAsset,
     val badgeText: String,
@@ -98,6 +104,33 @@ internal data class LanShareActionUi(
     val label: String,
     val disabledReason: String?,
 )
+
+internal enum class LanShareMenuAction {
+    GuestSelection,
+    ProjectSync,
+}
+
+internal data class LanShareMenuItemUi(
+    val action: LanShareMenuAction,
+    val label: String,
+)
+
+internal fun lanShareMenuItems(): List<LanShareMenuItemUi> =
+    listOf(
+        LanShareMenuItemUi(
+            action = LanShareMenuAction.GuestSelection,
+            label = "\u591a\u65b9\u7b5b\u9009",
+        ),
+        LanShareMenuItemUi(
+            action = LanShareMenuAction.ProjectSync,
+            label = "\u5c40\u57df\u7f51\u9879\u76ee\u5171\u4eab",
+        ),
+    )
+
+internal fun lanShareDialogShowsUserVisibleLink(
+    mode: LanShareMenuAction,
+    sharingActive: Boolean,
+): Boolean = mode == LanShareMenuAction.GuestSelection && sharingActive
 
 internal data class ProjectPhotoGridItemUi(
     val key: String,
@@ -754,6 +787,43 @@ internal fun photoDetailFavoriteSelected(asset: ProjectAsset): Boolean =
 
 internal fun photoDetailMarkedSelected(asset: ProjectAsset): Boolean =
     asset.userMarks.marked
+
+internal fun photoDetailExportUi(asset: ProjectAsset): PhotoDetailExportUi {
+    val fileName = photoDetailExportFileName(asset)
+    val hasPreviewSource = !asset.previewLocation.isNullOrBlank() &&
+        !asset.previewLocation.equals("null", ignoreCase = true)
+    return PhotoDetailExportUi(
+        enabled = hasPreviewSource,
+        fileName = fileName,
+        unavailableReason = if (hasPreviewSource) {
+            null
+        } else {
+            "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u7167\u7247\u9884\u89c8"
+        },
+    )
+}
+
+private fun photoDetailExportFileName(asset: ProjectAsset): String {
+    val sourceName = listOfNotNull(
+        asset.originalPath,
+        asset.displayPath,
+        asset.previewLocation,
+        asset.id,
+    )
+        .firstOrNull { it.isNotBlank() }
+        .orEmpty()
+    val baseName = sourceName
+        .substringBefore('?')
+        .substringBefore('#')
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+    val cleanName = baseName
+        .substringBeforeLast('.', baseName)
+        .replace(Regex("""[\\/:*?"<>|]+"""), "_")
+        .trim()
+        .ifBlank { asset.id.ifBlank { "photo" } }
+    return "$cleanName.jpg"
+}
 
 internal fun burstPreviewTileUi(
     item: BurstMemberFilmstripItemUi,

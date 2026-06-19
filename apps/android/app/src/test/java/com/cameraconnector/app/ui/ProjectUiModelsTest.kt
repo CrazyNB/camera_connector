@@ -11,6 +11,7 @@ import com.cameraconnector.app.core.ProjectAssetUserMarks
 import com.cameraconnector.app.core.ProjectEvaluationSettingsUi
 import com.cameraconnector.app.core.ProjectState
 import com.cameraconnector.app.core.ProjectSummary
+import com.cameraconnector.app.core.ReceiverState
 import com.cameraconnector.app.core.TechnicalAssessmentPolicyUi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -358,6 +359,121 @@ class ProjectUiModelsTest {
     }
 
     @Test
+    fun lanShareMenuSeparatesGuestSelectionFromProjectSync() {
+        assertEquals(
+            listOf("\u591a\u65b9\u7b5b\u9009", "\u5c40\u57df\u7f51\u9879\u76ee\u5171\u4eab"),
+            lanShareMenuItems().map { it.label },
+        )
+    }
+
+    @Test
+    fun projectSyncShareDoesNotExposeUserVisibleLink() {
+        assertFalse(lanShareDialogShowsUserVisibleLink(LanShareMenuAction.ProjectSync, sharingActive = true))
+        assertTrue(lanShareDialogShowsUserVisibleLink(LanShareMenuAction.GuestSelection, sharingActive = true))
+        assertFalse(lanShareDialogShowsUserVisibleLink(LanShareMenuAction.GuestSelection, sharingActive = false))
+    }
+
+    @Test
+    fun receiverAdvertisedHostUsesPhoneLanAddressAndIgnoresPublicAddresses() {
+        assertEquals(
+            "192.168.50.2",
+            receiverAdvertisedHost(
+                localIpv4Addresses = listOf("8.8.8.8", "192.168.50.2"),
+            ),
+        )
+        assertNull(
+            receiverAdvertisedHost(
+                localIpv4Addresses = listOf("8.8.8.8"),
+            ),
+        )
+    }
+
+    @Test
+    fun receiverCameraEndpointRowsShowAllLanAddressesWithPort() {
+        assertEquals(
+            listOf(
+                ReceiverCameraEndpointRowUi("\u624b\u673a\u70ed\u70b9", "192.168.43.1:2121"),
+                ReceiverCameraEndpointRowUi("\u540c Wi-Fi", "192.168.50.23:2121"),
+                ReceiverCameraEndpointRowUi("\u5176\u4ed6\u5c40\u57df\u7f51", "172.20.10.1:2121"),
+            ),
+            receiverCameraEndpointRows(
+                candidates = listOf(
+                    ReceiverLanEndpointCandidate("8.8.8.8", ReceiverLanEndpointSource.OtherLan),
+                    ReceiverLanEndpointCandidate("192.168.50.23", ReceiverLanEndpointSource.SameWifi),
+                    ReceiverLanEndpointCandidate("172.20.10.1", ReceiverLanEndpointSource.OtherLan),
+                    ReceiverLanEndpointCandidate("192.168.43.1", ReceiverLanEndpointSource.Hotspot),
+                ),
+                port = 2121,
+            ),
+        )
+    }
+
+    @Test
+    fun receiverCameraEndpointRowsShowUnavailableStateWhenNoLanAddress() {
+        assertEquals(
+            listOf(ReceiverCameraEndpointRowUi("\u672a\u68c0\u6d4b\u5230", "\u672a\u68c0\u6d4b\u5230\u624b\u673a\u5c40\u57df\u7f51\u5730\u5740")),
+            receiverCameraEndpointRows(
+                candidates = emptyList(),
+                port = 2121,
+            ),
+        )
+    }
+
+    @Test
+    fun receiverEndpointSourceSeparatesWifiHotspotAndCellularPrivateAddresses() {
+        val wifiHosts = setOf("192.168.31.158")
+
+        assertEquals(
+            ReceiverLanEndpointSource.SameWifi,
+            receiverNetworkEndpointSource(
+                host = "192.168.31.158",
+                wifiHosts = wifiHosts,
+                transportProfile = ReceiverNetworkTransportProfile(wifi = true),
+            ),
+        )
+        assertEquals(
+            ReceiverLanEndpointSource.Hotspot,
+            receiverNetworkEndpointSource(
+                host = "172.19.0.1",
+                wifiHosts = wifiHosts,
+                transportProfile = ReceiverNetworkTransportProfile(wifi = true),
+            ),
+        )
+        assertNull(
+            receiverNetworkEndpointSource(
+                host = "10.13.254.167",
+                wifiHosts = wifiHosts,
+                transportProfile = ReceiverNetworkTransportProfile(cellular = true),
+            ),
+        )
+        assertNull(
+            receiverNetworkEndpointSource(
+                host = "10.13.254.167",
+                wifiHosts = wifiHosts,
+                transportProfile = ReceiverNetworkTransportProfile(),
+            ),
+        )
+    }
+
+    @Test
+    fun receiverCollapsedStatusDoesNotExposeFtpEndpoint() {
+        val receiver = ReceiverState(
+            running = true,
+            phase = "Running",
+            protocol = "FTP",
+            authMode = "Accounts",
+            accountCount = 1,
+            host = "0.0.0.0",
+            port = 2121,
+            outputLabel = "out",
+            message = null,
+        )
+
+        assertEquals("\u8fd0\u884c\u4e2d", receiverCollapsedStatusLabel(receiver))
+        assertFalse(receiverCollapsedStatusLabel(receiver).contains("2121"))
+    }
+
+    @Test
     fun lanShareAssetQueryKeepsCurrentListAndCombinesTagsAsOr() {
         val baseQuery = assetListQuery(
             selectedCollection = ProjectPhotoCollection.ModelSelects,
@@ -566,6 +682,38 @@ class ProjectUiModelsTest {
         assertFalse(singleDecision.splitBurstEnabled)
         assertTrue(photoDetailActionBarVisible(burstDecision, hasActionCallbacks = true))
         assertTrue(burstDecision.splitBurstEnabled)
+    }
+
+    @Test
+    fun detailLongPressExportUsesPreviewBackedJpegFileName() {
+        val asset = projectAsset(id = "group-a").copy(
+            displayPath = "DCIM/Camera/DSC_0207.NEF",
+            originalPath = "D:/ps/Photos/2026/02/DSC_0207.NEF",
+            previewLocation = "/data/user/0/com.cameraconnector.app/files/previews/DSC_0207.jpg",
+        )
+
+        assertEquals(
+            PhotoDetailExportUi(
+                enabled = true,
+                fileName = "DSC_0207.jpg",
+                unavailableReason = null,
+            ),
+            photoDetailExportUi(asset),
+        )
+    }
+
+    @Test
+    fun detailLongPressExportDisabledWithoutPreviewSource() {
+        val asset = projectAsset(id = "group-a").copy(previewLocation = null)
+
+        assertEquals(
+            PhotoDetailExportUi(
+                enabled = false,
+                fileName = "group-a.jpg",
+                unavailableReason = "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u7167\u7247\u9884\u89c8",
+            ),
+            photoDetailExportUi(asset),
+        )
     }
 
     @Test

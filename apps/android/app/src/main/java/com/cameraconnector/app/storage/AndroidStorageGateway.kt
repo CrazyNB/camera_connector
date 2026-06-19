@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.provider.Settings
-import com.cameraconnector.app.core.DEFAULT_CAMERA_CONNECT_HOST
 
 class AndroidStorageGateway(private val context: Context) {
     private val preferences: SharedPreferences =
@@ -37,18 +36,6 @@ class AndroidStorageGateway(private val context: Context) {
             .apply()
     }
 
-    fun cameraConnectHost(): String =
-        preferences.getString(KEY_CAMERA_CONNECT_HOST, null)
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_CAMERA_CONNECT_HOST
-
-    fun persistCameraConnectHost(host: String) {
-        preferences.edit()
-            .putString(KEY_CAMERA_CONNECT_HOST, host.trim().ifBlank { DEFAULT_CAMERA_CONNECT_HOST })
-            .apply()
-    }
-
     fun createAppNotificationSettingsIntent(): Intent =
         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -58,7 +45,6 @@ class AndroidStorageGateway(private val context: Context) {
         const val KEY_OUTPUT_URI = "output_uri"
         const val KEY_OUTPUT_LABEL = "output_label"
         const val KEY_PROJECT_PHOTO_GRID_COLUMNS = "project_photo_grid_columns"
-        const val KEY_CAMERA_CONNECT_HOST = "camera_connect_host"
         const val DEFAULT_PROJECT_PHOTO_GRID_COLUMNS = 3
     }
 }

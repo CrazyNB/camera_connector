@@ -116,9 +116,6 @@ fun CameraConnectorApp(
     var projectPhotoGridColumnCount by rememberSaveable {
         mutableStateOf(storageGateway.projectPhotoGridColumnCount())
     }
-    var cameraConnectHost by rememberSaveable {
-        mutableStateOf(normalizeCameraConnectHost(storageGateway.cameraConnectHost()))
-    }
     var modelProviderSettings by remember { mutableStateOf(ModelProviderSettingsUi()) }
     var modelProviderSettingsList by remember { mutableStateOf<List<ModelProviderSettingsUi>>(emptyList()) }
     var globalPromptPacks by remember { mutableStateOf<List<PromptPackUi>>(emptyList()) }
@@ -129,12 +126,6 @@ fun CameraConnectorApp(
         activeProjectId = projectState.activeProjectId,
     )
     val context = LocalContext.current
-
-    fun saveCameraConnectHost(host: String) {
-        val normalized = normalizeCameraConnectHost(host)
-        cameraConnectHost = normalized
-        storageGateway.persistCameraConnectHost(normalized)
-    }
 
     fun runAction(actionName: String, action: suspend () -> Unit) {
         scope.launch {
@@ -446,8 +437,7 @@ fun CameraConnectorApp(
                             },
                             onRequestNotificationPermission = onRequestNotificationPermission,
                             actionsEnabled = actionInFlight == null,
-                            onStartReceiver = { settings, cameraHost ->
-                                saveCameraConnectHost(cameraHost)
+                            onStartReceiver = { settings ->
                                 runAction("正在启动接收服务") {
                                     coreGateway.saveReceiverSettings(settings)
                                     coreGateway.startReceiver()
@@ -458,7 +448,6 @@ fun CameraConnectorApp(
                                     coreGateway.stopReceiver()
                                 }
                             },
-                            cameraConnectHost = cameraConnectHost,
                             receiverPanelExpanded = receiverPanelExpanded,
                             onReceiverPanelExpandedChange = { expanded ->
                                 activeProjectId?.let { receiverPanelExpandedByProject[it] = expanded }

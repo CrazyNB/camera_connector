@@ -1,9 +1,15 @@
 package com.cameraconnector.app.ui
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -58,9 +64,11 @@ import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.SyncAlt
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -76,6 +84,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -119,6 +128,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.content.FileProvider
 import com.cameraconnector.app.core.CoreGateway
 import com.cameraconnector.app.core.DashboardState
 import com.cameraconnector.app.core.DeviceAccount
@@ -144,6 +154,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -166,14 +177,61 @@ internal fun PhotoDetailScreen(
     onDeleteAsset: ((String) -> Unit)? = null,
 ) {
     var fullScreenPreview by remember { mutableStateOf(false) }
+    val assetId = asset.assetSelectionId()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val exportUi = remember(assetId, asset.previewLocation, asset.displayPath, asset.originalPath) {
+        photoDetailExportUi(asset)
+    }
+    var exportActionsVisible by remember(assetId) { mutableStateOf(false) }
+    val showExportActions = {
+        if (exportUi.enabled) {
+            exportActionsVisible = true
+        } else {
+            Toast.makeText(
+                context,
+                exportUi.unavailableReason ?: "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u7167\u7247",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
     if (fullScreenPreview) {
         FullScreenPhotoPreview(
             asset = asset,
             onDismiss = { fullScreenPreview = false },
+            onLongPress = showExportActions,
         )
     }
-    val assetId = asset.assetSelectionId()
-    val scope = rememberCoroutineScope()
+    if (exportActionsVisible) {
+        PhotoDetailExportDialog(
+            exportUi = exportUi,
+            onDismiss = { exportActionsVisible = false },
+            onSave = {
+                exportActionsVisible = false
+                scope.launch {
+                    val saved = savePhotoDetailExportToGallery(context, asset, exportUi)
+                    Toast.makeText(
+                        context,
+                        if (saved) {
+                            "\u5df2\u4fdd\u5b58\u5230\u76f8\u518c"
+                        } else {
+                            "\u4fdd\u5b58\u5931\u8d25"
+                        },
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+            onShare = {
+                exportActionsVisible = false
+                scope.launch {
+                    val shared = sharePhotoDetailExport(context, asset, exportUi)
+                    if (!shared) {
+                        Toast.makeText(context, "\u5206\u4eab\u5931\u8d25", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+        )
+    }
     var dragOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
     var settleOffsetX by remember(assetId) { mutableFloatStateOf(0f) }
     var settling by remember(assetId) { mutableStateOf(false) }
@@ -294,6 +352,7 @@ internal fun PhotoDetailScreen(
                     onEvaluateModel = null,
                     onDeleteAsset = null,
                     onPreviewClick = {},
+                    onPreviewLongPress = {},
                 )
             }
             nextGroupAsset?.takeIf { showNextPage }?.let { next ->
@@ -313,6 +372,7 @@ internal fun PhotoDetailScreen(
                     onEvaluateModel = null,
                     onDeleteAsset = null,
                     onPreviewClick = {},
+                    onPreviewLongPress = {},
                 )
             }
             PhotoDetailContent(
@@ -331,6 +391,7 @@ internal fun PhotoDetailScreen(
                 onEvaluateModel = onEvaluateModel,
                 onDeleteAsset = onDeleteAsset,
                 onPreviewClick = { fullScreenPreview = true },
+                onPreviewLongPress = showExportActions,
             )
             DetailPageTurnShadow(
                 direction = dragDirection,
@@ -381,6 +442,63 @@ private fun DetailPageTurnShadow(
     }
 }
 
+@Composable
+private fun PhotoDetailExportDialog(
+    exportUi: PhotoDetailExportUi,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("\u7167\u7247\u64cd\u4f5c") },
+        text = {
+            Text(
+                text = exportUi.fileName,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        confirmButton = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    enabled = exportUi.enabled,
+                    onClick = onSave,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.PhotoLibrary,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("\u4fdd\u5b58")
+                }
+                TextButton(
+                    enabled = exportUi.enabled,
+                    onClick = onShare,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("\u5206\u4eab")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("\u53d6\u6d88")
+            }
+        },
+    )
+}
+
 private class DetailGroupSwipeCallbacks(
     val onDragStart: () -> Unit,
     val onDrag: (Float) -> Unit,
@@ -403,6 +521,7 @@ private fun PhotoDetailContent(
     onEvaluateModel: ((ProjectAsset) -> Unit)?,
     onDeleteAsset: ((String) -> Unit)?,
     onPreviewClick: () -> Unit,
+    onPreviewLongPress: () -> Unit,
 ) {
     val context = LocalContext.current
     val metadataLocation = asset.previewLocation.takeIf(::isDecodablePreviewLocation)
@@ -474,6 +593,7 @@ private fun PhotoDetailContent(
             onPrevious = previousBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
             onNext = nextBurstMember?.let { member -> { onOpenBurstMember?.invoke(member) } },
             onClick = onPreviewClick,
+            onLongPress = onPreviewLongPress,
             modifier = Modifier.fillMaxWidth(),
         )
         if (photoDetailActionBarVisible(decision, hasActionCallbacks)) {
@@ -862,6 +982,7 @@ private fun DetailPhotoCarousel(
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1013,6 +1134,7 @@ private fun DetailPhotoCarousel(
                     }
                 },
                 onClick = onClick,
+                onLongPress = onLongPress,
                 modifier = Modifier
                     .fillMaxSize()
                     .offset { IntOffset(pageOffsetX.roundToInt(), 0) },
@@ -1048,6 +1170,7 @@ private fun DetailCarouselPhotoPage(
     preferredAspectRatio: Float? = null,
     pageScale: Float = 1f,
     onClick: (() -> Unit)?,
+    onLongPress: (() -> Unit)? = null,
     onPreviewAspectRatio: ((Float) -> Unit)? = null,
     onPreviewReady: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -1069,6 +1192,7 @@ private fun DetailCarouselPhotoPage(
             contentScale = ContentScale.Fit,
             backgroundColor = ElementSurface,
             onClick = onClick,
+            onLongClick = onLongPress,
             onPreviewAspectRatio = onPreviewAspectRatio,
             onPreviewReady = onPreviewReady,
             showFallbackText = false,
@@ -1225,6 +1349,7 @@ private fun Modifier.detailHorizontalSwipe(
 internal fun FullScreenPhotoPreview(
     asset: ProjectAsset,
     onDismiss: () -> Unit,
+    onLongPress: () -> Unit = {},
 ) {
     BackHandler(onBack = onDismiss)
     ImmersiveSystemBars()
@@ -1257,6 +1382,7 @@ internal fun FullScreenPhotoPreview(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onDismiss() },
+                        onLongPress = { onLongPress() },
                         onDoubleTap = {
                             if (scale > FULLSCREEN_MIN_SCALE) {
                                 scale = FULLSCREEN_MIN_SCALE
@@ -1314,6 +1440,108 @@ internal fun ImmersiveSystemBars() {
     }
 }
 
+private suspend fun savePhotoDetailExportToGallery(
+    context: Context,
+    asset: ProjectAsset,
+    exportUi: PhotoDetailExportUi,
+): Boolean =
+    withContext(Dispatchers.IO) {
+        val bitmap = photoDetailExportBitmap(context, asset) ?: return@withContext false
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, exportUi.fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, PHOTO_DETAIL_EXPORT_MIME_TYPE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/CameraConnector",
+                )
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: return@withContext false
+        runCatching {
+            val saved = resolver.openOutputStream(uri)?.use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_DETAIL_EXPORT_JPEG_QUALITY, output)
+            } == true
+            if (!saved) {
+                resolver.delete(uri, null, null)
+                return@withContext false
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val publishValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.IS_PENDING, 0)
+                }
+                resolver.update(uri, publishValues, null, null)
+            }
+            true
+        }.getOrElse {
+            resolver.delete(uri, null, null)
+            false
+        }
+    }
+
+private suspend fun sharePhotoDetailExport(
+    context: Context,
+    asset: ProjectAsset,
+    exportUi: PhotoDetailExportUi,
+): Boolean {
+    val exportFile = writePhotoDetailExportCacheFile(context, asset, exportUi)
+        ?: return false
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        exportFile,
+    )
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = PHOTO_DETAIL_EXPORT_MIME_TYPE
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(shareIntent, "\u5206\u4eab\u7167\u7247").apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (context.findActivity() == null) {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+    return runCatching {
+        context.startActivity(chooser)
+        true
+    }.getOrDefault(false)
+}
+
+private suspend fun writePhotoDetailExportCacheFile(
+    context: Context,
+    asset: ProjectAsset,
+    exportUi: PhotoDetailExportUi,
+): File? =
+    withContext(Dispatchers.IO) {
+        val bitmap = photoDetailExportBitmap(context, asset) ?: return@withContext null
+        val exportDirectory = File(context.cacheDir, PHOTO_DETAIL_EXPORT_CACHE_DIRECTORY)
+        runCatching {
+            exportDirectory.mkdirs()
+            val exportFile = File(exportDirectory, exportUi.fileName)
+            exportFile.outputStream().use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_DETAIL_EXPORT_JPEG_QUALITY, output))
+            }
+            exportFile
+        }.getOrNull()
+    }
+
+private suspend fun photoDetailExportBitmap(
+    context: Context,
+    asset: ProjectAsset,
+): Bitmap? =
+    withContext(Dispatchers.IO) {
+        val previewLocation = asset.previewLocation
+            ?.takeIf(::isDecodablePreviewLocation)
+            ?: return@withContext null
+        loadCachedPreviewBitmap(context, previewLocation, PreviewQuality.FullScreen)
+            ?: loadCachedPreviewBitmap(context, previewLocation, PreviewQuality.Detail)
+            ?: loadCachedPreviewBitmap(context, previewLocation, PreviewQuality.Thumbnail)
+    }
+
 private fun cachedPreviewAspectRatio(previewLocation: String?): Float? =
     cachedPreviewBitmap(
         location = previewLocation.takeIf(::isDecodablePreviewLocation),
@@ -1326,6 +1554,7 @@ private fun bitmapDisplayAspectRatio(bitmap: Bitmap?): Float? =
         ?.takeIf { it.width > 0 && it.height > 0 }
         ?.let { it.width.toFloat() / it.height.toFloat() }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PhotoPreview(
     asset: ProjectAsset,
@@ -1339,6 +1568,7 @@ internal fun PhotoPreview(
     clipPreview: Boolean = true,
     trimLetterbox: Boolean = false,
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     onPreviewAspectRatio: ((Float) -> Unit)? = null,
     onPreviewReady: (() -> Unit)? = null,
     showFallbackText: Boolean = true,
@@ -1413,10 +1643,13 @@ internal fun PhotoPreview(
     } else {
         aspectModifier
     }
-    val clickableModifier = if (onClick == null) {
+    val clickableModifier = if (onClick == null && onLongClick == null) {
         previewModifier
     } else {
-        previewModifier.clickable(onClick = onClick)
+        previewModifier.combinedClickable(
+            onClick = onClick ?: {},
+            onLongClick = onLongClick,
+        )
     }
     Box(
         modifier = clickableModifier.background(backgroundColor),
@@ -1513,6 +1746,9 @@ internal const val FULLSCREEN_MIN_SCALE = 1f
 internal const val FULLSCREEN_DOUBLE_TAP_SCALE = 2.5f
 internal const val FULLSCREEN_MAX_SCALE = 5f
 private const val PHOTO_DETAIL_LOADING_ASPECT_RATIO = 0.67f
+private const val PHOTO_DETAIL_EXPORT_MIME_TYPE = "image/jpeg"
+private const val PHOTO_DETAIL_EXPORT_JPEG_QUALITY = 95
+private const val PHOTO_DETAIL_EXPORT_CACHE_DIRECTORY = "photo_exports"
 
 @Composable
 private fun CompactDetailGrid(lines: List<Pair<String, String>>) {

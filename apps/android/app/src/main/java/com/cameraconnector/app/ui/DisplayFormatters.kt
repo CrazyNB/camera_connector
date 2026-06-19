@@ -1,6 +1,5 @@
 package com.cameraconnector.app.ui
 
-import com.cameraconnector.app.core.DEFAULT_CAMERA_CONNECT_HOST
 import com.cameraconnector.app.core.DeviceAccount
 import com.cameraconnector.app.core.PublishQueueState
 import java.time.Instant
@@ -51,20 +50,6 @@ internal fun transferStatusLabel(value: String): String = when (value) {
     "Failed" -> "失败"
     "Pending" -> "\u7b49\u5f85\u4e2d"
     else -> value
-}
-
-internal fun normalizeCameraConnectHost(value: String?): String {
-    val trimmed = value?.trim().orEmpty()
-    return if (
-        trimmed.isBlank() ||
-        trimmed.equals("null", ignoreCase = true) ||
-        trimmed == "0.0.0.0" ||
-        trimmed.startsWith("127.")
-    ) {
-        DEFAULT_CAMERA_CONNECT_HOST
-    } else {
-        trimmed
-    }
 }
 
 internal fun formatEndpoint(account: DeviceAccount): String {
