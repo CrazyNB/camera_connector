@@ -278,4 +278,3 @@ data class TransferRow(
     val displayPath: String,
     val message: String?,
 )
-

@@ -429,4 +429,3 @@ private fun calculateBitmapSampleSize(width: Int, height: Int, maxDimensionPx: I
     }
     return sampleSize
 }
-

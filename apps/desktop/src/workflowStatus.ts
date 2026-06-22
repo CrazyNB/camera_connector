@@ -17,7 +17,7 @@ export function createWorkflowStatusController(render: () => void) {
         return "neutral";
     }
   }
-  
+
   function lanSyncTransferLabel() {
     if (state.lanSyncPhase === "discovering") return "discovering";
     if (state.lanSyncPhase === "syncing") return "matching";
@@ -30,11 +30,11 @@ export function createWorkflowStatusController(render: () => void) {
       summary.applied_selection_recommendations;
     return `${summary.matched_groups} matched / ${applied} applied / ${summary.unresolved_records} unresolved`;
   }
-  
+
   function canStartScan() {
     return getScanStartBlocker() === null;
   }
-  
+
   function getScanStartBlocker() {
     return scanStartBlocker({
       hasProject: Boolean(state.selectedProjectId),
@@ -43,7 +43,7 @@ export function createWorkflowStatusController(render: () => void) {
       scanPhase: state.scan?.phase ?? null,
     });
   }
-  
+
   function scanBlockerCopy(blocker: ScanStartBlocker) {
     switch (blocker) {
       case "project":
@@ -56,13 +56,13 @@ export function createWorkflowStatusController(render: () => void) {
         return "褰撳墠椤圭洰姝ｅ湪鎵弿銆?";
     }
   }
-  
+
   function setStatus(message: string, error: string | null = null) {
     state.status = message;
     state.error = error;
     render();
   }
-  
+
   async function withBusy<T>(label: string, task: () => Promise<T>): Promise<T | null> {
     state.busy = label;
     state.error = null;
@@ -78,7 +78,7 @@ export function createWorkflowStatusController(render: () => void) {
       return null;
     }
   }
-  
+
   function currentIntelligenceSetup() {
     return intelligenceSetupState(state.intelligenceProviders, state.promptPacks, state.intelligenceSettings);
   }

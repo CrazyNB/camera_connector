@@ -320,4 +320,3 @@
 .status.is-error::before {
   background: var(--danger);
 }
-
