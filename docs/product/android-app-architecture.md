@@ -6,6 +6,9 @@ Camera Connector Android uses **Kotlin + Jetpack Compose + Material 3** as the n
 
 This is the first mobile target. It should prove the product loop on Android before any cross-platform abstraction is introduced.
 
+The repository-level architecture and semantic module ownership live in
+`../architecture.md`.
+
 ## 2. Why Native Android
 
 Camera Connector depends on Android-native surfaces that are central to the product, not incidental implementation details:
@@ -39,6 +42,34 @@ core-ffi/
 future generated bindings/
   UniFFI or JNI Kotlin bindings over core-ffi
 ```
+
+The current implementation uses JNI through `core-ffi`. Future generated
+bindings must preserve the same gateway boundary instead of letting Compose bind
+directly to core storage or Rust internals.
+
+## 3.1 Semantic Responsibilities
+
+Android owns platform mechanics:
+
+- Activity, navigation, Compose rendering, and UI state.
+- Foreground service lifecycle and notification permission.
+- SAF document tree selection and persisted URI permission.
+- Local Android preview decoding and publish worker execution.
+- User-facing camera setup copy and diagnostics presentation.
+
+The Rust core owns product semantics:
+
+- Receiver facts: runtime status, authentication, connected devices, transfers.
+- Asset facts: final storage locations, RAW/JPEG/video roles, grouping,
+  duplicates, and source metadata.
+- Project scope: active project, dashboard reads, scans, and sync.
+- Human decisions: favorite, marked, guest marks, manual burst edits, and delete.
+- Local technical assessment, model evaluation, selection recommendation, and
+  background analysis jobs.
+- Publish queue claim/retry state.
+
+Android should map these concepts into UI models without collapsing them into a
+single "smart selection" or "import status" field.
 
 ## 4. Android Responsibilities
 
@@ -90,9 +121,10 @@ UI code talks to a Kotlin `CoreGateway` interface:
 - `shouldScheduleSubjectAssessment()`
 - `saveSubjectAssessment()` / `loadSubjectAssessments(projectId, groupIds)`
 
-The first skeleton may use an in-memory gateway for layout and lifecycle wiring. Native Rust bindings should later implement the same interface.
-
-This keeps the UI from depending directly on FFI-generated types and allows the product shell to evolve while the Rust bridge is built.
+The preview gateway remains only for lightweight IDE rendering. Product
+verification uses the native gateway and the embedded Rust core. This keeps the
+UI from depending directly on FFI-generated types and allows the product shell
+to evolve without duplicating core logic.
 
 The Rust side now has a `camera-connector-ffi` crate that exposes a mobile-facing `MobileCore` facade. Its first contract is JSON-based so it can be verified in the normal Rust workspace before Android SDK/NDK builds are available.
 

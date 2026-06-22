@@ -2,6 +2,11 @@
 
 Record every real-camera push test here. Unknown is acceptable until a real smoke test replaces it.
 
+After each test, update only the rows that have direct evidence. If the test
+reveals a stable failure mode or setup requirement, also update
+`troubleshooting.md`. If it changes receiver/storage/project semantics, update
+`protocol.md` and `architecture.md`.
+
 | Vendor | Model | Firmware | Network Mode | FTP Push | SFTP Push | Passive FTP | RAW | JPEG | Video | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Nikon | Z5_2 | 1.11 | Windows hotspot | Pass | Unknown | Pass | Pass | Pass | Pass | FTP receiver `192.168.137.1:2121`; anonymous login; flat output validated with RAW+JPEG batch and MOV upload |

@@ -1,5 +1,8 @@
 ﻿# Development
 
+Start with the root `README.md` for the high-level repository map and
+`docs/architecture.md` for the current semantic module boundaries.
+
 ## Required Tools
 
 Windows development uses:
@@ -7,12 +10,34 @@ Windows development uses:
 - Rust stable through `rustup`
 - Visual Studio 2022 Build Tools with the C++ workload
 - PowerShell
+- Node.js/npm for the desktop TypeScript workbench
+- JDK 17, Android SDK 36, and Gradle for Android verification
 
 The Rust MSVC target needs `link.exe`. If normal shells cannot find it, run commands through:
 
 ```powershell
 C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat
 ```
+
+## Repository Responsibilities
+
+- `core/` owns product semantics, durable state, receiver behavior, storage,
+  grouping, project dashboards, analysis, recommendations, and sync.
+- `core-ffi/` wraps the core for mobile through C ABI and JNI JSON/DTO
+  contracts.
+- `apps/desktop/src-tauri/` owns desktop platform commands, thumbnailing, local
+  CV adapters, and LAN discovery.
+- `apps/desktop/src/` owns TypeScript UI state, rendering, preview caches, and
+  user interactions.
+- `apps/android/` owns Compose UI, foreground service lifecycle, Android
+  permissions, SAF publishing, and the native gateway adapter.
+- `tools/cli/` owns command parsing and diagnostic output only; behavior should
+  stay in `camera_connector_core`.
+- `scripts/` owns repeatable build, smoke, and device verification.
+
+Before moving behavior between modules, check `docs/architecture.md` and keep
+receiver facts, asset facts, project scope, human decisions, technical
+assessment, model evaluation, recommendations, publishing, and sync separate.
 
 ## Verify Everything
 
@@ -28,6 +53,8 @@ The script runs:
 - `cargo clippy --workspace -- -D warnings`
 - `cargo test --workspace`
 - `cargo build --workspace`
+- Android skeleton verification
+- Mobile FFI contract verification
 - Push-mode CLI smoke test:
   - `account`
   - `receiver-settings`
@@ -41,6 +68,40 @@ The script runs:
   - `transfers`
 
 Smoke uploads are written under `target/push-output`, `target/ftp-smoke-output`, and `target/sftp-smoke-output`. Smoke state/logs are written under the matching `target/*-state` directories.
+
+For current architecture cleanup and release checks, also use these focused
+commands when the related surface changes:
+
+```powershell
+cargo clippy --workspace --all-targets -- -D warnings
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_skeleton.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_mobile_ffi_contract.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_android_build.ps1
+```
+
+Desktop TypeScript checks run from `apps\desktop`:
+
+```powershell
+cmd /c npm ci
+cmd /c npx tsc --noEmit --noUnusedLocals --noUnusedParameters
+cmd /c npm run test:logic
+```
+
+## Documentation Maintenance
+
+When code changes alter product behavior:
+
+- Update `README.md` when entry points, setup, or verification commands change.
+- Update `docs/architecture.md` when module ownership or semantic boundaries
+  change.
+- Update `docs/product/PRD.md` when product scope or requirements change.
+- Update `docs/protocol.md` when receiver, storage, transfer, or runtime
+  contracts change.
+- Update app-specific docs when Android or desktop shell behavior changes.
+- Update `docs/compatibility.md` after every real-camera or physical-device
+  validation.
+- Update `docs/troubleshooting.md` when a stable diagnosis or recovery path is
+  learned.
 
 ## Manual FTP Receiver
 

@@ -10,8 +10,9 @@ One-line positioning:
 
 Current product direction extends that receiver into a project-scoped photo
 triage tool: imports are grouped under shooting projects, local CV catches
-obvious technical risks, configured models evaluate photography quality, and
-users keep their own favorites/marks separate from algorithm results.
+obvious technical risks, configured models evaluate photography quality,
+recommendation output stays separate, and users keep their own favorites/marks
+as independent human decisions.
 
 ## 2. Current Technical Decision
 
@@ -67,6 +68,17 @@ AP mode still means the camera creates its own Wi-Fi AP and the phone/computer j
    project. Project-level model recommendation is manual-only.
 5. User favorites and user marks are independent human choices; they never
    rewrite model recommendations.
+
+### 4.5 Desktop Folder Scan
+
+1. User creates or selects a desktop project.
+2. User scans a local camera folder or delivery folder.
+3. The scan writes project-scoped asset facts using the same grouping,
+   duplicate, technical assessment, model evaluation, recommendation, and user
+   mark semantics as receiver imports.
+4. The desktop workbench shows the project asset board, detail viewer,
+   technical risk, model output, and human decisions without treating scanned
+   files as a separate product model.
 
 ## 5. MVP Scope
 
@@ -199,6 +211,17 @@ flowchart LR
 ```
 
 The CLI is a thin operational adapter for development, validation, headless/NAS use, and field diagnostics. Product behavior belongs in core so desktop, mobile, and CLI clients share one receiver, account, config, logging, project asset model, storage-location model, and view model. `CameraConnectorService` is the app-facing core entry point for building receiver config, reading project asset groups, reading transfer views, and reading connected-device views. `CameraConnectorRuntime` owns receiver lifecycle state and exposes start, stop, and status for app shells.
+
+The current module map and semantic ownership rules live in
+`docs/architecture.md`. The important split is:
+
+- Receiver facts are not asset facts.
+- Asset facts are not human decisions.
+- Local technical assessment is not model evaluation.
+- Model evaluation is not selection recommendation.
+- Selection recommendation is not user favorite/marked state.
+- Publish/write retry state is not camera transfer state.
+- Platform shells are not the business core.
 
 ## 10. Milestones
 

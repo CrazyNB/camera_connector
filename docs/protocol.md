@@ -7,6 +7,23 @@ Current technical route:
 3. SFTP remains an engineering/core validation path only.
 4. AP mode keeps its original meaning, but is paused for now: the camera creates its own Wi-Fi AP and the phone/computer joins it. We are not implementing that path in the current slice.
 
+For module ownership and the product semantic split, see `docs/architecture.md`.
+
+## Protocol Semantics
+
+The receiver protocol produces facts; it does not make photo-selection
+decisions.
+
+- FTP/SFTP sessions produce receiver facts: authentication, connection state,
+  runtime status, and transfer rows.
+- Completed transfers produce asset facts: staged bytes, final storage
+  location, object format, source metadata, duplicate state, and asset groups.
+- Project assignment is explicit. Receivers and scans must write into a selected
+  project; no default project is created silently.
+- Technical assessment, model evaluation, recommendation, and user marks are
+  separate downstream semantics. Protocol code must not collapse them into
+  transfer status.
+
 ## FTP Push
 
 The app runs a local FTP receiver. The camera is configured with:

@@ -1,5 +1,21 @@
 ﻿# Troubleshooting
 
+Use this guide with `docs/architecture.md`: first identify which semantic layer
+is failing, then inspect the owning module or diagnostic surface.
+
+Quick triage:
+
+- Receiver cannot start or connect: receiver facts (`runtime`, `push`,
+  connected devices).
+- Upload succeeds but no project photo appears: asset facts, project scope, or
+  publish/write queue.
+- Preview appears but risk/score is missing: technical assessment or model
+  evaluation.
+- Recommendation disagrees with favorite/mark: this is expected separation;
+  recommendation output and human marks are independent.
+- Android output permission failed: publish/write queue and SAF storage, not
+  camera transfer.
+
 ## Camera Cannot Connect To Receiver
 
 User-facing copy:
@@ -38,6 +54,9 @@ Checks:
 - Ensure the app can write to the output folder.
 - Check whether the camera sends nested folders and unusual filenames.
 - Confirm the final file is not left as `.tmp`.
+- On Android, check whether the item is pending or failed in the write queue
+  because SAF permission was revoked or the selected output tree is unavailable.
+- Confirm the active project exists; imports and scans are project-scoped.
 
 ## Transfer Interrupted
 
@@ -51,6 +70,36 @@ Checks:
 - Keep phone/computer close to the camera.
 - Prefer single-file or small-batch tests before large RAW batches.
 - Retry from the beginning until resume support is proven.
+
+## Project Photo Missing After Successful Upload
+
+User-facing copy:
+
+> 文件已经收到，但还没有出现在当前项目里。请检查项目选择、写入队列和诊断信息。
+
+Checks:
+
+- Confirm the receiver was started from the intended active project.
+- Check dashboard transfer counts and recent failures.
+- Check publish/write queue pending and failed counts.
+- Confirm the final `StoredObjectLocation` is available for the platform.
+- Confirm the asset group is not hidden by collection, format, or risk filters.
+
+## Model Or Recommendation Missing
+
+User-facing copy:
+
+> 文件已经可用，但模型评估或推荐还没有生成。请检查模型提供方和项目智能设置。
+
+Checks:
+
+- Upload, grouping, thumbnails, publishing, and local technical CV should still
+  work without a model provider.
+- Confirm a provider profile is configured and selected by the project.
+- Confirm the project prompt pack is enabled.
+- Confirm project recommendation was triggered manually; it is not created by
+  upload drains.
+- Keep model recommendation separate from favorite and marked state.
 
 ## AP Mode
 

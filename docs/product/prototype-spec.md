@@ -1,5 +1,16 @@
 # Camera Connector Prototype Spec
 
+Current repository and module ownership references:
+
+- `../../README.md`
+- `../README.md`
+- `../architecture.md`
+
+The prototype is a product-shape artifact. It should map to the same separated
+semantics as the live apps: receiver facts, asset facts, project scope, human
+decisions, technical assessment, model evaluation, recommendations, publishing,
+and sync.
+
 ## 1. Prototype Goal
 
 The prototype presents the product shell for a push-mode camera receiver. It is intentionally close to the current core read model so mobile development can map screens to service calls without inventing a second product model.

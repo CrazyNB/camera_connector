@@ -8,6 +8,12 @@ The app is intentionally thin:
 - Android owns foreground service, notification, storage permission, and platform lifecycle.
 - The existing Rust core remains the source of truth for receiver behavior, transfer log, account state, and project asset grouping.
 
+For the repository-level module map and semantic boundaries, start with
+`../../README.md` and `../../docs/architecture.md`. Android should keep acting
+as a platform shell: it owns Android lifecycle and storage APIs, while receiver
+facts, asset facts, project state, technical assessment, model evaluation,
+recommendations, and user marks remain shared-core semantics.
+
 ## Current State
 
 This directory now contains the working native Android shell. The debug APK can be built with the Rust native receiver packaged for `arm64-v8a` and `x86_64`, installed on a device or emulator, and verified through the automated FTP account/login/upload smoke path.
@@ -62,6 +68,11 @@ The Android source now has a native gateway boundary:
   context on portrait projects only; Android does not need a new ML dependency to
   honor the storage/API contract in this slice.
 - The app opens on Project Management. Entering a project opens the photo-first project workspace: the receiver launch panel starts expanded while stopped, collapses into a compact running status after start, and the rest of the page is the project photo grid with compact tiles, JPEG previews from local paths or SAF document URIs, tap-to-detail, and long-press selection.
+
+Important semantic rule: Android UI state must not merge technical risk, model
+evaluation, recommendation, favorite, marked, guest mark, publish state, or
+camera transfer state into one product status. The gateway maps these concepts
+separately because the Rust core stores them separately.
 
 The Gradle default still keeps `USE_NATIVE_CORE=false` for lightweight IDE preview builds, but the preview gateway starts with no project, no account, and no fake receiver data. Product verification and install scripts build with `-PcameraConnector.useNativeCore=true`, which is the path used for emulator and device validation. Native gateway failures no longer fall back to preview unless `-PcameraConnector.nativeCoreFallbackToPreview=true` is passed explicitly.
 

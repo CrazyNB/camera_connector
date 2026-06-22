@@ -1,5 +1,20 @@
 # Mobile App Handoff
 
+## Current Source Of Truth - 2026-06-22
+
+Use these documents before this archive section when implementing or reviewing
+the current app:
+
+- `../../README.md`: repository entry point.
+- `../README.md`: documentation index.
+- `../architecture.md`: semantic module boundaries.
+- `android-app-architecture.md`: Android shell and gateway architecture.
+- `../protocol.md`: receiver, storage, transfer, and runtime contracts.
+
+This handoff still describes the mobile product surface, but older checkpoint
+details below are historical context when they conflict with current code or the
+current source-of-truth documents.
+
 ## 0. Worktree Archive - 2026-06-13
 
 Current branch: `main`, based on `origin/main` at `995ca75` before the
