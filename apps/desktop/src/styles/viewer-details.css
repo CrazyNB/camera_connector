@@ -1,0 +1,136 @@
+.empty-workbench h2 {
+  font-size: 18px;
+  font-weight: 760;
+}
+
+.empty-workbench p {
+  max-width: 56ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.inspector {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  background: linear-gradient(180deg, oklch(0.155 0.013 248), oklch(0.13 0.012 248));
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+}
+
+.inspector-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.detail-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--chrome);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+}
+
+.quality-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-result-row {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  background: oklch(0.09 0.01 248);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+}
+
+.quality-result-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.quality-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quality-result-main strong {
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quality-result-row p {
+  margin: 0 0 0 17px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.summary-text {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.defects,
+.file-list {
+  display: grid;
+  gap: 7px;
+}
+
+.defect {
+  padding: 8px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid oklch(0.43 0.09 27);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.file-item:last-child {
+  border-bottom: 0;
+}
+
+.file-name {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.file-name span,
+.file-size {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

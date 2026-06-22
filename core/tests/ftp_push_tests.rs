@@ -16,10 +16,12 @@ async fn ftp_server_accepts_passive_stor_upload() {
     let project = store
         .create_project("FTP Upload")
         .expect("project should create");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_state_dir(state_dir.path())
-        .with_active_project(project.project_id.clone())
-        .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path());
+    config.active_project_id = Some(project.project_id.clone());
+    config
+        .accounts
+        .push(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -124,9 +126,9 @@ async fn ftp_server_indexes_uploads_under_active_project() {
     let project = store
         .create_project("FTP Project")
         .expect("project should create");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_state_dir(state_dir.path())
-        .with_active_project(project.project_id.clone());
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path());
+    config.active_project_id = Some(project.project_id.clone());
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -189,10 +191,10 @@ async fn ftp_server_defers_final_publish_when_configured() {
     let project = store
         .create_project("Deferred FTP Project")
         .expect("project should create");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_state_dir(state_dir.path())
-        .with_active_project(project.project_id.clone())
-        .with_deferred_publish();
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path());
+    config.active_project_id = Some(project.project_id.clone());
+    config.defer_publish = true;
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");
@@ -266,8 +268,10 @@ async fn ftp_server_defers_final_publish_when_configured() {
 #[tokio::test]
 async fn ftp_server_rejects_unknown_account_when_accounts_are_configured() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_account(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path());
+    config
+        .accounts
+        .push(ReceiverAccount::new("z5", Some("secret"), "Studio A"));
     let server = FtpPushServer::bind(config)
         .await
         .expect("server should bind");

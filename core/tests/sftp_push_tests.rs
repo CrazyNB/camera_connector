@@ -45,14 +45,14 @@ async fn sftp_server_accepts_password_upload() {
     let project = store
         .create_project("SFTP Upload")
         .expect("project should create");
-    let config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path())
-        .with_state_dir(state_dir.path())
-        .with_active_project(project.project_id.clone())
-        .with_account(ReceiverAccount::new(
-            "camera",
-            Some("secret"),
-            "Studio Camera",
-        ));
+    let mut config = PushReceiverConfig::new(PushProtocol::Sftp, "127.0.0.1", 0, temp_dir.path())
+        .with_state_dir(state_dir.path());
+    config.active_project_id = Some(project.project_id.clone());
+    config.accounts.push(ReceiverAccount::new(
+        "camera",
+        Some("secret"),
+        "Studio Camera",
+    ));
     let server = SftpPushServer::bind(config)
         .await
         .expect("SFTP server should bind");

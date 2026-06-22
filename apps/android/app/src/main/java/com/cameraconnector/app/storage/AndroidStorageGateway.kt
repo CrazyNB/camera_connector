@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
-import android.provider.Settings
 
 class AndroidStorageGateway(private val context: Context) {
     private val preferences: SharedPreferences =
@@ -35,11 +34,6 @@ class AndroidStorageGateway(private val context: Context) {
             .putInt(KEY_PROJECT_PHOTO_GRID_COLUMNS, columnCount.coerceIn(2, 3))
             .apply()
     }
-
-    fun createAppNotificationSettingsIntent(): Intent =
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-        }
 
     private companion object {
         const val KEY_OUTPUT_URI = "output_uri"

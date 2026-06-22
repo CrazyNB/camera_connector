@@ -1,3 +1,5 @@
+#![allow(clippy::should_implement_trait)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;

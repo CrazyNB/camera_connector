@@ -1,0 +1,239 @@
+.stage-surface {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.review-surface {
+  overflow: hidden;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.project-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+}
+
+.project-create-hero {
+  width: min(620px, 100%);
+}
+
+.project-create-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.project-folder-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 10px 12px;
+  color: var(--ink-soft);
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.project-folder-picker:hover:not(:disabled),
+.project-folder-picker.has-folder {
+  color: var(--ink);
+  border-color: var(--accent-2);
+}
+
+.project-folder-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.project-folder-picker strong,
+.project-folder-picker small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-folder-picker strong {
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.project-folder-picker small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-input,
+.textarea-input {
+  min-width: 0;
+  padding: 0 11px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.text-input {
+  height: 34px;
+}
+
+.textarea-input {
+  min-height: 142px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.text-input::placeholder,
+.textarea-input::placeholder {
+  color: var(--dim);
+}
+
+.text-input:focus-visible,
+.textarea-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px oklch(0.58 0.12 226 / 0.2);
+}
+
+.primary,
+.secondary,
+.ghost,
+.source-tab,
+.tool-toggle {
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease),
+    border-color 160ms var(--ease),
+    color 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+
+.primary,
+.secondary,
+.ghost,
+.source-tab,
+.tool-toggle {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.large {
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+.primary {
+  color: oklch(0.08 0.012 248);
+  background: var(--accent);
+  border: 1px solid oklch(0.75 0.12 226);
+}
+
+.primary:hover:not(:disabled) {
+  background: oklch(0.75 0.13 226);
+}
+
+.secondary,
+.tool-toggle,
+.source-tab {
+  color: var(--ink-soft);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.secondary:hover:not(:disabled),
+.tool-toggle:hover:not(:disabled),
+.source-tab:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: oklch(0.43 0.02 248);
+}
+
+.ghost {
+  color: var(--muted);
+  background: transparent;
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:focus-visible,
+.group-card:focus-visible {
+  outline: 3px solid oklch(0.58 0.12 226 / 0.26);
+  outline-offset: 2px;
+}
+
+button:disabled,
+input:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inspector-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inspector-actions .primary,
+.inspector-actions .secondary {
+  width: 100%;
+}
+
+.inspector-danger-row {
+  display: grid;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.inspector-danger-row .danger-text {
+  color: oklch(0.72 0.17 28);
+  background: oklch(0.12 0.022 28);
+  border-color: oklch(0.34 0.075 28);
+}
+
+.inspector-danger-row .danger-text:hover:not(:disabled) {
+  color: oklch(0.8 0.18 28);
+  border-color: oklch(0.48 0.12 28);
+}
+
+.empty-note {
+  color: var(--muted);
+  font-size: 12px;
+}

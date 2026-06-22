@@ -1,3 +1,5 @@
+#![allow(clippy::should_implement_trait)]
+
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_ASSESSOR_VERSION: &str = "technical-v1";
@@ -386,7 +388,7 @@ fn push_color_cast_defect(
     let mean_green = green.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
     let mean_blue = blue.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
     let mean_luma = sample.luma.iter().map(|value| *value as f64).sum::<f64>() / pixel_count as f64;
-    if mean_luma < 24.0 || mean_luma > 232.0 {
+    if !(24.0..=232.0).contains(&mean_luma) {
         return;
     }
 

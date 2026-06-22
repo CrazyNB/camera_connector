@@ -36,6 +36,29 @@ export function containedImageRect(container: ViewportRect, image: ImageSize): V
   };
 }
 
+export function coverImageRect(container: ViewportRect, image: ImageSize): ViewportRect {
+  const safeContainerWidth = Math.max(1, container.width);
+  const safeContainerHeight = Math.max(1, container.height);
+  const imageWidth = Math.max(1, image.width);
+  const imageHeight = Math.max(1, image.height);
+  const scale = Math.max(safeContainerWidth / imageWidth, safeContainerHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  return {
+    left: container.left + (safeContainerWidth - width) / 2,
+    top: container.top + (safeContainerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
+export function normalizedPointInRect(rect: ViewportRect, point: Point): Point {
+  return {
+    x: clamp((point.x - rect.left) / Math.max(1, rect.width), 0, 1),
+    y: clamp((point.y - rect.top) / Math.max(1, rect.height), 0, 1),
+  };
+}
+
 export function normalizedContainedImagePoint(
   container: ViewportRect,
   image: ImageSize,

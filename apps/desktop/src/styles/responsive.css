@@ -1,0 +1,90 @@
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .topbar,
+  .workflow-layout,
+  .review-stage.has-inspector {
+    grid-template-columns: 1fr;
+  }
+
+  .top-context,
+  .status {
+    justify-self: stretch;
+  }
+
+  .project-sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .global-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+}
+
+@media (max-width: 1400px) {
+  .review-header,
+  .light-table-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .review-actions,
+  .table-controls {
+    justify-content: flex-start;
+  }
+
+}
+
+@media (max-width: 760px) {
+  .stage-surface {
+    padding: 12px;
+  }
+
+  .review-header,
+  .light-table-toolbar,
+  .file-item {
+    grid-template-columns: 1fr;
+  }
+
+  .group-board {
+    padding-inline: 0;
+  }
+
+  .project-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .intelligence-drawer,
+  .intelligence-drawer.is-global-settings {
+    width: 100vw;
+    padding: 14px;
+  }
+
+  .group-card.is-expanded {
+    grid-column: auto;
+  }
+
+  .burst-frames {
+    grid-template-columns: repeat(4, minmax(48px, 1fr));
+  }
+
+  .loupe-overlay {
+    display: none;
+  }
+}

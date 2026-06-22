@@ -239,10 +239,6 @@ impl CameraConnectorConfig {
         resolved_config_path(config_path)
     }
 
-    pub fn default_path() -> PathBuf {
-        default_config_path()
-    }
-
     pub fn default_state_dir(config_path: Option<&Path>) -> PathBuf {
         resolved_config_path(config_path)
             .parent()
@@ -481,43 +477,8 @@ impl PushReceiverConfig {
         }
     }
 
-    pub fn with_credentials(
-        mut self,
-        username: impl Into<String>,
-        password: impl Into<String>,
-    ) -> Self {
-        self.username = Some(username.into());
-        self.password = Some(password.into());
-        self
-    }
-
     pub fn with_state_dir(mut self, state_dir: impl AsRef<Path>) -> Self {
         self.state_dir = state_dir.as_ref().to_path_buf();
-        self
-    }
-
-    pub fn with_advertised_host(mut self, host: impl Into<String>) -> Self {
-        self.advertised_host = Some(host.into());
-        self
-    }
-
-    pub fn with_source_name(mut self, source_name: impl Into<String>) -> Self {
-        self.source_name = Some(source_name.into());
-        self
-    }
-
-    pub fn with_account(mut self, account: ReceiverAccount) -> Self {
-        self.accounts.push(account);
-        self
-    }
-
-    pub fn with_active_project(mut self, project_id: impl Into<String>) -> Self {
-        self.active_project_id = Some(project_id.into());
-        self
-    }
-
-    pub fn with_deferred_publish(mut self) -> Self {
-        self.defer_publish = true;
         self
     }
 

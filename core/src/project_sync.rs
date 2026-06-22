@@ -216,9 +216,9 @@ enum CandidateResolution<T> {
     Ambiguous,
 }
 
-fn unique_asset_candidate<'a>(
-    candidates: Vec<(u8, &'a StoredAsset)>,
-) -> CandidateResolution<(u8, &'a StoredAsset)> {
+fn unique_asset_candidate(
+    candidates: Vec<(u8, &StoredAsset)>,
+) -> CandidateResolution<(u8, &StoredAsset)> {
     if candidates.is_empty() {
         return CandidateResolution::Unmatched;
     }
@@ -234,9 +234,9 @@ fn unique_asset_candidate<'a>(
     }
 }
 
-fn unique_group_candidate<'a>(
-    candidates: Vec<(u8, &'a StoredAssetGroup)>,
-) -> CandidateResolution<(u8, &'a StoredAssetGroup)> {
+fn unique_group_candidate(
+    candidates: Vec<(u8, &StoredAssetGroup)>,
+) -> CandidateResolution<(u8, &StoredAssetGroup)> {
     if candidates.is_empty() {
         return CandidateResolution::Unmatched;
     }

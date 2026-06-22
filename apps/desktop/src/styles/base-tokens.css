@@ -1,0 +1,96 @@
+:root {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--app);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --app: oklch(0.115 0.012 248);
+  --chrome: oklch(0.16 0.014 248);
+  --rail: oklch(0.19 0.014 248);
+  --panel: oklch(0.205 0.014 248);
+  --panel-2: oklch(0.25 0.014 248);
+  --panel-3: oklch(0.31 0.014 248);
+  --ink: oklch(0.93 0.006 248);
+  --ink-soft: oklch(0.77 0.012 248);
+  --muted: oklch(0.62 0.016 248);
+  --dim: oklch(0.47 0.014 248);
+  --line: oklch(0.31 0.016 248);
+  --line-soft: oklch(0.255 0.016 248);
+  --accent: oklch(0.69 0.13 226);
+  --accent-2: oklch(0.58 0.12 226);
+  --accent-soft: oklch(0.31 0.055 226);
+  --success: oklch(0.68 0.15 154);
+  --success-soft: oklch(0.28 0.055 154);
+  --warning: oklch(0.72 0.15 68);
+  --warning-soft: oklch(0.31 0.055 68);
+  --danger: oklch(0.64 0.18 27);
+  --danger-soft: oklch(0.3 0.06 27);
+  --shadow-panel: 0 18px 42px oklch(0.02 0.004 248 / 0.45);
+  --shadow-tight: 0 3px 10px oklch(0.02 0.004 248 / 0.28);
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  min-width: 360px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: var(--app);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+h2 {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+h3 {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
