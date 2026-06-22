@@ -1,0 +1,173 @@
+use std::ffi::CString;
+
+use serde_json::Value;
+
+use camera_connector_ffi::{
+    camera_connector_mobile_core_create, camera_connector_mobile_core_destroy,
+    camera_connector_mobile_core_remove_device_account_json,
+    camera_connector_mobile_core_save_device_account_json,
+    camera_connector_mobile_core_save_receiver_settings_json,
+    camera_connector_mobile_core_start_receiver_json,
+    camera_connector_mobile_core_stop_receiver_json,
+};
+
+use super::take_ffi_string;
+
+#[test]
+fn ffi_saves_account_and_returns_success_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let username = CString::new("camera01").unwrap();
+    let password = CString::new("secret").unwrap();
+    let device_name = CString::new("Camera 01").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    assert!(!core.is_null());
+
+    let response_ptr = unsafe {
+        camera_connector_mobile_core_save_device_account_json(
+            core,
+            username.as_ptr(),
+            password.as_ptr(),
+            device_name.as_ptr(),
+        )
+    };
+    let response = take_ffi_string(response_ptr);
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["username"], "camera01");
+    assert_eq!(value["value"]["device_name"], "Camera 01");
+    assert_eq!(value["value"]["password_configured"], true);
+    assert!(!response.contains("secret"));
+}
+
+#[test]
+fn ffi_removes_account_and_returns_success_envelope() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let username = CString::new("camera01").unwrap();
+    let password = CString::new("secret").unwrap();
+    let device_name = CString::new("Camera 01").unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    assert!(!core.is_null());
+    take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_device_account_json(
+            core,
+            username.as_ptr(),
+            password.as_ptr(),
+            device_name.as_ptr(),
+        )
+    });
+
+    let response = take_ffi_string(unsafe {
+        camera_connector_mobile_core_remove_device_account_json(core, username.as_ptr())
+    });
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["username"], "camera01");
+    assert_eq!(value["value"]["removed"], true);
+}
+
+#[test]
+fn ffi_saves_receiver_settings_from_json_patch() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let output_dir = temp.path().join("output");
+    let state_dir = temp.path().join("state");
+    let patch = CString::new(format!(
+        r#"{{
+            "protocol":"sftp",
+            "bind_host":"0.0.0.0",
+            "ftp_port":2121,
+            "sftp_port":2222,
+            "output_dir":{},
+            "state_dir":{},
+            "advertised_host":"192.168.137.1",
+            "source_name":"Studio Camera",
+            "defer_publish":true
+        }}"#,
+        serde_json::to_string(&output_dir.to_string_lossy()).unwrap(),
+        serde_json::to_string(&state_dir.to_string_lossy()).unwrap(),
+    ))
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let response_ptr =
+        unsafe { camera_connector_mobile_core_save_receiver_settings_json(core, patch.as_ptr()) };
+    let response = take_ffi_string(response_ptr);
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["value"]["protocol"], "Sftp");
+    assert_eq!(value["value"]["source_name"], "Studio Camera");
+    assert_eq!(value["value"]["defer_publish"], true);
+}
+
+#[test]
+fn ffi_returns_error_envelope_for_invalid_protocol() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let patch = CString::new(r#"{"protocol":"ftps"}"#).unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    let response_ptr =
+        unsafe { camera_connector_mobile_core_save_receiver_settings_json(core, patch.as_ptr()) };
+    let response = take_ffi_string(response_ptr);
+    unsafe { camera_connector_mobile_core_destroy(core) };
+
+    let value: Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["ok"], false);
+    assert!(value["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid protocol: ftps"));
+}
+
+#[test]
+fn ffi_starts_and_stops_receiver_with_envelopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = CString::new(temp.path().join("config.json").to_string_lossy().as_bytes())
+        .expect("config path should not contain nul");
+    let output_dir = temp.path().join("output");
+    let state_dir = temp.path().join("state");
+    let patch = CString::new(format!(
+        r#"{{
+            "protocol":"ftp",
+            "bind_host":"127.0.0.1",
+            "ftp_port":0,
+            "output_dir":{},
+            "state_dir":{}
+        }}"#,
+        serde_json::to_string(&output_dir.to_string_lossy()).unwrap(),
+        serde_json::to_string(&state_dir.to_string_lossy()).unwrap(),
+    ))
+    .unwrap();
+
+    let core = unsafe { camera_connector_mobile_core_create(config_path.as_ptr()) };
+    take_ffi_string(unsafe {
+        camera_connector_mobile_core_save_receiver_settings_json(core, patch.as_ptr())
+    });
+
+    let started =
+        take_ffi_string(unsafe { camera_connector_mobile_core_start_receiver_json(core) });
+    let started: Value = serde_json::from_str(&started).unwrap();
+    assert_eq!(started["ok"], true);
+    assert_eq!(started["value"]["phase"], "Running");
+
+    let stopped = take_ffi_string(unsafe { camera_connector_mobile_core_stop_receiver_json(core) });
+    let stopped: Value = serde_json::from_str(&stopped).unwrap();
+    assert_eq!(stopped["ok"], true);
+    assert_eq!(stopped["value"]["phase"], "Stopped");
+
+    unsafe { camera_connector_mobile_core_destroy(core) };
+}

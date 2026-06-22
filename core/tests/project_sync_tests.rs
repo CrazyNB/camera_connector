@@ -216,7 +216,7 @@ fn service_sync_project_snapshot_applies_matched_existing_data_only() {
 
     let store = service.storage_store().expect("store should open");
     let evaluations = store
-        .model_evaluations_for_asset_groups(&[group_id.clone()], "android-model-v1")
+        .model_evaluations_for_asset_groups(std::slice::from_ref(group_id), "android-model-v1")
         .expect("evaluations should query");
     assert_eq!(evaluations.len(), 1);
     assert_eq!(evaluations[0].evaluator_kind, ModelEvaluatorKind::Imported);

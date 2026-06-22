@@ -46,8 +46,10 @@ fn push_receiver_config_requires_active_project_for_storage_recording() {
 #[tokio::test]
 async fn ftp_server_rejects_blank_account_username() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_account(ReceiverAccount::new(" ", Some("secret"), "Studio A"));
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path());
+    config
+        .accounts
+        .push(ReceiverAccount::new(" ", Some("secret"), "Studio A"));
 
     let result = FtpPushServer::bind(config).await;
 
@@ -57,8 +59,10 @@ async fn ftp_server_rejects_blank_account_username() {
 #[tokio::test]
 async fn ftp_server_rejects_blank_account_device_name() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path())
-        .with_account(ReceiverAccount::new("z5", Some("secret"), " "));
+    let mut config = PushReceiverConfig::new(PushProtocol::Ftp, "127.0.0.1", 0, temp_dir.path());
+    config
+        .accounts
+        .push(ReceiverAccount::new("z5", Some("secret"), " "));
 
     let result = FtpPushServer::bind(config).await;
 

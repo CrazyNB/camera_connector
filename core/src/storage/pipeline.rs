@@ -61,22 +61,6 @@ impl LocalStagingStore {
             bytes_written: 0,
         })
     }
-
-    pub fn cleanup_stale(&self) -> Result<usize> {
-        if !self.staging_dir.exists() {
-            return Ok(0);
-        }
-        let mut removed = 0;
-        for entry in fs::read_dir(&self.staging_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) == Some("staged") {
-                fs::remove_file(path)?;
-                removed += 1;
-            }
-        }
-        Ok(removed)
-    }
 }
 
 impl LocalStagedUpload {

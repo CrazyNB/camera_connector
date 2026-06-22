@@ -4,8 +4,7 @@ use camera_connector_core::{
     ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind,
     ModelProviderKind, ModelProviderSettings, ModelSendMode, PreviewSample,
     ProjectEvaluationSettings, SelectionRecommendationScope, SelectionRecommendationStatus,
-    SelectionSource, StoredObjectLocation, TechnicalAssessment, TechnicalAssessmentStatus,
-    TechnicalGateStatus, TransferRecord, TransferStatus,
+    SelectionSource, StoredObjectLocation, TechnicalGateStatus, TransferRecord, TransferStatus,
 };
 
 #[test]
@@ -236,7 +235,7 @@ fn service_preview_assessment_persists_technical_and_model_evaluation_records() 
         .expect("score should save");
     let store = service.storage_store().expect("store should open");
     let assessments = store
-        .technical_assessments_for_asset_groups(&[group_id.clone()], "technical-v1")
+        .technical_assessments_for_asset_groups(std::slice::from_ref(&group_id), "technical-v1")
         .expect("technical assessments should query");
     let evaluations = store
         .model_evaluations_for_asset_groups(&[group_id], "model-stub-v1")
@@ -510,23 +509,6 @@ fn enable_upload_model_evaluation(service: &CameraConnectorService, project_id: 
     service
         .save_project_evaluation_settings(settings)
         .expect("settings should save");
-}
-
-#[allow(dead_code)]
-fn technical_assessment(
-    asset_group_id: &str,
-    gate_status: TechnicalGateStatus,
-) -> TechnicalAssessment {
-    TechnicalAssessment {
-        asset_group_id: asset_group_id.to_string(),
-        assessor_version: "technical-v1".to_string(),
-        status: TechnicalAssessmentStatus::Ready,
-        gate_status,
-        defect_flags: Vec::new(),
-        preview_source: Some("test".to_string()),
-        visual_signature: None,
-        analyzed_at_ms: 1_000,
-    }
 }
 
 fn flat_sample(width: usize, height: usize, value: u8) -> PreviewSample {

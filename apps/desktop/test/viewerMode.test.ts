@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 
 import {
   adjacentViewerGroup,
@@ -32,6 +33,16 @@ const burstGroups = [
   { group_id: "burst-b-1", group_key: "DSC_2001", burst: { burst_group_id: "burst-b" } },
   { group_id: "single", group_key: "DSC_9001", burst: null },
 ];
+
+function readCssWithImports(path: string, visited = new Set<string>()): string {
+  const normalizedPath = normalize(path);
+  if (visited.has(normalizedPath)) return "";
+  visited.add(normalizedPath);
+
+  return readFileSync(normalizedPath, "utf8").replace(/^@import\s+"([^"]+)";/gm, (_match, importPath: string) =>
+    readCssWithImports(join(dirname(normalizedPath), importPath), visited),
+  );
+}
 
 test("viewerCurrentGroup prefers the selected group", () => {
   assert.equal(viewerCurrentGroup(groups, "group-4")?.group_id, "group-4");
@@ -154,7 +165,7 @@ test("resetViewerTransform restores the unzoomed viewer", () => {
 });
 
 test("viewer navigation keeps its centered transform while pressed", () => {
-  const css = readFileSync("src/styles.css", "utf8");
+  const css = readCssWithImports("src/styles.css");
 
   assert.match(css, /\.viewer-nav:active:not\(:disabled\)\s*{[^}]*transform:\s*translateY\(-50%\)/s);
 });

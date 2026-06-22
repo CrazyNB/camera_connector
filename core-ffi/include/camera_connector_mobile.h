@@ -83,6 +83,32 @@ char *camera_connector_mobile_core_project_asset_group_page_json(
     uint32_t limit
 );
 
+char *camera_connector_mobile_core_create_lan_share_session_json(
+    const CameraConnectorMobileCore *core,
+    const char *project_id,
+    const char *query_json,
+    const char *title
+);
+
+char *camera_connector_mobile_core_stop_lan_share_session_json(
+    const CameraConnectorMobileCore *core,
+    const char *share_id
+);
+
+char *camera_connector_mobile_core_lan_share_asset_group_page_json(
+    const CameraConnectorMobileCore *core,
+    const char *token,
+    uint32_t offset,
+    uint32_t limit
+);
+
+char *camera_connector_mobile_core_set_lan_share_guest_mark_json(
+    const CameraConnectorMobileCore *core,
+    const char *token,
+    const char *asset_group_id,
+    const char *patch_json
+);
+
 char *camera_connector_mobile_core_project_group_assets_json(
     const CameraConnectorMobileCore *core,
     const char *project_id,

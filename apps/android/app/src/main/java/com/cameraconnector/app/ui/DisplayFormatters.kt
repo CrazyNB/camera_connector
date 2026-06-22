@@ -38,13 +38,6 @@ internal fun receiverPhaseLabel(value: String): String = when (value) {
     else -> value
 }
 
-internal fun authModeLabel(value: String): String = when (value) {
-    "Accounts" -> "账号认证"
-    "Open" -> "\u5f00\u653e"
-    "Unknown" -> "未知"
-    else -> value
-}
-
 internal fun transferStatusLabel(value: String): String = when (value) {
     "Completed" -> "\u5df2\u5b8c\u6210"
     "Failed" -> "失败"

@@ -18,7 +18,8 @@ pub use model_eval::{
     compose_model_evaluation_prompt, evaluate_asset_group_with_model_provider,
     evaluate_asset_group_with_stub, recommend_selection_with_model_provider,
     ComposedModelEvaluationPrompt, ModelEvaluation, ModelEvaluationStatus, ModelEvaluationTier,
-    ModelEvaluatorKind, SelectionCandidateVisualInput,
+    ModelEvaluatorKind, ModelProviderEvaluationRequest, ModelProviderSelectionRequest,
+    SelectionCandidateVisualInput,
 };
 pub use recommendation::{
     recommend_burst_group_from_model_evaluations, recommend_project_model_selections,

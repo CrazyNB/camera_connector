@@ -278,16 +278,6 @@ internal fun technicalDefectTypeLabel(value: String?): String =
         else -> value
     }
 
-internal fun technicalDefectSeverityLabel(value: String?): String =
-    when (value?.trim()?.lowercase()) {
-        "low" -> "\u4f4e"
-        "medium" -> "\u4e2d"
-        "high" -> "\u9ad8"
-        "severe" -> "\u4e25\u91cd"
-        null, "" -> "\u672a\u77e5"
-        else -> value
-    }
-
 internal fun ProjectAsset.isBestRecommendedAsset(): Boolean {
     if (isModelSelect) {
         return true

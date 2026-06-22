@@ -62,9 +62,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         }
     }
 
-    fun markPublishCompleted(queueId: String): JSONObject =
-        call { markPublishCompletedJson(handle, queueId) }
-
     override fun completePublish(queueId: String, publishedObject: PublishedObject): JSONObject =
         call {
             completePublishJson(
@@ -81,9 +78,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
 
     fun releaseFailedPublishRetries(projectId: String): JSONObject =
         call { releaseFailedPublishRetriesJson(handle, projectId) }
-
-    fun drainAnalysisJobs(limit: Int = 32): JSONObject =
-        call { drainAnalysisJobsJson(handle, limit.coerceAtLeast(0)) }
 
     fun drainAnalysisJobsWithProviderConfigured(
         limit: Int = 32,
@@ -143,13 +137,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
                     .toString(),
             )
         }
-
-    fun assessAssetGroupPreview(
-        assetGroupId: String,
-        sampleJson: String,
-        assessorVersion: String = "technical-v1",
-    ): JSONObject =
-        call { assessAssetGroupPreviewJson(handle, assetGroupId, sampleJson, assessorVersion) }
 
     fun assessAssetGroupPreviewWithProviderConfigured(
         assetGroupId: String,
@@ -416,7 +403,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
         patchJson: String,
     ): String
     private external fun claimNextPublishItemJson(handle: Long): String
-    private external fun markPublishCompletedJson(handle: Long, queueId: String): String
     private external fun completePublishJson(
         handle: Long,
         queueId: String,
@@ -426,7 +412,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     ): String
     private external fun markPublishFailedJson(handle: Long, queueId: String, error: String): String
     private external fun releaseFailedPublishRetriesJson(handle: Long, projectId: String): String
-    private external fun drainAnalysisJobsJson(handle: Long, limit: Int): String
     private external fun drainAnalysisJobsWithProviderConfiguredJson(
         handle: Long,
         limit: Int,
@@ -435,12 +420,6 @@ class NativeMobileCore(configPath: String?) : AutoCloseable, PublishQueueCore {
     private external fun enqueueModelEvaluationForAssetGroupsJson(handle: Long, requestJson: String): String
     private external fun evaluateAssetGroupsWithModelInputsJson(handle: Long, requestJson: String): String
     private external fun recommendBurstGroupWithCandidateVisualsJson(handle: Long, requestJson: String): String
-    private external fun assessAssetGroupPreviewJson(
-        handle: Long,
-        assetGroupId: String,
-        sampleJson: String,
-        assessorVersion: String,
-    ): String
     private external fun assessAssetGroupPreviewWithProviderConfiguredJson(
         handle: Long,
         assetGroupId: String,

@@ -163,13 +163,6 @@ function Swipe-UntilUiContains {
     throw "Expected UI to contain '$Label' after swiping."
 }
 
-function Scroll-ToTop {
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        Invoke-Adb @("shell", "input", "swipe", "540", "760", "540", "1900", "500") | Out-Null
-        Start-Sleep -Milliseconds 500
-    }
-}
-
 function Tap {
     param([int]$X, [int]$Y)
     Invoke-Adb @("shell", "input", "tap", "$X", "$Y") | Out-Null

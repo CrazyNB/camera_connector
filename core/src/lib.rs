@@ -18,13 +18,14 @@ pub use analysis::{
     recommend_selection_with_model_provider, AnalysisEntityType, AnalysisJob, AnalysisJobStatus,
     AnalysisJobType, BurstGroup, BurstGroupingProfile, ComposedModelEvaluationPrompt, CvPolicy,
     EvaluationRun, EvaluationRunStatus, EvaluationRunTrigger, EvaluationRunType, ModelEvaluation,
-    ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind, ModelProviderKind,
-    ModelProviderSettings, ModelSendMode, NewAnalysisJob, PreviewSample, ProjectEvaluationSettings,
-    ProjectRecommendationMode, PromptPack, PromptPackContent, SceneProfile,
-    SelectionCandidateVisualInput, SelectionRecommendation, SelectionRecommendationScope,
-    SelectionRecommendationStatus, SelectionSource, SubjectAssessment, TechnicalAssessment,
-    TechnicalAssessmentPolicy, TechnicalAssessmentStatus, TechnicalDefectFlag,
-    TechnicalDefectSeverity, TechnicalDefectType, TechnicalGateStatus,
+    ModelEvaluationStatus, ModelEvaluationTier, ModelEvaluatorKind, ModelProviderEvaluationRequest,
+    ModelProviderKind, ModelProviderSelectionRequest, ModelProviderSettings, ModelSendMode,
+    NewAnalysisJob, PreviewSample, ProjectEvaluationSettings, ProjectRecommendationMode,
+    PromptPack, PromptPackContent, SceneProfile, SelectionCandidateVisualInput,
+    SelectionRecommendation, SelectionRecommendationScope, SelectionRecommendationStatus,
+    SelectionSource, SubjectAssessment, TechnicalAssessment, TechnicalAssessmentPolicy,
+    TechnicalAssessmentStatus, TechnicalDefectFlag, TechnicalDefectSeverity, TechnicalDefectType,
+    TechnicalGateStatus,
 };
 pub use desktop_scan::{
     desktop_scan_root_key, desktop_scan_root_label, desktop_scan_transfer_id,
@@ -39,11 +40,11 @@ pub use model::{
     ReceivedAssetTechnicalDefectSummary,
 };
 pub use project_sync::{
-    PROJECT_SYNC_SCHEMA_VERSION, ProjectSyncApplySummary, ProjectSyncMatchSummary,
-    ProjectSyncProjectSummary, ProjectSyncSnapshot, ProjectSyncSnapshotAsset,
-    ProjectSyncSnapshotGroup, ProjectSyncSnapshotModelEvaluation,
+    match_project_sync_snapshot, parse_project_sync_snapshot_json, ProjectSyncApplySummary,
+    ProjectSyncMatchSummary, ProjectSyncProjectSummary, ProjectSyncSnapshot,
+    ProjectSyncSnapshotAsset, ProjectSyncSnapshotGroup, ProjectSyncSnapshotModelEvaluation,
     ProjectSyncSnapshotRecommendation, ProjectSyncSnapshotUserMarks, ProjectSyncSourceDevice,
-    match_project_sync_snapshot, parse_project_sync_snapshot_json,
+    PROJECT_SYNC_SCHEMA_VERSION,
 };
 pub use push::{
     CameraConnectorConfig, FtpPushServer, ModelProviderSettingsConfig, PushProtocol,
@@ -68,11 +69,12 @@ pub use service::{
     AccountView, AssetFacetCount, AssetGroupModelEvaluationInput, AssetGroupPage, AssetGroupQuery,
     AssetGroupSort, AssetGroupSummary, CameraConnectorDashboard, CameraConnectorService,
     ConnectedDeviceView, DesktopProjectScanResult, PublishQueueFailureView, ReceiverConfigRequest,
-    ReceiverSettingsUpdate, SystemPathsView, TransferQuery, TransferRecordView, TransferSummary,
+    ReceiverSettingsUpdate, SavePromptPackRequest, SystemPathsView, TransferQuery,
+    TransferRecordView, TransferSummary,
 };
 pub use storage::{
-    GlobalAssetSummary, LocalFolderObjectStore, LocalStagedUpload, LocalStagingStore, Project,
-    ProjectCapabilities, ProjectKind, ProjectStatus, ProjectView, PublishQueueItem,
-    PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore, StagedObject,
-    StoredAsset, StoredAssetGroup, StoredReceiverAccount,
+    DesktopScanRunUpdate, GlobalAssetSummary, LocalFolderObjectStore, LocalStagedUpload,
+    LocalStagingStore, Project, ProjectCapabilities, ProjectKind, ProjectStatus, ProjectView,
+    PublishQueueItem, PublishQueueSummary, PublishState, PublishTransferMetadata, SqliteStore,
+    StagedObject, StoredAsset, StoredAssetGroup, StoredReceiverAccount,
 };
