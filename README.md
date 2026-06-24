@@ -1,5 +1,7 @@
 # Camera Connector
 
+Chinese version: `README.zh-CN.md`.
+
 Camera Connector is a local camera ingest and photo triage system. Cameras push
 JPEG, RAW, and video files to a local receiver; the shared Rust core records the
 transfer facts, indexes the files into explicit shooting projects, groups related

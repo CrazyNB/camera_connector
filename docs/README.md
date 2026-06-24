@@ -3,6 +3,8 @@
 This directory contains the current product, architecture, protocol,
 development, and validation documentation for Camera Connector.
 
+Chinese repository overview: `../README.zh-CN.md`.
+
 ## Current Source Of Truth
 
 - `architecture.md`: semantic module boundaries and file ownership.
